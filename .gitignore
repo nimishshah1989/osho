@@ -1,4 +1,22 @@
-# Osho Wisdom Engine
+# Osho Speaks - Cloud Ignore
 node_modules/
+.next/
+out/
+build/
 .env
+.env.local
+
+# Data (Migrated via rsync, not Git)
+data/
+db/*.db
+!db/schema.sql
+
+# Environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local Configs
 .planning/codebase/
+.npm_cache/
+.DS_Store

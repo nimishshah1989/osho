@@ -4,10 +4,10 @@
 Objective: Safely ingest the massive 1.14GB dataset without crashing memory, establishing the Database.
 
 ### Phase 1: Data Engineering
-- [ ] `1: write-schema` Plan & implement db/schema.sql.
-- [ ] `2: write-ingest` Plan & implement memory-efficient streaming CSV parser (ingest.py).
-- [ ] `3: write-processor` Plan & implement metadata normalizer and chunking logic.
-- [ ] `4: run-ingestion` Execute script to hydrate native SQLite Database.
+- [x] `1: write-schema` Plan & implement db/schema.sql.
+- [x] `2: write-ingest` Plan & implement memory-efficient streaming CSV parser (ingest.py).
+- [x] `3: write-processor` Plan & implement metadata normalizer and chunking logic.
+- [x] `4: run-ingestion` Execute script to hydrate native SQLite Database.
 
 ## Milestone 2: Search & Intelligence
 Objective: Setup hybrid search + RAG.

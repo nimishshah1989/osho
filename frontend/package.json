@@ -1,0 +1,27 @@
+{
+  "name": "osho-wisdom-engine-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.121.3",
+    "@react-three/fiber": "^8.17.10",
+    "@types/three": "^0.183.1",
+    "lucide-react": "^0.363.0",
+    "next": "14.2.0",
+    "react": "^18",
+    "react-dom": "^18",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5"
+  }
+}
