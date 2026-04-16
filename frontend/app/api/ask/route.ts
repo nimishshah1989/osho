@@ -1,4 +1,6 @@
-const CLOUD_API_URL = "http://13.206.34.214:8000/ask";
+const CLOUD_API_URL = "http://13.206.34.214:8000/stream";
+
+import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
@@ -8,7 +10,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No query provided" }, { status: 400 });
     }
 
-    // Switch to the remote EC2 Intelligence Engine
+    // Switch to the remote EC2 Streaming Engine
     const response = await fetch(CLOUD_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -19,8 +21,14 @@ export async function POST(req: Request) {
       throw new Error(`Cloud Analysis Failed: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    return NextResponse.json({ wisdom: data.wisdom });
+    // Proxy the readable stream directly to the frontend
+    return new Response(response.body, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+      },
+    });
 
   } catch (error: any) {
     console.error("The Silence is deep:", error);

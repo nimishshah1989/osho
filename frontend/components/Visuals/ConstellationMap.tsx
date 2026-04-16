@@ -1,105 +1,119 @@
-'use client';
-
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Points, PointMaterial, Float, Line } from '@react-three/drei';
+import { Points, PointMaterial, OrbitControls, Stars, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 
-// Constellation Galaxy Centers (Mapped to the 11 topics)
-const GALAXIES = [
-  { name: "Meditation", color: "#d4af37", pos: [100, 0, 0] },
-  { name: "Zen", color: "#ffffff", pos: [0, 100, 0] },
-  { name: "Taoism", color: "#4169e1", pos: [-100, 0, 0] },
-  { name: "Sufism", color: "#ffd700", pos: [0, -100, 0] },
-  { name: "Silence", color: "#ivory", pos: [0, 0, 100] },
-  { name: "Awareness", color: "#d4af37", pos: [0, 0, -100] }
-];
+// Note: Ensure nebula_data.json exists in /public/
+const NEBULA_DATA_URL = '/nebula_data.json';
 
-function Galaxy({ center, color, count = 200 }: any) {
-  const points = useMemo(() => {
-    const p = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++) {
-      const r = Math.random() * 50;
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos(2 * Math.random() - 1);
-      p[i * 3] = center[0] + r * Math.sin(phi) * Math.cos(theta);
-      p[i * 3 + 1] = center[1] + r * Math.sin(phi) * Math.sin(theta);
-      p[i * 3 + 2] = center[2] + r * Math.cos(phi);
+interface Node {
+  id: string;
+  title: string;
+  galaxy: string;
+  color: string;
+  pos: [number, number, number];
+  date: string;
+}
+
+function NebulaNodes() {
+  const [data, setData] = useState<Node[]>([]);
+  const pointsRef = useRef<THREE.Points>(null);
+  
+  useEffect(() => {
+    fetch(NEBULA_DATA_URL)
+      .then(res => res.json())
+      .then(setData)
+      .catch(err => console.error("Nebula failed to load:", err));
+  }, []);
+
+  const [positions, colors] = useMemo(() => {
+    const pos = new Float32Array(data.length * 3);
+    const col = new Float32Array(data.length * 3);
+    
+    data.forEach((node, i) => {
+      pos[i * 3] = node.pos[0];
+      pos[i * 3 + 1] = node.pos[1];
+      pos[i * 3 + 2] = node.pos[2];
+      
+      const c = new THREE.Color(node.color);
+      col[i * 3] = c.r;
+      col[i * 3 + 1] = c.g;
+      col[i * 3 + 2] = c.b;
+    });
+    
+    return [pos, col];
+  }, [data]);
+
+  useFrame((state) => {
+    if (pointsRef.current) {
+      pointsRef.current.rotation.y = state.clock.getElapsedTime() * 0.02;
     }
-    return p;
-  }, [center, count]);
+  });
+
+  if (data.length === 0) return null;
 
   return (
     <group>
-      <Points positions={points} stride={3}>
+      <Points ref={pointsRef} positions={positions} colors={colors} stride={3}>
         <PointMaterial
           transparent
-          color={color}
-          size={0.5}
+          vertexColors
+          size={1.8}
           sizeAttenuation={true}
           depthWrite={false}
-          opacity={0.4}
+          blending={THREE.AdditiveBlending}
+          opacity={0.8}
         />
       </Points>
-      {/* Network Lines for the Galaxy */}
-      {Array.from({ length: 15 }).map((_, i) => {
-        const startIdx = Math.floor(Math.random() * count);
-        const endIdx = Math.floor(Math.random() * count);
-        return (
-          <Line
-            key={i}
-            points={[
-              [points[startIdx * 3], points[startIdx * 3 + 1], points[startIdx * 3 + 2]],
-              [points[endIdx * 3], points[endIdx * 3 + 1], points[endIdx * 3 + 2]]
-            ]}
-            color={color}
-            lineWidth={0.2}
-            transparent
-            opacity={0.15}
-          />
-        );
-      })}
     </group>
   );
 }
 
 function Scene() {
-  const group = useRef<THREE.Group>(null);
-  
-  useFrame((state) => {
-    if (group.current) {
-      group.current.rotation.y = state.clock.getElapsedTime() * 0.05;
-      group.current.rotation.x = Math.sin(state.clock.getElapsedTime() * 0.03) * 0.1;
-    }
-  });
-
   return (
-    <group ref={group}>
-      {GALAXIES.map((g, i) => (
-        <Galaxy key={i} center={g.pos} color={g.color} />
-      ))}
-      {/* Background Dust */}
-      <Points positions={new Float32Array(Array.from({ length: 3000 }, () => (Math.random() - 0.5) * 800))}>
-        <PointMaterial
-          transparent
-          color="#ffffff"
-          size={0.2}
-          sizeAttenuation={true}
-          depthWrite={false}
-          opacity={0.1}
-        />
-      </Points>
-    </group>
+    <>
+      <color attach="background" args={['#000000']} />
+      <PerspectiveCamera makeDefault position={[0, 0, 300]} fov={50} />
+      <OrbitControls 
+        enablePan={true} 
+        enableRotate={true} 
+        zoomSpeed={0.5} 
+        rotateSpeed={0.5}
+        makeDefault
+      />
+      <ambientLight intensity={0.5} />
+      <Stars radius={300} depth={60} count={20000} factor={7} saturation={0} fade speed={1} />
+      <NebulaNodes />
+      <fog attach="fog" args={['#000000', 100, 800]} />
+    </>
   );
 }
 
 export default function ConstellationMap() {
   return (
     <div className="fixed inset-0 -z-10 bg-[#000000]">
-      <Canvas camera={{ position: [0, 0, 250], fov: 60 }}>
-        <fog attach="fog" args={['#000000', 100, 500]} />
+      <Canvas dpr={[1, 2]}>
         <Scene />
       </Canvas>
+      {/* Legend Overlay for Elite Navigation */}
+      <div className="absolute top-8 left-8 z-10 hidden md:block opacity-40 hover:opacity-100 transition-opacity">
+        <h3 className="text-[10px] tracking-[0.5em] uppercase text-white mb-4">Semantic Galaxies</h3>
+        <div className="flex flex-col gap-2">
+          {[
+            { n: "Zen", c: "#10b981" },
+            { n: "Tantra", c: "#ef4444" },
+            { n: "Sufism", c: "#8b5cf6" },
+            { n: "Meditation", c: "#f59e0b" },
+            { n: "Love & Freedom", c: "#ec4899" },
+            { n: "Philosophy", c: "#3b82f6" }
+          ].map(g => (
+            <div key={g.n} className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full" style={{ background: g.c }} />
+              <span className="text-[9px] uppercase tracking-widest text-ivory/80">{g.n}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

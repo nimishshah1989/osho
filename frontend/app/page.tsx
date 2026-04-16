@@ -5,6 +5,7 @@ import { Search, Sparkles, Loader2, X } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
 const ConstellationMap = dynamic(() => import('../components/Visuals/ConstellationMap'), { ssr: false });
+const ParticleTitle = dynamic(() => import('../components/Visuals/ParticleTitle'), { ssr: false });
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -16,7 +17,7 @@ export default function Home() {
     if (!query.trim() || isLoading) return;
 
     setIsLoading(true);
-    setWisdom(null);
+    setWisdom(""); // Start with empty string for streaming
 
     try {
       const response = await fetch('/api/ask', {
@@ -25,13 +26,28 @@ export default function Home() {
         body: JSON.stringify({ query }),
       });
 
-      const data = await response.json();
-      if (data.wisdom) {
-        setWisdom(data.wisdom);
-      } else {
-        setWisdom("The Void is silent. Perhaps try framing your inquiry differently.");
+      if (!response.ok) {
+        throw new Error("The silence was broken by an error.");
       }
+
+      // Handle the ReadableStream
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) {
+        throw new Error("The stream of wisdom is blocked.");
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value, { stream: true });
+        setWisdom((prev) => (prev || "") + chunk);
+      }
+
     } catch (error) {
+      console.error(error);
       setWisdom("A tremor in the connection. The stillness was interrupted.");
     } finally {
       setIsLoading(false);
@@ -45,12 +61,8 @@ export default function Home() {
       </div>
       
       <div className={`w-full max-w-2xl z-20 flex flex-col items-center text-center transition-all duration-1000 ${wisdom ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}>
-        <div className="flex flex-col items-center mb-12">
-          <div className="h-[1px] w-24 bg-gold mb-8 opacity-20" />
-          <h1 className="wisdom-title text-4xl md:text-6xl tracking-[0.2em]">
-            OSHO <span className="gold-accent italic">SPEAKS..</span>
-          </h1>
-          <div className="h-[1px] w-24 bg-gold mt-8 opacity-20" />
+        <div className="relative w-full h-[120px] mb-16 flex items-center justify-center">
+           <ParticleTitle text="OSHO SPEAK.." />
         </div>
         
         <form onSubmit={handleSearch} className="search-container relative w-full group max-w-xl">

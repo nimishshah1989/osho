@@ -9,18 +9,20 @@ Objective: Safely ingest the massive 1.14GB dataset without crashing memory, est
 - [x] `3: write-processor` Plan & implement metadata normalizer and chunking logic.
 - [x] `4: run-ingestion` Execute script to hydrate native SQLite Database.
 
-## Milestone 2: Search & Intelligence
-Objective: Setup hybrid search + RAG.
+## Milestone 4: The Visual Wisdom Engine (Oxford Standard)
+Objective: Realize a world-class, high-performance scholarly portal with advanced semantic and structural visualizations.
 
-### Phase 2: Core Intelligence
-- [ ] `1: setup-search` Hybrid search engine integration.
-- [ ] `2: rag-engine` Context retrieval logic for "Ask Osho".
-- [ ] `3: file-watcher` PDF dropzone ingestion.
+### Phase 10: The Warm Brain (Performance Optimization)
+- [ ] `1: persistent-index` Load ChromaDB and MinLM into long-running EC2 memory.
+- [ ] `2: sse-streaming` Implement Server-Sent Events (SSE) for word-by-word streaming syntheses.
+- [ ] `3: latency-audit` Target <300ms time-to-first-token.
 
-## Milestone 3: "The Void" UI
-Objective: World-class, Oxford-grade Frontend.
+### Phase 11: The Interstellar Nebula (WebGL Visualization)
+- [ ] `1: semantic-clustering` Perform AI-driven categorization for meaningful cluster colors.
+- [ ] `2: nebula-zoom` Build a high-performance WebGL/Canvas zoomable constellation map.
+- [ ] `3: cluster-navigation` Link Nebula nodes to search context and source documents.
 
-### Phase 3: Frontend Architecture
-- [ ] `1: nextjs-scaffold` Setup Next.js 14 and custom tokens (dark mode, glassmorphism).
-- [ ] `2: ui-components` Interactive Reader and Search interface.
-- [ ] `3: visual-graphs` Topic Connection and timeline visuals.
+### Phase 12: The Library & Mind Map (Explorer)
+- [ ] `1: tree-visualizer` Hierarchical mind-map (Year -> Series -> Talk).
+- [ ] `2: source-citation` Reference-grade citations with links to books/articles.
+- [ ] `3: mobile-spotsless` Comprehensive UI/UX audit for perfect mobile responsiveness.

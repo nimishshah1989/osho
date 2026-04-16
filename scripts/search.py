@@ -32,15 +32,17 @@ class HybridSearcher:
         self.model = SentenceTransformer("all-MiniLM-L6-v2", device=get_device(), cache_folder=CACHE_PATH)
         self.chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
         
-        class CustomEF:
-            def __init__(self, model):
-                self.model = model
-            def __call__(self, input):
-                return self.model.encode(input).tolist()
+        from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+        
+        self.embedding_function = SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2",
+            device=get_device(),
+            cache_folder=CACHE_PATH
+        )
         
         self.collection = self.chroma_client.get_collection(
             name="osho_paragraphs", 
-            embedding_function=CustomEF(self.model)
+            embedding_function=self.embedding_function
         )
         self.conn = sqlite3.connect(DB_PATH)
 
@@ -69,7 +71,9 @@ class HybridSearcher:
                 "event_title": event_row[0] if event_row else "Unknown",
                 "event_date": event_row[1] if event_row else "Unknown",
                 "event_location": event_row[2] if event_row else "Unknown",
-                "sequence_number": metadata['sequence_number']
+                "sequence_number": metadata['sequence_number'],
+                # Scholarly link pattern
+                "source_url": f"https://www.google.com/search?q=Osho+{event_row[0].replace(' ', '+')}" if event_row else None
             })
         return search_results
 
