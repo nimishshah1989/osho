@@ -30,38 +30,25 @@ export async function POST(req: NextRequest) {
           }
           resolve(stdout);
         });
-      });
-    };
+    // Switch to the remote EC2 Intelligence Engine
+    const response = await fetch(CLOUD_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
 
-    const tryGemini = () => {
-      const command = `export HF_HOME="${cachePath}" && export TRANSFORMERS_CACHE="${cachePath}" && ${venvPython} ${geminiScript} "${sanitizedQuery}"`;
-      return new Promise((resolve, reject) => {
-        exec(command, { cwd: projectRoot }, (error, stdout, stderr) => {
-          if (error) return reject(error);
-          resolve(stdout);
-        });
-      });
-    };
-
-    try {
-      // 1. Try local Ollama first
-      const output = await tryOllama().catch(async () => {
-        console.log("Ollama unavailable, falling back to Gemini...");
-        return await tryGemini();
-      }) as string;
-
-      // Parse the section after the equals signs
-      const outputParts = output.split("=").filter(p => p.trim());
-      const wisdom = outputParts.length > 2 ? outputParts[outputParts.length - 1].trim() : output;
-
-      return NextResponse.json({ wisdom });
-    } catch (error) {
-      console.error('All synthesis engines failed:', error);
-      return NextResponse.json({ error: 'The Engine is currently silent. Please check your API configurations.' }, { status: 500 });
+    if (!response.ok) {
+      throw new Error(`Cloud Analysis Failed: ${response.statusText}`);
     }
 
-  } catch (error) {
-    console.error('API error:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    const data = await response.json();
+    return NextResponse.json({ wisdom: data.wisdom });
+
+  } catch (error: any) {
+    console.error("The Silence is deep:", error);
+    return NextResponse.json(
+      { error: "A cloud has obscured the moon. Synthesis failed." },
+      { status: 500 }
+    );
   }
 }
