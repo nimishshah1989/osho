@@ -1,0 +1,4 @@
+# Osho Wisdom Engine
+node_modules/
+.env
+.planning/codebase/
