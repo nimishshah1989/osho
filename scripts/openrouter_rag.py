@@ -1,7 +1,8 @@
 import os
 import sys
-import google.generativeai as genai
+from openai import AsyncOpenAI
 from dotenv import load_dotenv
+import asyncio
 
 # Absolute path anchoring
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,12 +16,8 @@ from scripts.search import HybridSearcher
 load_dotenv(ENV_PATH)
 
 # Configuration
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# We will use an intelligent fallback loop to bypass temporary quota/404 issues
-# Prioritizing 1.5-flash for the highest stability and rate-limit flexibility
-MODELS_TO_TRY = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
-MAX_RETRIES = 3
-INITIAL_RETRY_DELAY = 5 # seconds
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+MODEL = "google/gemini-2.0-flash-001:free"
 
 def build_prompt(query, contexts):
     context_text = "\n\n".join([f"--- Context (from {c['event_title']}) ---\n{c['content']}\n[Source: {c['event_title']} | Read more: {c['source_url']}]" for c in contexts])
@@ -47,12 +44,12 @@ WISDOM:"""
     return prompt
 
 async def ask_osho_stream(query, searcher):
-    if not GEMINI_API_KEY:
-        yield "The Engine is silent. Please configure the Gemini API Key to proceed."
+    if not OPENROUTER_API_KEY:
+        yield "The Engine is silent. Please configure the OpenRouter API Key to proceed."
         return
 
     try:
-        # 1. Retrieve context (Search is now millisecond fast as searcher is pre-loaded)
+        # 1. Retrieve context
         results = searcher.search(query, n_results=5)
         
         if not results:
@@ -62,58 +59,33 @@ async def ask_osho_stream(query, searcher):
         # 2. Construct prompt
         prompt = build_prompt(query, results)
         
-        # 3. Call Gemini API with Streaming, Fallback, and Retries
-        genai.configure(api_key=GEMINI_API_KEY)
+        # 3. Call OpenRouter API with Streaming
+        client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=OPENROUTER_API_KEY,
+        )
         
-        last_error = ""
-        success = False
-        
-        for model_name in MODELS_TO_TRY:
-            if success: break
+        try:
+            response = await client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True,
+            )
             
-            for attempt in range(MAX_RETRIES):
-                try:
-                    model = genai.GenerativeModel(model_name)
-                    response = model.generate_content(prompt, stream=True)
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
                     
-                    # Try to get the first chunk to verify it's working
-                    chunk_it = iter(response)
-                    try:
-                        first_chunk = next(chunk_it)
-                        if first_chunk.text:
-                            yield first_chunk.text
-                    except StopIteration:
-                        pass
-
-                    # Stream the rest
-                    for chunk in chunk_it:
-                        if chunk.text:
-                            yield chunk.text
-                    
-                    success = True
-                    break
-                except Exception as e:
-                    last_error = str(e)
-                    # If it's a 429 (Rate limit), wait and retry
-                    if "429" in last_error and attempt < MAX_RETRIES - 1:
-                        wait_time = INITIAL_RETRY_DELAY * (2 ** attempt)
-                        print(f"Wisdom Engine: Cloud detected ({model_name}). Waiting {wait_time}s to retry...")
-                        import time
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        # Move to next model
-                        break
-        
-        if not success:
-            yield f"The cloud is thick. All synthesis attempts failed. Last error: {last_error}"
-        
+        except Exception as e:
+            yield f"The cloud is thick. All synthesis attempts failed. Last error: {str(e)}"
+            
     except Exception as e:
         yield f"The search through the void failed: {str(e)}"
 
 # Keep ask_osho for local testing/legacy
 def ask_osho(query):
-    import asyncio
     searcher = HybridSearcher()
     try:
         wisdom = ""

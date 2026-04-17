@@ -1,11 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Search, Sparkles, Loader2, X } from 'lucide-react';
-import dynamic from 'next/dynamic';
-
-const ConstellationMap = dynamic(() => import('../components/Visuals/ConstellationMap'), { ssr: false });
-const ParticleTitle = dynamic(() => import('../components/Visuals/ParticleTitle'), { ssr: false });
+import { Search, Sparkles, Loader2 } from 'lucide-react';
 
 export default function Home() {
   const [query, setQuery] = useState('');
@@ -17,7 +13,7 @@ export default function Home() {
     if (!query.trim() || isLoading) return;
 
     setIsLoading(true);
-    setWisdom(""); // Start with empty string for streaming
+    setWisdom(""); 
 
     try {
       const response = await fetch('/api/ask', {
@@ -26,113 +22,79 @@ export default function Home() {
         body: JSON.stringify({ query }),
       });
 
-      if (!response.ok) {
-        throw new Error("The silence was broken by an error.");
-      }
+      if (!response.ok) throw new Error("Connection interrupted.");
 
-      // Handle the ReadableStream
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
 
-      if (!reader) {
-        throw new Error("The stream of wisdom is blocked.");
-      }
+      if (!reader) throw new Error("Stream blocked.");
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
         const chunk = decoder.decode(value, { stream: true });
         setWisdom((prev) => (prev || "") + chunk);
       }
-
     } catch (error) {
       console.error(error);
-      setWisdom("A tremor in the connection. The stillness was interrupted.");
+      setWisdom("The stillness remains undisturbed. Please try again.");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <main className="zen-container flex flex-col items-center justify-center min-h-screen relative overflow-hidden px-4">
-      <div className="absolute inset-0 z-0">
-        <ConstellationMap />
-      </div>
-      
-      <div className={`w-full max-w-2xl z-20 flex flex-col items-center text-center transition-all duration-1000 ${wisdom ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}>
-        <div className="relative w-full h-[120px] mb-16 flex items-center justify-center">
-           <ParticleTitle text="OSHO SPEAK.." />
-        </div>
+    <main className="min-h-screen bg-black text-ivory flex flex-col items-center justify-start pt-24 px-6 md:pt-40">
+      <div className="w-full max-w-2xl">
+        <h1 className="text-sm tracking-[1em] uppercase opacity-40 mb-12 text-center text-gold">
+          Osho Wisdom Engine
+        </h1>
         
-        <form onSubmit={handleSearch} className="search-container relative w-full group max-w-xl">
+        <form onSubmit={handleSearch} className="relative w-full mb-16">
           <input
             type="text"
-            className="search-input w-full pl-8 pr-16"
-            placeholder="Approach with Silence..."
+            className="w-full bg-transparent border-b border-gold/30 py-4 text-xl md:text-2xl focus:border-gold outline-none transition-all placeholder:opacity-20 font-serif italic"
+            placeholder="Ask anything..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           <button 
             type="submit"
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-gold opacity-50 hover:opacity-100 transition-all p-2 bg-transparent border-none cursor-pointer outline-none flex items-center justify-center"
-            style={{ background: 'transparent', border: 'none' }}
+            className="absolute right-0 top-1/2 -translate-y-1/2 text-gold transition-all"
+            disabled={isLoading}
           >
-            {isLoading ? <Loader2 className="animate-spin" size={20} /> : <Search size={20} />}
+            {isLoading ? <Loader2 className="animate-spin" size={24} /> : <Search size={24} />}
           </button>
         </form>
-        
-        {isLoading && (
-          <div className="searching-indicator flex items-center justify-center gap-3 mt-12 animate-pulse">
-            <Sparkles size={14} className="gold-accent" />
-            <span className="text-[10px] tracking-[0.3em] uppercase">Consulting the Stillness</span>
-          </div>
-        )}
 
-        {!isLoading && !wisdom && (
-          <p className="presence-statement mt-12">
-            The void contains everything.
-          </p>
+        {wisdom !== null && (
+          <div className="w-full animate-in fade-in duration-700">
+            <div className="flex items-center gap-4 mb-8 opacity-20">
+              <div className="h-[1px] flex-1 bg-gold" />
+              <Sparkles size={12} />
+              <div className="h-[1px] flex-1 bg-gold" />
+            </div>
+            
+            <div className="wisdom-output text-lg md:text-xl leading-relaxed font-serif italic whitespace-pre-wrap opacity-90 pb-20">
+              {wisdom}
+            </div>
+            
+            {wisdom && (
+              <button 
+                onClick={() => { setWisdom(null); setQuery(''); }}
+                className="text-[10px] tracking-[0.5em] uppercase opacity-30 hover:opacity-100 transition-opacity text-gold mt-8"
+              >
+                New Inquiry
+              </button>
+            )}
+          </div>
         )}
       </div>
 
-      {wisdom && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center p-4 md:p-10 bg-black/80 backdrop-blur-xl">
-          <div className="wisdom-plate relative flex flex-col items-center text-center max-w-3xl w-full max-h-[90vh] overflow-y-auto custom-scrollbar p-8 md:p-16">
-            <button 
-              onClick={() => setWisdom(null)}
-              className="absolute top-6 right-6 text-gray-500 hover:text-white transition-colors bg-transparent border-none cursor-pointer p-2 z-50"
-              style={{ background: 'transparent', border: 'none' }}
-            >
-              <X size={24} />
-            </button>
-            
-            <div className="flex items-center gap-3 mb-12 opacity-40">
-              <div className="h-[1px] w-8 md:w-16 bg-gold" />
-              <span className="text-[9px] md:text-[11px] tracking-[0.8em] md:tracking-[1.2em] uppercase gold-accent">The Synthesis</span>
-              <div className="h-[1px] w-8 md:w-16 bg-gold" />
-            </div>
-
-            <div className="wisdom-content text-lg md:text-2xl leading-relaxed font-serif italic whitespace-pre-wrap text-ivory/90">
-              {wisdom}
-            </div>
-
-            <div className="mt-16 text-center border-t border-gold/10 pt-8 w-full">
-              <button 
-                onClick={() => { setWisdom(null); setQuery(''); }}
-                className="text-[10px] tracking-[0.5em] uppercase opacity-30 hover:opacity-100 transition-opacity gold-accent bg-transparent border-none cursor-pointer"
-                style={{ background: 'transparent', border: 'none' }}
-              >
-                Enter the Silence Once More
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      <footer className="footer-text z-10 w-full fixed bottom-8">
-        © Osho Speaks.. | An Insight into the Timeless
+      <footer className="fixed bottom-8 text-[9px] tracking-[0.4em] uppercase opacity-20">
+        Oxford scholarly Edition | 2026
       </footer>
     </main>
   );
 }
+

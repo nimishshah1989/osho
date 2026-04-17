@@ -11,7 +11,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(BASE_DIR)
 
 from scripts.search import HybridSearcher
-from scripts.gemini_rag import ask_osho_stream
+from scripts.openrouter_rag import ask_osho_stream
 
 # Persistent searcher instance
 searcher = None
