@@ -1,105 +1,93 @@
 import os
-import sys
-from openai import AsyncOpenAI
-from dotenv import load_dotenv
+import google.generativeai as genai
+import httpx
+import json
 import asyncio
+from dotenv import load_dotenv
 
-# Absolute path anchoring
+# Absolute path anchoring for portability
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ENV_PATH = os.path.join(BASE_DIR, '.env')
+load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-# Ensure Base DIR is in path so we can import search
-sys.path.append(BASE_DIR)
-from scripts.search import HybridSearcher
-
-# Load environment variables
-load_dotenv(ENV_PATH)
-
-# Configuration
+# --- CONFIGURATION ---
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-MODEL = "google/gemini-2.0-flash-001:free"
 
-def build_prompt(query, contexts):
-    context_text = "\n\n".join([f"--- Context (from {c['event_title']}) ---\n{c['content']}\n[Source: {c['event_title']} | Read more: {c['source_url']}]" for c in contexts])
+# April 2026 Verified High-Performance Free Models
+FALLBACK_MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b:free",  # Current #1 Healthy Free Model
+    "openai/gpt-oss-120b:free",               # High-reasoning backup
+    "z-ai/glm-4.5-air:free",                  # Fast agentic fallback
+    "openrouter/free"                          # The "Magic" Auto-Router
+]
+
+async def ask_osho_stream(prompt, context):
+    """
+    Elite RAG Bridge: 
+    1. Primary: Direct Google Gemini (1,500 req/day free).
+    2. Secondary: Multi-model OpenRouter Failover.
+    """
     
-    prompt = f"""You are 'Osho Speaks..', a sophisticated interactive guide to the teachings of Osho. 
-Your tone is poetic, profound, and scholarly, yet accessible.
+    system_prompt = (
+        "You are Osho, the enlightened mystic. Your responses must be poetic, paradoxical, and profoundly transformative. "
+        "Use the provided context from Osho's discourses to weave a scholarly yet soul-stirring response.\n\n"
+        "STRICT SCHOLARLY REQUIREMENTS:\n"
+        "1. Every major point must include an inline citation: [Source: Book Name/Discourse Title].\n"
+        "2. Provide a multi-paragraph synthesis (300-500 words).\n"
+        "3. Conclude with a 'Bibliography' section listing Osho books found in the context.\n\n"
+        f"Context:\n{context}"
+    )
 
-Use the provided fragments from Osho's discourses to answer the user's question. 
+    # --- ATTEMPT 1: DIRECT GOOGLE BRIDGE ---
+    if GOOGLE_API_KEY:
+        try:
+            # Clean the key in case of quote wrapping
+            clean_key = GOOGLE_API_KEY.strip("'").strip('"')
+            genai.configure(api_key=clean_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            response = model.generate_content(
+                f"{system_prompt}\n\nUser Question: {prompt}",
+                stream=True
+            )
+            for chunk in response:
+                if chunk.text:
+                    yield chunk.text
+            return # Success
+        except Exception as e:
+            print(f"Direct Google Bridge saturated: {str(e)}")
+            # Fall through to OpenRouter
 
-CONSTRAINTS:
-1. Stay strictly within the context of the provided fragments if possible.
-2. If the fragments do not contain enough information, use your internal knowledge of Osho's style as a bridge.
-3. Use 'The Void' aesthetic in your language—embrace silence and awareness.
-4. Always cite the specific book or discourse title at the end of relevant points.
-5. PROVIDE LINKS: Include at least one source link from the fragments (in markdown format [Source](URL)) at the very end of your response.
-
-SOURCE FRAGMENTS:
-{context_text}
-
-USER QUESTION:
-{query}
-
-WISDOM:"""
-    return prompt
-
-async def ask_osho_stream(query, searcher):
+    # --- ATTEMPT 2: OPENROUTER FAILOVER ARRAY ---
     if not OPENROUTER_API_KEY:
-        yield "The Engine is silent. Please configure the OpenRouter API Key to proceed."
+        yield "The stillness remains deep. Both the Direct Bridge and OpenRouter are unavailable."
         return
 
-    try:
-        # 1. Retrieve context
-        results = searcher.search(query, n_results=5)
-        
-        if not results:
-            yield "The silence remains deep. I found no fragments matching your inquiry in this current constellation."
-            return
-            
-        # 2. Construct prompt
-        prompt = build_prompt(query, results)
-        
-        # 3. Call OpenRouter API with Streaming
-        client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=OPENROUTER_API_KEY,
-        )
-        
-        try:
-            response = await client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                stream=True,
-            )
-            
-            async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-                    
-        except Exception as e:
-            yield f"The cloud is thick. All synthesis attempts failed. Last error: {str(e)}"
-            
-    except Exception as e:
-        yield f"The search through the void failed: {str(e)}"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://osho-wisdom-engine.com",
+        "X-Title": "Osho Wisdom Engine"
+    }
 
-# Keep ask_osho for local testing/legacy
-def ask_osho(query):
-    searcher = HybridSearcher()
-    try:
-        wisdom = ""
-        # Create a temporary loop to run the async generator
-        async def _run():
-            nonlocal wisdom
-            async for chunk in ask_osho_stream(query, searcher):
-                wisdom += chunk
-        
-        asyncio.run(_run())
-        return wisdom
-    finally:
-        searcher.close()
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        for model in FALLBACK_MODELS:
+            try:
+                async with client.stream("POST", "https://openrouter.ai/api/v1/chat/completions", headers=headers, json={
+                    "model": model,
+                    "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                    "stream": True
+                }) as response:
+                    if response.status_code == 200:
+                        async for line in response.aiter_lines():
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str == "[DONE]": break
+                                try:
+                                    content = json.loads(data_str)['choices'][0]['delta'].get('content', '')
+                                    if content: yield content
+                                except: continue
+                        return # Success
+            except: continue
 
-if __name__ == "__main__":
-    query = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "What is awareness?"
-    print(ask_osho(query))
+    yield "All engines are currently busy. Please wait 60 seconds for the free tier to reset."
