@@ -27,6 +27,7 @@ function AskPageInner() {
   const [retrievedIds, setRetrievedIds] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
   const [rateLimitSecondsLeft, setRateLimitSecondsLeft] = useState(0);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -80,6 +81,7 @@ function AskPageInner() {
     setCitations([]);
     setRetrievedIds([]);
     setError(null);
+    setDiagnostics(null);
 
     try {
       const response = await fetch('/api/ask', {
@@ -126,13 +128,36 @@ function AskPageInner() {
           } catch {
             setError('The stillness was disturbed.');
           }
+          void fetchEngineStatus();
         }
       });
     } catch (err) {
       console.error(err);
       setError('The stillness remains undisturbed. Please try again.');
+      void fetchEngineStatus();
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchEngineStatus = async () => {
+    try {
+      const r = await fetch('/api/engine-status', { cache: 'no-store' });
+      if (!r.ok) return;
+      const s = (await r.json()) as {
+        google_key_present?: boolean;
+        openrouter_key_present?: boolean;
+        searcher_warm?: boolean;
+      };
+      const missing: string[] = [];
+      if (s.google_key_present === false) missing.push('GOOGLE_API_KEY');
+      if (s.openrouter_key_present === false) missing.push('OPENROUTER_API_KEY');
+      if (s.searcher_warm === false) missing.push('searcher (cold index)');
+      if (missing.length > 0) {
+        setDiagnostics(`Upstream is missing: ${missing.join(', ')}.`);
+      }
+    } catch {
+      /* diagnostics are best-effort */
     }
   };
 
@@ -198,8 +223,13 @@ function AskPageInner() {
           )}
 
           {error && !rateLimitSecondsLeft && (
-            <div className="mb-8 text-sm opacity-60 font-serif italic">
-              {error}
+            <div className="mb-8 text-sm font-serif italic">
+              <div className="opacity-70">{error}</div>
+              {diagnostics && (
+                <div className="mt-2 text-[10px] tracking-[0.2em] uppercase font-sans opacity-50">
+                  {diagnostics}
+                </div>
+              )}
             </div>
           )}
 

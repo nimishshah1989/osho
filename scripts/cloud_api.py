@@ -108,6 +108,52 @@ def health():
     }
 
 
+@app.get("/api/engine-status")
+def engine_status():
+    """Surface which RAG engines are configured so /ask failures are debuggable."""
+    from scripts import openrouter_rag
+    return {
+        "google_key_present": bool(getattr(openrouter_rag, "GOOGLE_API_KEY", None)),
+        "openrouter_key_present": bool(getattr(openrouter_rag, "OPENROUTER_API_KEY", None)),
+        "searcher_warm": searcher is not None,
+    }
+
+
+def _series_from_title(title: str) -> str:
+    if not title:
+        return "Uncategorised"
+    if " ~ " in title:
+        return title.split(" ~ ", 1)[0].strip()
+    return title.strip()
+
+
+@app.get("/hierarchy")
+def hierarchy():
+    """Returns {year: {series: [talk_title, ...]}} for the /map tree view."""
+    if not os.path.exists(DB_PATH):
+        return {}
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT title, date FROM events WHERE title IS NOT NULL")
+
+    tree: dict = {}
+    for r in cur.fetchall():
+        raw_date = r["date"] or ""
+        year = raw_date[:4]
+        if not year.isdigit():
+            year = "Undated"
+        series = _series_from_title(r["title"])
+        tree.setdefault(year, {}).setdefault(series, []).append(r["title"])
+
+    conn.close()
+    # Sort talks within each series for stable display
+    for y in tree:
+        for s in tree[y]:
+            tree[y][s].sort()
+    return tree
+
+
 @app.post("/ask")
 async def ask(request: QueryRequest):
     if not searcher:

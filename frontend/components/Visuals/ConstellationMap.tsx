@@ -1,113 +1,41 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, ThreeEvent, useFrame } from '@react-three/fiber';
-import { OrbitControls, PerspectiveCamera, Stars } from '@react-three/drei';
+import { Canvas, ThreeEvent, useFrame, useThree } from '@react-three/fiber';
+import { OrbitControls, PerspectiveCamera, Stars, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Lens } from '../Nebula/LensSwitcher';
 import type { ParticleSummary } from '../Nebula/ParticlePanel';
+import { buildLayout, type ClusterDef, type NebulaNode } from '../../lib/nebulaLayout';
 
 const NEBULA_DATA_URL = '/nebula_data.json';
-
-interface NebulaNode {
-  id: string;
-  title: string;
-  galaxy: string;
-  color: string;
-  pos: [number, number, number];
-  date: string;
-}
 
 interface Props {
   lens: Lens;
   highlightedIds: Set<string>;
+  focusedCluster: string | null;
   onSelect: (p: ParticleSummary) => void;
   onHover?: (p: ParticleSummary | null) => void;
+  onFocusCluster: (name: string | null) => void;
+  onClustersChange?: (clusters: ClusterDef[]) => void;
 }
 
-const ERA_COLORS: Record<string, string> = {
-  Bombay: '#60a5fa',
-  'Poona I': '#d4af37',
-  Rajneeshpuram: '#ef4444',
-  'Poona II': '#10b981',
-  Unknown: '#94a3b8',
-};
-
-function eraFor(date: string): string {
-  const yr = parseInt((date || '').slice(0, 4), 10);
-  if (!Number.isFinite(yr)) return 'Unknown';
-  if (yr < 1970) return 'Bombay';
-  if (yr < 1981) return 'Poona I';
-  if (yr < 1986) return 'Rajneeshpuram';
-  return 'Poona II';
-}
-
-function hash(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
-  return h;
-}
-
-function jitter(id: string, seed: number): number {
-  const h = Math.abs(hash(id + ':' + seed));
-  return ((h % 1000) / 1000 - 0.5) * 2;
-}
-
-function buildLensGeometry(data: NebulaNode[], lens: Lens): { positions: Float32Array; colors: Float32Array } {
-  const positions = new Float32Array(data.length * 3);
-  const colors = new Float32Array(data.length * 3);
-  const c = new THREE.Color();
-
-  data.forEach((node, i) => {
-    let x = node.pos[0];
-    let y = node.pos[1];
-    let z = node.pos[2];
-    let colorHex = node.color;
-
-    if (lens === 'timeline') {
-      const year = parseInt((node.date || '').slice(0, 4), 10);
-      const y0 = Number.isFinite(year) ? year : 1976;
-      x = (y0 - 1975) * 14 + jitter(node.id, 1) * 12;
-      y = jitter(node.id, 2) * 80;
-      z = jitter(node.id, 3) * 60;
-      colorHex = ERA_COLORS[eraFor(node.date)] ?? '#94a3b8';
-    } else if (lens === 'geography') {
-      // No location in client data — lay out clusters in horizontal bands by galaxy
-      const galaxyIndex = Math.abs(hash(node.galaxy)) % 7;
-      const radius = 80 + galaxyIndex * 22;
-      const angle = (hash(node.id) % 360) * (Math.PI / 180);
-      x = Math.cos(angle) * radius + jitter(node.id, 4) * 10;
-      y = (galaxyIndex - 3) * 40 + jitter(node.id, 5) * 12;
-      z = Math.sin(angle) * radius + jitter(node.id, 6) * 10;
-    } else if (lens === 'concepts') {
-      // Spread original positions outward; color by decade
-      x = node.pos[0] * 1.3;
-      y = node.pos[1] * 1.3;
-      z = node.pos[2] * 1.3;
-      const decade = Math.floor((parseInt((node.date || '').slice(0, 4), 10) || 1970) / 10) * 10;
-      const hueSeed = (decade - 1940) * 0.08;
-      c.setHSL((hueSeed % 1 + 1) % 1, 0.6, 0.55);
-      colorHex = '#' + c.getHexString();
-    }
-    // themes: defaults already set
-
-    positions[i * 3] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
-
-    c.set(colorHex);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
-  });
-
-  return { positions, colors };
-}
-
-function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
+function NebulaPoints({
+  data,
+  lens,
+  highlightedIds,
+  focusedCluster,
+  clusters,
+  pointToCluster,
+  onSelect,
+  onHover,
+}: {
   data: NebulaNode[];
   lens: Lens;
   highlightedIds: Set<string>;
+  focusedCluster: string | null;
+  clusters: ClusterDef[];
+  pointToCluster: Uint16Array;
   onSelect: (p: ParticleSummary) => void;
   onHover?: (p: ParticleSummary | null) => void;
 }) {
@@ -118,20 +46,28 @@ function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
   const baseColorsRef = useRef<Float32Array | null>(null);
   const targetColorsRef = useRef<Float32Array | null>(null);
 
+  // Lens / layout changes: reset targets
   useEffect(() => {
-    const geom = buildLensGeometry(data, lens);
+    const layout = buildLayout(data, lens);
     if (!positionsRef.current) {
-      positionsRef.current = new Float32Array(geom.positions);
-      colorsRef.current = new Float32Array(geom.colors);
-      baseColorsRef.current = new Float32Array(geom.colors);
-      targetPositionsRef.current = geom.positions;
-      targetColorsRef.current = geom.colors;
+      positionsRef.current = new Float32Array(layout.positions);
+      colorsRef.current = new Float32Array(layout.colors);
+      baseColorsRef.current = new Float32Array(layout.colors);
+      targetPositionsRef.current = layout.positions;
+      targetColorsRef.current = layout.colors;
     } else {
-      targetPositionsRef.current = geom.positions;
-      targetColorsRef.current = geom.colors;
-      baseColorsRef.current = new Float32Array(geom.colors);
+      targetPositionsRef.current = layout.positions;
+      targetColorsRef.current = layout.colors;
     }
   }, [data, lens]);
+
+  const clusterIndexByName = useMemo(() => {
+    const m = new Map<string, number>();
+    clusters.forEach((c, i) => m.set(c.name, i));
+    return m;
+  }, [clusters]);
+
+  const focusedIdx = focusedCluster ? clusterIndexByName.get(focusedCluster) ?? -1 : -1;
 
   useFrame(({ clock }) => {
     const mesh = pointsRef.current;
@@ -144,7 +80,6 @@ function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
     const baseC = baseColorsRef.current;
     if (!positions || !colors || !targetP || !targetC || !baseC) return;
 
-    // Smooth position + color transition
     const lerpFactor = 0.08;
     let positionsChanged = false;
     let colorsChanged = false;
@@ -160,20 +95,21 @@ function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
       }
     }
 
-    // Highlight pulse: boost brightness of highlighted ids
     const pulse = 0.5 + 0.5 * Math.sin(clock.getElapsedTime() * 3);
     for (let i = 0; i < data.length; i++) {
       const id = data[i].id;
       const ci = i * 3;
       const hl = highlightedIds.has(id);
+      const pCluster = pointToCluster[i];
+      const dimmed = focusedIdx >= 0 && pCluster !== focusedIdx;
       const boost = hl ? 1.0 + 1.5 * pulse : 1.0;
+      const dim = dimmed ? 0.18 : 1.0;
       const base0 = baseC[ci];
       const base1 = baseC[ci + 1];
       const base2 = baseC[ci + 2];
-      const targ0 = Math.min(1, base0 * boost);
-      const targ1 = Math.min(1, base1 * boost);
-      const targ2 = Math.min(1, base2 * boost);
-      // Also blend toward target color on lens switch
+      const targ0 = Math.min(1, base0 * boost * dim);
+      const targ1 = Math.min(1, base1 * boost * dim);
+      const targ2 = Math.min(1, base2 * boost * dim);
       const blended0 = colors[ci] + (targ0 - colors[ci]) * lerpFactor;
       const blended1 = colors[ci + 1] + (targ1 - colors[ci + 1]) * lerpFactor;
       const blended2 = colors[ci + 2] + (targ2 - colors[ci + 2]) * lerpFactor;
@@ -183,29 +119,28 @@ function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
         colors[ci + 2] = blended2;
         colorsChanged = true;
       }
-      // Keep base in sync with lens-target base (no highlight)
-      baseC[ci] = baseC[ci] + (targetC[ci] - baseC[ci]) * lerpFactor;
+      baseC[ci]     = baseC[ci]     + (targetC[ci]     - baseC[ci])     * lerpFactor;
       baseC[ci + 1] = baseC[ci + 1] + (targetC[ci + 1] - baseC[ci + 1]) * lerpFactor;
       baseC[ci + 2] = baseC[ci + 2] + (targetC[ci + 2] - baseC[ci + 2]) * lerpFactor;
     }
 
     const geometry = mesh.geometry as THREE.BufferGeometry;
     if (positionsChanged) {
-      const attr = geometry.getAttribute('position') as THREE.BufferAttribute;
-      attr.needsUpdate = true;
+      (geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
     }
     if (colorsChanged) {
-      const attr = geometry.getAttribute('color') as THREE.BufferAttribute;
-      attr.needsUpdate = true;
+      (geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
     }
 
-    // Gentle autorotation
-    mesh.rotation.y = clock.getElapsedTime() * 0.015;
+    // Gentle autorotation only when not focused
+    if (focusedIdx < 0) {
+      mesh.rotation.y = clock.getElapsedTime() * 0.015;
+    }
   });
 
   const geometry = useMemo(() => {
     const geom = new THREE.BufferGeometry();
-    const initial = buildLensGeometry(data, lens);
+    const initial = buildLayout(data, lens);
     geom.setAttribute('position', new THREE.BufferAttribute(initial.positions, 3));
     geom.setAttribute('color', new THREE.BufferAttribute(initial.colors, 3));
     positionsRef.current = new Float32Array(initial.positions);
@@ -261,35 +196,167 @@ function NebulaPoints({ data, lens, highlightedIds, onSelect, onHover }: {
   );
 }
 
-function Scene({ data, lens, highlightedIds, onSelect, onHover }: Props & { data: NebulaNode[] }) {
+function ClusterLabels({
+  clusters,
+  focusedCluster,
+  onFocusCluster,
+}: {
+  clusters: ClusterDef[];
+  focusedCluster: string | null;
+  onFocusCluster: (name: string | null) => void;
+}) {
   return (
     <>
-      <color attach="background" args={['#000000']} />
-      <PerspectiveCamera makeDefault position={[0, 0, 300]} fov={50} />
-      <OrbitControls
-        enablePan
-        enableRotate
-        zoomSpeed={0.6}
-        rotateSpeed={0.5}
-        minDistance={40}
-        maxDistance={800}
-        makeDefault
-      />
-      <ambientLight intensity={0.5} />
-      <Stars radius={500} depth={60} count={8000} factor={7} saturation={0} fade speed={1} />
-      <NebulaPoints
-        data={data}
-        lens={lens}
-        highlightedIds={highlightedIds}
-        onSelect={onSelect}
-        onHover={onHover}
-      />
-      <fog attach="fog" args={['#000000', 120, 900]} />
+      {clusters.map((c) => {
+        const isFocused = focusedCluster === c.name;
+        const isDimmed = focusedCluster !== null && !isFocused;
+        return (
+          <Html
+            key={c.name}
+            position={c.centroid}
+            center
+            distanceFactor={220}
+            zIndexRange={[20, 0]}
+            style={{ pointerEvents: 'auto' }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onFocusCluster(isFocused ? null : c.name);
+              }}
+              className={`whitespace-nowrap select-none transition-all duration-300 ${
+                isDimmed ? 'opacity-30 hover:opacity-70' : 'opacity-95'
+              }`}
+              style={{
+                background: 'rgba(0,0,0,0.55)',
+                border: `1px solid ${c.color}66`,
+                color: c.color,
+                padding: '6px 12px',
+                borderRadius: 2,
+                backdropFilter: 'blur(6px)',
+                fontFamily: 'var(--font-sans)',
+                fontSize: isFocused ? 11 : 10,
+                letterSpacing: '0.3em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
+            >
+              {c.name}
+              <span style={{ opacity: 0.6, marginLeft: 8, fontSize: 9 }}>{c.size}</span>
+            </button>
+          </Html>
+        );
+      })}
     </>
   );
 }
 
-export default function ConstellationMap({ lens, highlightedIds, onSelect, onHover }: Props) {
+function CameraController({
+  clusters,
+  focusedCluster,
+}: {
+  clusters: ClusterDef[];
+  focusedCluster: string | null;
+}) {
+  const { camera } = useThree();
+  const controlsRef = useRef<React.ComponentRef<typeof OrbitControls> | null>(null);
+  const targetRef = useRef(new THREE.Vector3(0, 0, 0));
+  const desiredPosRef = useRef(new THREE.Vector3(0, 0, 300));
+
+  useEffect(() => {
+    if (focusedCluster) {
+      const c = clusters.find((x) => x.name === focusedCluster);
+      if (c) {
+        targetRef.current.set(c.centroid[0], c.centroid[1], c.centroid[2]);
+        desiredPosRef.current.set(
+          c.centroid[0] + 20,
+          c.centroid[1] + 20,
+          c.centroid[2] + 110,
+        );
+        return;
+      }
+    }
+    targetRef.current.set(0, 0, 0);
+    desiredPosRef.current.set(0, 0, 300);
+  }, [focusedCluster, clusters]);
+
+  useFrame(() => {
+    camera.position.lerp(desiredPosRef.current, 0.06);
+    const ctrls = controlsRef.current as unknown as { target: THREE.Vector3; update: () => void } | null;
+    if (ctrls) {
+      ctrls.target.lerp(targetRef.current, 0.08);
+      ctrls.update();
+    } else {
+      camera.lookAt(targetRef.current);
+    }
+  });
+
+  return (
+    <OrbitControls
+      ref={controlsRef as React.Ref<React.ComponentRef<typeof OrbitControls>>}
+      enablePan
+      enableRotate
+      zoomSpeed={0.6}
+      rotateSpeed={0.5}
+      minDistance={30}
+      maxDistance={800}
+      makeDefault
+    />
+  );
+}
+
+function Scene({
+  data,
+  lens,
+  highlightedIds,
+  focusedCluster,
+  onSelect,
+  onHover,
+  onFocusCluster,
+  onClustersChange,
+}: Props & { data: NebulaNode[] }) {
+  const layout = useMemo(() => buildLayout(data, lens), [data, lens]);
+
+  useEffect(() => {
+    onClustersChange?.(layout.clusters);
+  }, [layout.clusters, onClustersChange]);
+
+  return (
+    <>
+      <color attach="background" args={['#000000']} />
+      <PerspectiveCamera makeDefault position={[0, 0, 300]} fov={50} />
+      <CameraController clusters={layout.clusters} focusedCluster={focusedCluster} />
+      <ambientLight intensity={0.5} />
+      <Stars radius={500} depth={60} count={6000} factor={7} saturation={0} fade speed={1} />
+      <NebulaPoints
+        data={data}
+        lens={lens}
+        highlightedIds={highlightedIds}
+        focusedCluster={focusedCluster}
+        clusters={layout.clusters}
+        pointToCluster={layout.pointToCluster}
+        onSelect={onSelect}
+        onHover={onHover}
+      />
+      <ClusterLabels
+        clusters={layout.clusters}
+        focusedCluster={focusedCluster}
+        onFocusCluster={onFocusCluster}
+      />
+      <fog attach="fog" args={['#000000', 180, 900]} />
+    </>
+  );
+}
+
+export default function ConstellationMap({
+  lens,
+  highlightedIds,
+  focusedCluster,
+  onSelect,
+  onHover,
+  onFocusCluster,
+  onClustersChange,
+}: Props) {
   const [data, setData] = useState<NebulaNode[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -315,14 +382,18 @@ export default function ConstellationMap({ lens, highlightedIds, onSelect, onHov
         onCreated={({ raycaster }) => {
           raycaster.params.Points = { threshold: 2.5 };
         }}
+        onPointerMissed={() => onFocusCluster(null)}
       >
         {data.length > 0 && (
           <Scene
             data={data}
             lens={lens}
             highlightedIds={highlightedIds}
+            focusedCluster={focusedCluster}
             onSelect={onSelect}
             onHover={onHover}
+            onFocusCluster={onFocusCluster}
+            onClustersChange={onClustersChange}
           />
         )}
       </Canvas>
