@@ -66,6 +66,7 @@ class HybridSearcher:
             
             search_results.append({
                 "id": p_id,
+                "event_id": metadata['event_id'],
                 "content": content,
                 "distance": distance,
                 "event_title": event_row[0] if event_row else "Unknown",

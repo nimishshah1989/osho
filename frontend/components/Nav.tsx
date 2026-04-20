@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Globe, MessageCircle } from 'lucide-react';
+import { Library, MessageCircle } from 'lucide-react';
 
 const ITEMS = [
-  { href: '/', label: 'Nebula', Icon: Globe },
+  { href: '/', label: 'Archive', Icon: Library },
   { href: '/ask', label: 'Ask', Icon: MessageCircle },
 ];
 

@@ -1,11 +1,11 @@
 import Nav from '../components/Nav';
-import SunburstExplorer from '../components/Sunburst/SunburstExplorer';
+import TreeExplorer from '../components/Archive/TreeExplorer';
 
 export default function Home() {
   return (
     <>
       <Nav />
-      <SunburstExplorer />
+      <TreeExplorer />
     </>
   );
 }
