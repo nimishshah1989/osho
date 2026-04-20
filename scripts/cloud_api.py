@@ -154,6 +154,25 @@ def hierarchy():
     return tree
 
 
+@app.get("/api/catalog")
+def catalog():
+    """Flat list of every indexed event — the frontend groups by lens client-side."""
+    if not os.path.exists(DB_PATH):
+        return {"events": []}
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT id, title, date, location FROM events WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title"
+    )
+    events = [
+        {"id": r["id"], "title": r["title"], "date": r["date"], "location": r["location"]}
+        for r in cur.fetchall()
+    ]
+    conn.close()
+    return {"events": events}
+
+
 @app.post("/ask")
 async def ask(request: QueryRequest):
     if not searcher:
@@ -178,6 +197,7 @@ def _citations(context):
         seen.add(key)
         out.append({
             "id": r.get("id"),
+            "event_id": r.get("event_id"),
             "title": r.get("event_title"),
             "date": r.get("event_date"),
             "location": r.get("event_location"),

@@ -10,6 +10,7 @@ import { consumeSSE } from '../../lib/sse';
 
 interface Citation {
   id?: string;
+  event_id?: string | null;
   title: string | null;
   date: string | null;
   location: string | null;
@@ -294,24 +295,37 @@ function AskPageInner() {
                   </h2>
                   <ul className="space-y-2 text-sm opacity-80">
                     {citations.map((c, i) => {
-                      const titleNode = c.source_url ? (
-                        <a
-                          href={c.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-ivory underline decoration-gold/40 hover:decoration-gold inline-flex items-center gap-1"
-                        >
-                          {c.title ?? 'Unknown'}
-                          <ExternalLink size={10} className="opacity-60" />
-                        </a>
-                      ) : (
-                        <span className="text-ivory">{c.title ?? 'Unknown'}</span>
-                      );
+                      const readHref = c.event_id
+                        ? `/read?event_id=${encodeURIComponent(c.event_id)}`
+                        : c.title
+                          ? `/read?title=${encodeURIComponent(c.title)}`
+                          : null;
                       return (
                         <li key={`${c.title}-${c.date}-${i}`} className="leading-relaxed">
-                          {titleNode}
+                          {readHref ? (
+                            <Link
+                              href={readHref}
+                              className="text-ivory underline decoration-gold/40 hover:decoration-gold inline-flex items-center gap-1"
+                            >
+                              {c.title ?? 'Unknown'}
+                              <BookOpen size={10} className="opacity-60" />
+                            </Link>
+                          ) : (
+                            <span className="text-ivory">{c.title ?? 'Unknown'}</span>
+                          )}
                           {c.date ? <span className="opacity-50"> · {c.date}</span> : null}
                           {c.location ? <span className="opacity-50"> · {c.location}</span> : null}
+                          {c.source_url && (
+                            <a
+                              href={c.source_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="ml-2 opacity-40 hover:opacity-100 transition-opacity inline-flex items-center"
+                              aria-label="External reference"
+                            >
+                              <ExternalLink size={10} />
+                            </a>
+                          )}
                         </li>
                       );
                     })}
@@ -331,7 +345,7 @@ function AskPageInner() {
                     href="/"
                     className="text-[10px] tracking-[0.5em] uppercase opacity-40 hover:opacity-100 transition-opacity text-gold flex items-center gap-2"
                   >
-                    <Orbit size={12} /> Open the Nebula
+                    <Orbit size={12} /> Browse the Archive
                   </Link>
                 )}
               </div>

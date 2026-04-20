@@ -76,7 +76,7 @@ function ReaderInner() {
             href="/"
             className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase opacity-50 hover:opacity-100 transition-opacity mb-10"
           >
-            <ArrowLeft size={12} /> Back to the Nebula
+            <ArrowLeft size={12} /> Back to the Archive
           </Link>
 
           <header className="mb-12 border-b border-gold/10 pb-8">
