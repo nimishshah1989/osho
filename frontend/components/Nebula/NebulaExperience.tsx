@@ -124,6 +124,13 @@ function NebulaInner() {
           </div>
         </div>
       )}
+      {!hovered && !selected && focusedCluster && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
+          <div className="text-[9px] tracking-[0.4em] uppercase text-gold/80">
+            Click any star to read the discourse · ESC to return
+          </div>
+        </div>
+      )}
 
       {hovered && !selected && (
         <div

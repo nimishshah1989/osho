@@ -186,11 +186,11 @@ function NebulaPoints({
       <pointsMaterial
         vertexColors
         transparent
-        size={1.8}
+        size={focusedCluster ? 3.6 : 1.8}
         sizeAttenuation
         depthWrite={false}
         blending={THREE.AdditiveBlending}
-        opacity={0.85}
+        opacity={0.9}
       />
     </points>
   );
@@ -210,6 +210,10 @@ function ClusterLabels({
       {clusters.map((c) => {
         const isFocused = focusedCluster === c.name;
         const isDimmed = focusedCluster !== null && !isFocused;
+        // Hide the label for the focused cluster so it doesn't block raycasts
+        // to the points behind it. Other cluster labels stay (dimmed) so the
+        // user can switch focus by clicking a neighboring galaxy.
+        if (isFocused) return null;
         return (
           <Html
             key={c.name}
@@ -305,6 +309,16 @@ function CameraController({
   );
 }
 
+function RaycasterTuner({ focusedCluster }: { focusedCluster: string | null }) {
+  const { raycaster } = useThree();
+  useEffect(() => {
+    // Bigger hit-radius when zoomed into a cluster makes individual stars
+    // actually clickable at typical viewing distance.
+    raycaster.params.Points = { threshold: focusedCluster ? 5 : 2.5 };
+  }, [focusedCluster, raycaster]);
+  return null;
+}
+
 function Scene({
   data,
   lens,
@@ -325,6 +339,7 @@ function Scene({
     <>
       <color attach="background" args={['#000000']} />
       <PerspectiveCamera makeDefault position={[0, 0, 300]} fov={50} />
+      <RaycasterTuner focusedCluster={focusedCluster} />
       <CameraController clusters={layout.clusters} focusedCluster={focusedCluster} />
       <ambientLight intensity={0.5} />
       <Stars radius={500} depth={60} count={6000} factor={7} saturation={0} fade speed={1} />
