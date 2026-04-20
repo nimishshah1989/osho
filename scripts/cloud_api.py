@@ -71,6 +71,7 @@ async def lifespan(app: FastAPI):
     try:
         print("Wisdom Engine: Loading discourse index into RAM...")
         searcher = HybridSearcher()
+        searcher.warmup()
         print("Wisdom Engine: Warm and ready for scholarly synthesis.")
     except Exception as e:
         print(f"Wisdom Engine: Failed to ignite. Error: {str(e)}")
