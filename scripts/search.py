@@ -46,13 +46,33 @@ class HybridSearcher:
         )
         self.conn = sqlite3.connect(DB_PATH)
 
+    def warmup(self):
+        """Force the HNSW index + sqlite metadata into memory so the first
+        real query doesn't pay the cold-cache tax (~20s on 1.3M vectors)."""
+        import time
+        t0 = time.perf_counter()
+        try:
+            emb = self.model.encode(["warmup"], show_progress_bar=False).tolist()
+            self.collection.query(query_embeddings=emb, n_results=1)
+            print(f"Wisdom Engine: index warmed in {int((time.perf_counter()-t0)*1000)}ms")
+        except Exception as e:
+            print(f"Wisdom Engine: warmup skipped ({e})")
+
     def search(self, query, n_results=5):
+        import time
         print(f"Searching for: '{query}'")
+        t0 = time.perf_counter()
+        query_embedding = self.model.encode([query], show_progress_bar=False).tolist()
+        embed_ms = int((time.perf_counter() - t0) * 1000)
+
+        t1 = time.perf_counter()
         results = self.collection.query(
-            query_texts=[query],
-            n_results=n_results
+            query_embeddings=query_embedding,
+            n_results=n_results,
         )
-        
+        query_ms = int((time.perf_counter() - t1) * 1000)
+        print(f"[search] embed={embed_ms}ms query={query_ms}ms")
+
         search_results = []
         for i in range(len(results['ids'][0])):
             p_id = results['ids'][0][i]

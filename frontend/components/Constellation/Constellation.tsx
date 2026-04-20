@@ -42,13 +42,31 @@ function yearOf(date: string | null): number | null {
   return /^\d{4}$/.test(y) ? parseInt(y, 10) : null;
 }
 
-function cityOf(loc: string | null): string {
-  if (!loc) return 'Unknown';
-  const tail = loc.match(/,\s*([^,.]+?)\s*\.?\s*$/);
-  if (tail) return tail[1].trim();
-  const inMatch = loc.match(/\bin\s+([^,.]+?)\s*\.?\s*$/i);
-  if (inMatch) return inMatch[1].trim();
-  return loc.slice(0, 40).trim();
+// Canonical cities Osho actually spoke in. Order matters: specific before generic.
+const KNOWN_CITIES: { match: RegExp; name: string }[] = [
+  { match: /\brajneeshpuram\b|\boregon\b/i, name: 'Rajneeshpuram' },
+  { match: /\bpoona\b|\bpune\b/i, name: 'Pune' },
+  { match: /\bbombay\b|\bmumbai\b/i, name: 'Bombay' },
+  { match: /\bkathmandu\b/i, name: 'Kathmandu' },
+  { match: /\bjabalpur\b/i, name: 'Jabalpur' },
+  { match: /\bahmedabad\b/i, name: 'Ahmedabad' },
+  { match: /\bmt\.?\s*abu\b|\bmount\s*abu\b/i, name: 'Mt. Abu' },
+  { match: /\bgadarwara\b/i, name: 'Gadarwara' },
+  { match: /\buruguay\b|\bmontevideo\b/i, name: 'Uruguay' },
+  { match: /\bcrete\b/i, name: 'Crete' },
+  { match: /\bnepal\b/i, name: 'Nepal' },
+  { match: /\bmanali\b/i, name: 'Manali' },
+  { match: /\bnargol\b/i, name: 'Nargol' },
+  { match: /\bdelhi\b/i, name: 'Delhi' },
+  { match: /\bdwarka\b/i, name: 'Dwarka' },
+];
+
+function cityOf(loc: string | null): string | null {
+  if (!loc) return null;
+  for (const c of KNOWN_CITIES) {
+    if (c.match.test(loc)) return c.name;
+  }
+  return null;
 }
 
 interface Cell {
@@ -66,8 +84,6 @@ interface Prepared {
   cells: Cell[];
 }
 
-const MAX_PLACES = 10;
-
 function prepare(events: Event[]): Prepared {
   const placeCounts = new Map<string, number>();
   const enriched = events
@@ -77,29 +93,28 @@ function prepare(events: Event[]): Prepared {
       _place: cityOf(e.location),
       _theme: themeOf(e.title),
     }))
-    .filter((e) => e._year !== null);
+    .filter((e): e is typeof e & { _year: number; _place: string } => e._year !== null && e._place !== null);
 
   for (const e of enriched) placeCounts.set(e._place, (placeCounts.get(e._place) ?? 0) + 1);
 
-  const topPlaces = Array.from(placeCounts.entries())
+  // Rows: only cities with at least this many talks. Keeps the y-axis dense.
+  const MIN_TALKS_PER_PLACE = 3;
+  const places = Array.from(placeCounts.entries())
+    .filter(([, c]) => c >= MIN_TALKS_PER_PLACE)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, MAX_PLACES)
     .map(([p]) => p);
 
-  const placeLabel = (p: string) => (topPlaces.includes(p) ? p : 'Other');
-  const places = [...topPlaces];
-  if (enriched.some((e) => !topPlaces.includes(e._place))) places.push('Other');
+  const yearMin = enriched.reduce((m, e) => Math.min(m, e._year), Infinity);
+  const yearMax = enriched.reduce((m, e) => Math.max(m, e._year), -Infinity);
 
-  const yearMin = enriched.reduce((m, e) => Math.min(m, e._year!), Infinity);
-  const yearMax = enriched.reduce((m, e) => Math.max(m, e._year!), -Infinity);
-
+  const placeSet = new Set(places);
   const bucket = new Map<string, Cell>();
   for (const e of enriched) {
-    const p = placeLabel(e._place);
-    const key = `${e._year}|${p}|${e._theme}`;
+    if (!placeSet.has(e._place)) continue;
+    const key = `${e._year}|${e._place}|${e._theme}`;
     const existing = bucket.get(key);
     if (existing) existing.events.push(e);
-    else bucket.set(key, { year: e._year!, place: p, theme: e._theme, events: [e] });
+    else bucket.set(key, { year: e._year, place: e._place, theme: e._theme, events: [e] });
   }
 
   return { yearMin, yearMax, places, placeCounts, cells: Array.from(bucket.values()) };
@@ -109,7 +124,8 @@ export default function Constellation() {
   const [events, setEvents] = useState<Event[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hiddenThemes, setHiddenThemes] = useState<Set<string>>(new Set());
+  // "Other" hidden by default — un-classified talks otherwise swamp the viz in grey.
+  const [hiddenThemes, setHiddenThemes] = useState<Set<string>>(new Set(['Other']));
   const [selected, setSelected] = useState<Cell | null>(null);
 
   useEffect(() => {
@@ -173,13 +189,16 @@ export default function Constellation() {
 
   const xFor = (year: number) => leftGutter + ((year - yearMin) / yearSpan) * plotWidth;
   const yFor = (place: string) => topGutter + (places.indexOf(place) + 0.5) * rowHeight;
-  const radiusFor = (count: number) => 3 + Math.sqrt(count) * 2.2;
+  // Cap radius so a cell with 500 talks can't bleed across rows.
+  const MAX_R = rowHeight / 2 - 4;
+  const radiusFor = (count: number) => Math.min(MAX_R, 2.5 + Math.sqrt(count) * 1.1);
 
   // Jitter dots within the same cell so multiple themes don't overlap exactly
   const jitter = (cell: Cell) => {
     const ti = THEMES.findIndex((t) => t.name === cell.theme);
     const angle = (ti * 137.5 * Math.PI) / 180;
-    return { dx: Math.cos(angle) * 6, dy: Math.sin(angle) * 6 };
+    const r = 4;
+    return { dx: Math.cos(angle) * r, dy: Math.sin(angle) * r };
   };
 
   const decadeTicks: number[] = [];
@@ -278,9 +297,9 @@ export default function Constellation() {
                   cy={yFor(cell.place) + dy}
                   r={radiusFor(cell.events.length)}
                   fill={colorOfTheme(cell.theme)}
-                  fillOpacity={0.75}
+                  fillOpacity={0.85}
                   stroke="black"
-                  strokeWidth={0.5}
+                  strokeWidth={0.6}
                   className="cursor-pointer hover:stroke-white"
                   onClick={() => setSelected(cell)}
                 >
