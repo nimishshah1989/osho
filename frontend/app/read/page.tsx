@@ -70,11 +70,11 @@ function ReaderInner() {
   return (
     <>
       <Nav />
-      <main className="min-h-screen bg-black text-ivory/85 selection:bg-gold/30">
+      <main className="min-h-screen bg-black text-ivory selection:bg-gold/30">
         <div className="max-w-3xl mx-auto pt-32 pb-24 px-6 md:px-8">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase opacity-50 hover:opacity-100 transition-opacity mb-10"
+            className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase text-ivory/70 hover:text-ivory transition-colors mb-10"
           >
             <ArrowLeft size={12} /> Back to the Archive
           </Link>
@@ -84,7 +84,7 @@ function ReaderInner() {
               {headerTitle}
             </h1>
             {data?.event && (
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-[10px] tracking-[0.3em] uppercase opacity-50">
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-[10px] tracking-[0.3em] uppercase text-ivory/75">
                 {data.event.date && <span className="text-gold">{data.event.date}</span>}
                 {data.event.location && <span>{data.event.location}</span>}
                 {data.paragraphs.length > 0 && (
@@ -95,7 +95,7 @@ function ReaderInner() {
           </header>
 
           {loading && (
-            <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase opacity-40 text-gold">
+            <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/80">
               Unfurling the discourse...
             </div>
           )}
@@ -105,10 +105,10 @@ function ReaderInner() {
               <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
                 Discourse unavailable
               </div>
-              <div className="text-sm font-serif italic opacity-70 mb-4">{error}</div>
+              <div className="text-sm font-serif italic text-ivory/85 mb-4">{error}</div>
               <Link
                 href={`/ask?q=${encodeURIComponent(title)}`}
-                className="inline-flex items-center gap-2 text-[10px] tracking-[0.4em] uppercase text-gold opacity-70 hover:opacity-100 transition-opacity"
+                className="inline-flex items-center gap-2 text-[10px] tracking-[0.4em] uppercase text-gold hover:opacity-100 opacity-85 transition-opacity"
               >
                 <MessageCircle size={12} /> Ask Osho about this instead
               </Link>
@@ -116,13 +116,13 @@ function ReaderInner() {
           )}
 
           {data && !loading && !error && data.paragraphs.length === 0 && (
-            <div className="opacity-60 text-sm font-serif italic">
+            <div className="text-ivory/80 text-sm font-serif italic">
               This discourse has no paragraphs indexed yet.
             </div>
           )}
 
           {data && !loading && data.paragraphs.length > 0 && (
-            <article className="prose-osho font-serif text-base md:text-lg leading-loose space-y-5">
+            <article className="prose-osho font-serif text-base md:text-lg leading-loose space-y-5 text-ivory/95">
               {data.paragraphs.map((p) => (
                 <p key={p.sequence_number} className="whitespace-pre-wrap">
                   {p.content}

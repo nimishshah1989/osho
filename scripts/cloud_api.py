@@ -178,7 +178,7 @@ async def ask(request: QueryRequest):
     if not searcher:
         raise HTTPException(status_code=503, detail="The Engine is still cold.")
     try:
-        context = searcher.search(request.query, n_results=10)
+        context = searcher.search(request.query, n_results=5)
         wisdom = ""
         async for chunk in ask_osho_stream(request.query, context):
             wisdom += chunk
@@ -212,12 +212,22 @@ async def stream_wisdom(request: QueryRequest):
     if not searcher:
         raise HTTPException(status_code=503, detail="The Engine is still cold.")
 
-    context_results = searcher.search(request.query, n_results=10)
+    import time
+    t0 = time.perf_counter()
+    context_results = searcher.search(request.query, n_results=5)
+    retrieval_ms = int((time.perf_counter() - t0) * 1000)
+    print(f"[stream] retrieval={retrieval_ms}ms n={len(context_results)} query={request.query!r}")
 
     async def event_stream():
+        first_chunk_logged = False
+        t_gen = time.perf_counter()
         try:
             async for chunk in ask_osho_stream(request.query, context_results):
                 if chunk:
+                    if not first_chunk_logged:
+                        ttft_ms = int((time.perf_counter() - t_gen) * 1000)
+                        print(f"[stream] ttft={ttft_ms}ms")
+                        first_chunk_logged = True
                     yield _sse("wisdom", {"chunk": chunk})
             for c in _citations(context_results):
                 yield _sse("citation", c)
