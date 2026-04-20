@@ -269,6 +269,55 @@ def clusters(lens: str = "themes", limit: int = 20):
     return {"lens": lens, "clusters": clusters_out}
 
 
+@app.get("/api/discourse")
+def discourse(title: str | None = None, event_id: str | None = None):
+    """Return full paragraphs for one talk, keyed by either exact title or event id.
+
+    When multiple events share a title (re-runs, re-edits) the earliest-dated
+    one wins — the reader can still drill into a specific id via `event_id`.
+    """
+    if not title and not event_id:
+        raise HTTPException(status_code=400, detail="Provide title or event_id")
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=404, detail="Discourse store unavailable")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+
+    if event_id:
+        cur.execute("SELECT id, title, date, location FROM events WHERE id = ?", (event_id,))
+    else:
+        cur.execute(
+            "SELECT id, title, date, location FROM events WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
+            (title,),
+        )
+    ev = cur.fetchone()
+    if not ev:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Discourse not found")
+
+    cur.execute(
+        "SELECT sequence_number, content FROM paragraphs WHERE event_id = ? ORDER BY sequence_number",
+        (ev["id"],),
+    )
+    paragraphs = [
+        {"sequence_number": r["sequence_number"], "content": r["content"]}
+        for r in cur.fetchall()
+    ]
+    conn.close()
+
+    return {
+        "event": {
+            "id": ev["id"],
+            "title": ev["title"],
+            "date": ev["date"],
+            "location": ev["location"],
+        },
+        "paragraphs": paragraphs,
+    }
+
+
 @app.get("/api/particle/{pid}")
 def particle(pid: str):
     """Full paragraph + neighbors for a given paragraph id."""

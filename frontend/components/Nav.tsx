@@ -2,12 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Globe, MessageCircle, Map as MapIcon } from 'lucide-react';
+import { Globe, MessageCircle } from 'lucide-react';
 
 const ITEMS = [
   { href: '/', label: 'Nebula', Icon: Globe },
   { href: '/ask', label: 'Ask', Icon: MessageCircle },
-  { href: '/map', label: 'Map', Icon: MapIcon },
 ];
 
 export default function Nav() {
