@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Search, Sparkles, Loader2, BookOpen, Orbit, ExternalLink } from 'lucide-react';
@@ -170,11 +170,6 @@ function AskPageInner() {
     setQuery('');
   };
 
-  const nebulaHref = useMemo(() => {
-    if (retrievedIds.length === 0) return '/';
-    return `/?highlight=${encodeURIComponent(retrievedIds.slice(0, 64).join(','))}`;
-  }, [retrievedIds]);
-
   const hasResult = Boolean(wisdom) || citations.length > 0;
 
   return (
@@ -333,10 +328,10 @@ function AskPageInner() {
                 </button>
                 {retrievedIds.length > 0 && (
                   <Link
-                    href={nebulaHref}
+                    href="/"
                     className="text-[10px] tracking-[0.5em] uppercase opacity-40 hover:opacity-100 transition-opacity text-gold flex items-center gap-2"
                   >
-                    <Orbit size={12} /> View in Nebula
+                    <Orbit size={12} /> Open the Nebula
                   </Link>
                 )}
               </div>

@@ -1,5 +1,11 @@
-import NebulaExperience from '../components/Nebula/NebulaExperience';
+import Nav from '../components/Nav';
+import SunburstExplorer from '../components/Sunburst/SunburstExplorer';
 
 export default function Home() {
-  return <NebulaExperience />;
+  return (
+    <>
+      <Nav />
+      <SunburstExplorer />
+    </>
+  );
 }
