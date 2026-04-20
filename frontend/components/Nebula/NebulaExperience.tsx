@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import Nav from '../Nav';
 import LensSwitcher, { Lens } from './LensSwitcher';
 import ParticlePanel, { ParticleSummary } from './ParticlePanel';
+import type { ClusterDef } from '../../lib/nebulaLayout';
 
 const ConstellationMap = dynamic(() => import('../Visuals/ConstellationMap'), {
   ssr: false,
@@ -16,11 +17,20 @@ const ConstellationMap = dynamic(() => import('../Visuals/ConstellationMap'), {
   ),
 });
 
+const LENS_TITLE: Record<Lens, string> = {
+  themes: 'Semantic Galaxies',
+  timeline: 'Era',
+  geography: 'Galactic Bands',
+  concepts: 'By Decade',
+};
+
 function NebulaInner() {
   const searchParams = useSearchParams();
   const [lens, setLens] = useState<Lens>('themes');
   const [hovered, setHovered] = useState<ParticleSummary | null>(null);
   const [selected, setSelected] = useState<ParticleSummary | null>(null);
+  const [focusedCluster, setFocusedCluster] = useState<string | null>(null);
+  const [clusters, setClusters] = useState<ClusterDef[]>([]);
 
   const highlightedIds = useMemo(() => {
     const raw = searchParams?.get('highlight') ?? '';
@@ -28,13 +38,21 @@ function NebulaInner() {
     return new Set(raw.split(',').map((s) => s.trim()).filter(Boolean));
   }, [searchParams]);
 
+  // Clear focus on lens change so users aren't stuck zoomed on a stale cluster
+  useEffect(() => {
+    setFocusedCluster(null);
+  }, [lens]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setSelected(null);
+      if (e.key === 'Escape') {
+        if (selected) setSelected(null);
+        else if (focusedCluster) setFocusedCluster(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [selected, focusedCluster]);
 
   return (
     <>
@@ -42,22 +60,70 @@ function NebulaInner() {
       <ConstellationMap
         lens={lens}
         highlightedIds={highlightedIds}
+        focusedCluster={focusedCluster}
         onSelect={setSelected}
         onHover={setHovered}
+        onFocusCluster={setFocusedCluster}
+        onClustersChange={setClusters}
       />
       <LensSwitcher active={lens} onChange={setLens} />
       <ParticlePanel summary={selected} onClose={() => setSelected(null)} />
 
-      {/* Legend + hover tooltip */}
-      <div className="fixed top-20 left-4 md:left-8 z-30 pointer-events-none">
+      {/* Cluster palette / focus panel */}
+      <div className="fixed top-20 left-4 md:left-8 z-30 max-w-[220px]">
         <h3 className="text-[10px] tracking-[0.5em] uppercase text-ivory/70 mb-3">
-          {lens === 'themes'    && 'Semantic Galaxies'}
-          {lens === 'timeline'  && 'Era'}
-          {lens === 'geography' && 'Galactic Bands'}
-          {lens === 'concepts'  && 'By Decade'}
+          {LENS_TITLE[lens]}
         </h3>
-        <Legend lens={lens} />
+        <div className="flex flex-col gap-1.5">
+          {clusters.map((c) => {
+            const active = focusedCluster === c.name;
+            return (
+              <button
+                key={c.name}
+                onClick={() =>
+                  setFocusedCluster(active ? null : c.name)
+                }
+                aria-pressed={active}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded-sm text-left transition-all ${
+                  active
+                    ? 'bg-gold/10 border border-gold/30'
+                    : 'hover:bg-ivory/5 border border-transparent'
+                }`}
+              >
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ background: c.color }}
+                />
+                <span
+                  className={`text-[9px] uppercase tracking-widest truncate ${
+                    active ? 'text-gold' : 'text-ivory/70'
+                  }`}
+                >
+                  {c.name}
+                </span>
+                <span className="ml-auto text-[9px] opacity-40">{c.size}</span>
+              </button>
+            );
+          })}
+        </div>
+        {focusedCluster && (
+          <button
+            onClick={() => setFocusedCluster(null)}
+            className="mt-3 text-[9px] tracking-[0.3em] uppercase text-ivory/50 hover:text-ivory"
+          >
+            ← Back to all
+          </button>
+        )}
       </div>
+
+      {/* Interaction hint */}
+      {!hovered && !selected && !focusedCluster && clusters.length > 0 && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-30 pointer-events-none text-center">
+          <div className="text-[9px] tracking-[0.4em] uppercase text-ivory/50">
+            Click a label or list entry to zoom into a cluster · drag to orbit · scroll to zoom
+          </div>
+        </div>
+      )}
 
       {hovered && !selected && (
         <div
@@ -76,48 +142,6 @@ function NebulaInner() {
         </div>
       )}
     </>
-  );
-}
-
-function Legend({ lens }: { lens: Lens }) {
-  const items =
-    lens === 'themes'
-      ? [
-          { n: 'Zen', c: '#10b981' },
-          { n: 'Tantra', c: '#ef4444' },
-          { n: 'Sufism', c: '#8b5cf6' },
-          { n: 'Meditation', c: '#f59e0b' },
-          { n: 'Love & Freedom', c: '#ec4899' },
-          { n: 'Philosophy', c: '#3b82f6' },
-        ]
-      : lens === 'timeline'
-      ? [
-          { n: 'Bombay 60s', c: '#60a5fa' },
-          { n: 'Poona I 70s', c: '#d4af37' },
-          { n: 'Rajneeshpuram 80s', c: '#ef4444' },
-          { n: 'Poona II late 80s', c: '#10b981' },
-        ]
-      : lens === 'concepts'
-      ? [
-          { n: '1960s', c: '#3b82f6' },
-          { n: '1970s', c: '#f59e0b' },
-          { n: '1980s', c: '#ef4444' },
-          { n: '1990s', c: '#10b981' },
-        ]
-      : [
-          { n: 'Galactic band', c: '#d4af37' },
-          { n: 'radius grouping', c: '#94a3b8' },
-        ];
-
-  return (
-    <div className="flex flex-col gap-2">
-      {items.map((g) => (
-        <div key={g.n} className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full" style={{ background: g.c }} />
-          <span className="text-[9px] uppercase tracking-widest text-ivory/70">{g.n}</span>
-        </div>
-      ))}
-    </div>
   );
 }
 
