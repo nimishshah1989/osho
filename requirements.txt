@@ -5,6 +5,8 @@ google-generativeai
 python-dotenv
 sentence-transformers
 chromadb
+faiss-cpu
+numpy
 pydantic
 openai
 pytest

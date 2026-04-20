@@ -28,13 +28,34 @@ git clone <repo_url>
 cd osho-wisdom-engine
 
 # Initialize Virtual Environment
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# Start the Engine
-sudo nohup ./venv/bin/python3 -m uvicorn scripts.cloud_api:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
 ```
+
+You also need the 1.3M-paragraph corpus. These files aren't in git:
+- `data/osho.db`       — SQLite with `events` + `paragraphs`
+- `data/chromadb/`     — ChromaDB persistent store
+rsync them onto the box before the next step.
+
+### 3. Build the RAM-resident FAISS index (one-time)
+Retrieval runs out of an in-memory FAISS index instead of disk-backed
+ChromaDB — the difference is ~22s vs ~100ms per query. Build it once per
+host:
+```bash
+python3 scripts/build_faiss.py
+```
+This reads `data/chromadb/` and writes `data/faiss/index.faiss` +
+`data/faiss/meta.sqlite` (~2GB RAM at runtime). If these files are
+missing, `HybridSearcher` silently falls back to ChromaDB.
+
+### 4. Start the Engine
+```bash
+sudo nohup ./.venv/bin/python3 -u -m uvicorn scripts.cloud_api:app \
+  --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+```
+`-u` keeps Python stdout unbuffered so `tail -f backend.log` shows
+timing lines (`[search] backend=faiss embed=Xms query=Yms`) in real time.
 
 ## Resilience Logic (Elite Bridge)
 The `scripts/openrouter_rag.py` implements a **Triple-Failover** system:
