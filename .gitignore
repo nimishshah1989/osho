@@ -3,8 +3,13 @@ node_modules/
 .next/
 out/
 build/
+*.tsbuildinfo
 .env
 .env.local
+
+# Secrets — never commit private keys
+*.pem
+*.key
 
 # Data (Migrated via rsync, not Git)
 data/

@@ -7,4 +7,4 @@ sentence-transformers
 chromadb
 pydantic
 openai
-sqlite3
+pytest
