@@ -28,7 +28,7 @@ export default function Nav() {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={`text-[9px] tracking-[0.4em] uppercase flex items-center gap-2 transition-opacity ${
-                active ? 'text-gold opacity-100' : 'opacity-40 hover:opacity-100'
+                active ? 'text-gold opacity-100' : 'text-ivory/75 hover:text-ivory opacity-100'
               }`}
             >
               <Icon size={12} /> {label}

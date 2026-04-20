@@ -202,7 +202,7 @@ function AskPageInner() {
             </button>
           </form>
 
-          <label className="flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase opacity-60 hover:opacity-100 transition-opacity select-none cursor-pointer mb-8">
+          <label className="flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase text-ivory/80 hover:text-ivory transition-colors select-none cursor-pointer mb-8">
             <input
               type="checkbox"
               checked={showSources}
@@ -213,7 +213,7 @@ function AskPageInner() {
           </label>
 
           {rateLimitSecondsLeft > 0 && (
-            <div className="mb-8 border border-gold/20 rounded-sm p-4 text-sm opacity-80">
+            <div className="mb-8 border border-gold/20 rounded-sm p-4 text-sm text-ivory/90">
               Free tier is resting, please wait{' '}
               <span className="text-gold font-medium">{rateLimitSecondsLeft}s</span> and try again.
             </div>
@@ -221,9 +221,9 @@ function AskPageInner() {
 
           {error && !rateLimitSecondsLeft && (
             <div className="mb-8 text-sm font-serif italic">
-              <div className="opacity-70">{error}</div>
+              <div className="text-ivory/85">{error}</div>
               {diagnostics && (
-                <div className="mt-2 text-[10px] tracking-[0.2em] uppercase font-sans opacity-50">
+                <div className="mt-2 text-[10px] tracking-[0.2em] uppercase font-sans text-ivory/70">
                   {diagnostics}
                 </div>
               )}
@@ -238,7 +238,7 @@ function AskPageInner() {
                 <div className="h-[1px] flex-1 bg-gold" />
               </div>
 
-              <div className="wisdom-output prose-osho text-lg md:text-xl leading-relaxed font-serif italic opacity-90 pb-10">
+              <div className="wisdom-output prose-osho text-lg md:text-xl leading-relaxed font-serif italic text-ivory pb-10">
                 <ReactMarkdown
                   components={{
                     p: ({ children }) => <p className="mb-5">{children}</p>,
@@ -293,7 +293,7 @@ function AskPageInner() {
                   <h2 className="text-[10px] tracking-[0.5em] uppercase text-gold/80 mb-4 flex items-center gap-2">
                     <BookOpen size={12} /> Sources from this synthesis
                   </h2>
-                  <ul className="space-y-2 text-sm opacity-80">
+                  <ul className="space-y-2 text-sm text-ivory/90">
                     {citations.map((c, i) => {
                       const readHref = c.event_id
                         ? `/read?event_id=${encodeURIComponent(c.event_id)}`
@@ -313,14 +313,14 @@ function AskPageInner() {
                           ) : (
                             <span className="text-ivory">{c.title ?? 'Unknown'}</span>
                           )}
-                          {c.date ? <span className="opacity-50"> · {c.date}</span> : null}
-                          {c.location ? <span className="opacity-50"> · {c.location}</span> : null}
+                          {c.date ? <span className="text-ivory/70"> · {c.date}</span> : null}
+                          {c.location ? <span className="text-ivory/70"> · {c.location}</span> : null}
                           {c.source_url && (
                             <a
                               href={c.source_url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="ml-2 opacity-40 hover:opacity-100 transition-opacity inline-flex items-center"
+                              className="ml-2 text-ivory/65 hover:text-ivory transition-colors inline-flex items-center"
                               aria-label="External reference"
                             >
                               <ExternalLink size={10} />
@@ -336,14 +336,14 @@ function AskPageInner() {
               <div className="flex gap-6 items-center mt-10">
                 <button
                   onClick={reset}
-                  className="text-[10px] tracking-[0.5em] uppercase opacity-30 hover:opacity-100 transition-opacity text-gold"
+                  className="text-[10px] tracking-[0.5em] uppercase opacity-75 hover:opacity-100 transition-opacity text-gold"
                 >
                   New Inquiry
                 </button>
                 {retrievedIds.length > 0 && (
                   <Link
                     href="/"
-                    className="text-[10px] tracking-[0.5em] uppercase opacity-40 hover:opacity-100 transition-opacity text-gold flex items-center gap-2"
+                    className="text-[10px] tracking-[0.5em] uppercase opacity-85 hover:opacity-100 transition-opacity text-gold flex items-center gap-2"
                   >
                     <Orbit size={12} /> Browse the Archive
                   </Link>

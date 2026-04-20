@@ -193,13 +193,13 @@ export default function TreeExplorer() {
     });
 
   return (
-    <main className="min-h-screen bg-black text-ivory/80 font-sans selection:bg-gold/30">
+    <main className="min-h-screen bg-black text-ivory font-sans selection:bg-gold/30">
       <div className="max-w-5xl mx-auto pt-32 pb-20 px-6 md:px-8">
         <div className="mb-10">
           <h1 className="text-4xl md:text-5xl font-serif italic mb-6 text-white tracking-wide">
             The Archive
           </h1>
-          <p className="max-w-2xl text-sm leading-relaxed opacity-60">
+          <p className="max-w-2xl text-sm leading-relaxed text-ivory/85">
             Every indexed discourse, grouped by the lens of your choice. Click any talk to read it
             in full.
           </p>
@@ -214,7 +214,7 @@ export default function TreeExplorer() {
               className={`flex items-center gap-2 px-4 py-2 text-[10px] tracking-[0.3em] uppercase transition-all rounded-sm ${
                 lens === id
                   ? 'text-gold bg-gold/5 border border-gold/30'
-                  : 'text-ivory/50 hover:text-ivory border border-transparent'
+                  : 'text-ivory/75 hover:text-ivory border border-transparent'
               }`}
             >
               <Icon size={12} />
@@ -224,7 +224,7 @@ export default function TreeExplorer() {
         </div>
 
         {loading && (
-          <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/70">
+          <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/80">
             Unfolding the Archive...
           </div>
         )}
@@ -234,12 +234,12 @@ export default function TreeExplorer() {
             <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
               Archive unavailable
             </div>
-            <div className="text-sm font-serif italic opacity-70">{error}</div>
+            <div className="text-sm font-serif italic text-ivory/85">{error}</div>
           </div>
         )}
 
         {!loading && !error && buckets.length === 0 && (
-          <div className="opacity-60 text-sm font-serif italic">
+          <div className="text-ivory/80 text-sm font-serif italic">
             The archive appears empty.
           </div>
         )}
@@ -257,9 +257,9 @@ export default function TreeExplorer() {
                   className="w-full text-left p-5 flex items-center justify-between group bg-transparent border-none cursor-pointer"
                 >
                   <div className="flex items-center gap-6">
-                    <span className="text-2xl font-serif italic text-gold/80">{bucket.label}</span>
+                    <span className="text-2xl font-serif italic text-gold">{bucket.label}</span>
                     <div className="h-[1px] w-12 bg-gold/10 group-hover:w-20 transition-all" />
-                    <span className="text-[9px] tracking-[0.3em] uppercase opacity-40">
+                    <span className="text-[9px] tracking-[0.3em] uppercase text-ivory/70">
                       {bucket.meta}
                     </span>
                   </div>
@@ -279,10 +279,10 @@ export default function TreeExplorer() {
                               className="flex items-center gap-3 text-xs hover:text-gold transition-colors bg-transparent border-none cursor-pointer p-0"
                             >
                               {subOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                              <span className="font-medium text-ivory/90 uppercase text-[10px] tracking-[0.2em]">
+                              <span className="font-medium text-ivory uppercase text-[10px] tracking-[0.2em]">
                                 {s.name}
                               </span>
-                              <span className="text-[9px] opacity-30">{s.talks.length}</span>
+                              <span className="text-[9px] text-ivory/60">{s.talks.length}</span>
                             </button>
                           )}
 
@@ -292,12 +292,12 @@ export default function TreeExplorer() {
                                 <Link
                                   key={t.id}
                                   href={`/read?event_id=${encodeURIComponent(t.id)}`}
-                                  className="group flex items-center justify-between py-1 opacity-70 hover:opacity-100 transition-opacity no-underline"
+                                  className="group flex items-center justify-between py-1 text-ivory/90 hover:text-ivory transition-colors no-underline"
                                 >
-                                  <span className="text-[11px] leading-relaxed hover:text-gold transition-colors">
+                                  <span className="text-[11px] leading-relaxed group-hover:text-gold transition-colors">
                                     {t.title}
                                     {t.date && (
-                                      <span className="opacity-30 ml-2 text-[10px]">{t.date.slice(0, 10)}</span>
+                                      <span className="text-ivory/60 ml-2 text-[10px]">{t.date.slice(0, 10)}</span>
                                     )}
                                   </span>
                                   <BookOpen
