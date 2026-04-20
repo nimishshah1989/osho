@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   --background: 0, 0, 0;
   --foreground: 250, 249, 246;
@@ -16,10 +20,6 @@ body {
   min-height: 100vh;
 }
 
-.text-ivory { color: #faf9f6; }
-.text-gold { color: #d4af37; }
-.bg-gold { background-color: #d4af37; }
-
 .wisdom-output {
   font-family: var(--font-serif);
 }
@@ -35,4 +35,13 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(212, 175, 55, 0.2);
   border-radius: 10px;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(8px);
+}
+
+.gold-accent {
+  color: #d4af37;
 }
