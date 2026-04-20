@@ -33,8 +33,8 @@ async def ask_osho_stream(prompt, context):
         "Use the provided context from Osho's discourses to weave a scholarly yet soul-stirring response.\n\n"
         "STRICT SCHOLARLY REQUIREMENTS:\n"
         "1. Every major point must include an inline citation: [Source: Book Name/Discourse Title].\n"
-        "2. Provide a multi-paragraph synthesis (300-500 words).\n"
-        "3. Conclude with a 'Bibliography' section listing Osho books found in the context.\n\n"
+        "2. Keep the synthesis concise: aim for 180-260 words, at most 3 short paragraphs.\n"
+        "3. Conclude with a brief 'Bibliography' listing the Osho books found in the context.\n\n"
         f"Context:\n{context}"
     )
 

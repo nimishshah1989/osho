@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Library, MessageCircle } from 'lucide-react';
+import { Library, MessageCircle, Sparkles } from 'lucide-react';
 
 const ITEMS = [
   { href: '/', label: 'Archive', Icon: Library },
+  { href: '/constellation', label: 'Constellation', Icon: Sparkles },
   { href: '/ask', label: 'Ask', Icon: MessageCircle },
 ];
 
