@@ -1,11 +1,18 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { ChevronRight, ChevronDown, BookOpen, Map as MapIcon, Globe } from 'lucide-react';
+import { ChevronRight, ChevronDown, BookOpen, Map as MapIcon, Globe, Calendar, Clock, Layers } from 'lucide-react';
 import Link from 'next/link';
 
 type SeriesMap = Record<string, string[]>;
 type Hierarchy = Record<string, SeriesMap>;
+type Lens = 'year' | 'era' | 'series';
+
+const LENS_BUTTONS: { id: Lens; label: string; Icon: typeof Calendar }[] = [
+  { id: 'year', label: 'By Year', Icon: Calendar },
+  { id: 'era', label: 'By Era', Icon: Clock },
+  { id: 'series', label: 'By Series', Icon: Layers },
+];
 
 function isHierarchy(value: unknown): value is Hierarchy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -20,6 +27,17 @@ function isHierarchy(value: unknown): value is Hierarchy {
   return true;
 }
 
+function eraFor(year: string): string {
+  if (!/^\d{4}$/.test(year)) return 'Undated';
+  const y = parseInt(year, 10);
+  if (y < 1970) return 'Bombay';
+  if (y < 1981) return 'Poona I';
+  if (y < 1986) return 'Rajneeshpuram';
+  return 'Poona II';
+}
+
+const ERA_ORDER = ['Bombay', 'Poona I', 'Rajneeshpuram', 'Poona II', 'Undated'];
+
 function sortYears(years: string[]): string[] {
   return [...years].sort((a, b) => {
     const numA = /^\d+$/.test(a) ? parseInt(a, 10) : -Infinity;
@@ -28,12 +46,71 @@ function sortYears(years: string[]): string[] {
   });
 }
 
+interface BucketView {
+  /** display label for the top-level group, e.g. "1973" or "Poona I" or "The Book of Secrets" */
+  label: string;
+  /** subtitle shown on the right ("12 Series", "1965-1969", "144 talks") */
+  meta: string;
+  /** children groups: series name → [talks]. For series-lens this is a single self-named group. */
+  children: SeriesMap;
+}
+
+function regroup(hierarchy: Hierarchy, lens: Lens): BucketView[] {
+  if (lens === 'year') {
+    return sortYears(Object.keys(hierarchy)).map((year) => {
+      const series = hierarchy[year];
+      const seriesCount = Object.keys(series).length;
+      return { label: year, meta: `${seriesCount} series`, children: series };
+    });
+  }
+  if (lens === 'era') {
+    const byEra = new Map<string, SeriesMap>();
+    const yearsByEra = new Map<string, string[]>();
+    for (const year of Object.keys(hierarchy)) {
+      const era = eraFor(year);
+      if (!byEra.has(era)) {
+        byEra.set(era, {});
+        yearsByEra.set(era, []);
+      }
+      yearsByEra.get(era)!.push(year);
+      const target = byEra.get(era)!;
+      for (const [series, talks] of Object.entries(hierarchy[year])) {
+        if (!target[series]) target[series] = [];
+        target[series].push(...talks);
+      }
+    }
+    byEra.forEach((series) => {
+      for (const t of Object.values(series)) t.sort();
+    });
+    return ERA_ORDER.filter((e) => byEra.has(e)).map((era) => {
+      const years = (yearsByEra.get(era) ?? []).filter((y) => /^\d+$/.test(y)).map(Number).sort();
+      const range = years.length ? `${years[0]}–${years[years.length - 1]}` : 'Undated';
+      const seriesCount = Object.keys(byEra.get(era)!).length;
+      return { label: era, meta: `${range} · ${seriesCount} series`, children: byEra.get(era)! };
+    });
+  }
+  // series lens: flatten all years into series buckets
+  const bySeries: Record<string, string[]> = {};
+  for (const year of Object.keys(hierarchy)) {
+    for (const [series, talks] of Object.entries(hierarchy[year])) {
+      if (!bySeries[series]) bySeries[series] = [];
+      bySeries[series].push(...talks);
+    }
+  }
+  const seriesNames = Object.keys(bySeries).sort();
+  return seriesNames.map((s) => {
+    const talks = Array.from(new Set(bySeries[s])).sort();
+    return { label: s, meta: `${talks.length} talk${talks.length === 1 ? '' : 's'}`, children: { [s]: talks } };
+  });
+}
+
 export default function KnowledgeMap() {
   const [hierarchy, setHierarchy] = useState<Hierarchy | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
-  const [expandedSeries, setExpandedSeries] = useState<Set<string>>(new Set());
+  const [lens, setLens] = useState<Lens>('year');
+  const [expandedTop, setExpandedTop] = useState<Set<string>>(new Set());
+  const [expandedSub, setExpandedSub] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -67,19 +144,28 @@ export default function KnowledgeMap() {
     };
   }, []);
 
-  const sortedYears = useMemo(() => (hierarchy ? sortYears(Object.keys(hierarchy)) : []), [hierarchy]);
+  // Collapse all when lens changes — different keys would otherwise look "stuck open"
+  useEffect(() => {
+    setExpandedTop(new Set());
+    setExpandedSub(new Set());
+  }, [lens]);
 
-  const toggleYear = (year: string) => {
-    setExpandedYears((prev) => {
+  const buckets = useMemo<BucketView[]>(() => {
+    if (!hierarchy) return [];
+    return regroup(hierarchy, lens);
+  }, [hierarchy, lens]);
+
+  const toggleTop = (key: string) => {
+    setExpandedTop((prev) => {
       const next = new Set(prev);
-      if (next.has(year)) next.delete(year);
-      else next.add(year);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
 
-  const toggleSeries = (key: string) => {
-    setExpandedSeries((prev) => {
+  const toggleSub = (key: string) => {
+    setExpandedSub((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -98,7 +184,7 @@ export default function KnowledgeMap() {
     );
   }
 
-  const isEmpty = !hierarchy || sortedYears.length === 0;
+  const isEmpty = !hierarchy || buckets.length === 0;
 
   return (
     <main className="min-h-screen bg-black text-ivory/80 font-sans selection:bg-gold/30">
@@ -123,14 +209,33 @@ export default function KnowledgeMap() {
       </nav>
 
       <div className="max-w-5xl mx-auto pt-32 pb-20 px-8">
-        <div className="mb-16">
+        <div className="mb-10">
           <h1 className="text-4xl md:text-5xl font-serif italic mb-6 text-white tracking-wide">
             The Structural DNA
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed opacity-60">
-            A chronological and series-based breakdown of the entire archive. From the early Poona years to the
-            global silence, every discourse is mapped here as a structural point of light.
+            A chronological and series-based breakdown of the entire archive. Click any talk to ask
+            Osho about it.
           </p>
+        </div>
+
+        {/* Lens switcher */}
+        <div className="flex gap-2 mb-10 border-b border-gold/10 pb-3">
+          {LENS_BUTTONS.map(({ id, label, Icon }) => (
+            <button
+              key={id}
+              onClick={() => setLens(id)}
+              aria-pressed={lens === id}
+              className={`flex items-center gap-2 px-4 py-2 text-[10px] tracking-[0.3em] uppercase transition-all rounded-sm ${
+                lens === id
+                  ? 'text-gold bg-gold/5 border border-gold/30'
+                  : 'text-ivory/50 hover:text-ivory border border-transparent'
+              }`}
+            >
+              <Icon size={12} />
+              {label}
+            </button>
+          ))}
         </div>
 
         {error && (
@@ -153,61 +258,65 @@ export default function KnowledgeMap() {
         )}
 
         <div className="space-y-4">
-          {sortedYears.map((year) => {
-            const seriesMap = hierarchy![year];
-            const seriesNames = Object.keys(seriesMap).sort();
+          {buckets.map((bucket) => {
+            const subKeys = Object.keys(bucket.children).sort();
+            const isOnlyChild = subKeys.length === 1 && subKeys[0] === bucket.label;
             return (
               <div
-                key={year}
+                key={bucket.label}
                 className="glass-panel border-l-2 border-gold/10 hover:border-gold/30 transition-colors"
               >
                 <button
-                  onClick={() => toggleYear(year)}
+                  onClick={() => toggleTop(bucket.label)}
                   className="w-full text-left p-6 flex items-center justify-between group bg-transparent border-none cursor-pointer"
                 >
                   <div className="flex items-center gap-6">
-                    <span className="text-2xl font-serif italic text-gold/80">{year}</span>
+                    <span className="text-2xl font-serif italic text-gold/80">{bucket.label}</span>
                     <div className="h-[1px] w-12 bg-gold/10 group-hover:w-20 transition-all" />
                     <span className="text-[9px] tracking-[0.3em] uppercase opacity-40">
-                      {seriesNames.length} Series
+                      {bucket.meta}
                     </span>
                   </div>
-                  {expandedYears.has(year) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  {expandedTop.has(bucket.label) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 </button>
 
-                {expandedYears.has(year) && (
+                {expandedTop.has(bucket.label) && (
                   <div className="px-10 pb-8 space-y-6">
-                    {seriesNames.map((series) => {
-                      const key = year + '::' + series;
-                      const talks = seriesMap[series];
+                    {subKeys.map((sub) => {
+                      const subKey = bucket.label + '::' + sub;
+                      const talks = bucket.children[sub];
+                      const subOpen = isOnlyChild || expandedSub.has(subKey);
                       return (
-                        <div key={series} className="space-y-3">
-                          <button
-                            onClick={() => toggleSeries(key)}
-                            className="flex items-center gap-3 text-xs tracking-wider hover:text-gold transition-colors bg-transparent border-none cursor-pointer p-0"
-                          >
-                            {expandedSeries.has(key) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            <span className="font-medium text-ivory/90 uppercase text-[10px] tracking-[0.2em]">
-                              {series}
-                            </span>
-                            <span className="text-[9px] opacity-30 ml-2">{talks.length}</span>
-                          </button>
+                        <div key={sub} className="space-y-3">
+                          {!isOnlyChild && (
+                            <button
+                              onClick={() => toggleSub(subKey)}
+                              className="flex items-center gap-3 text-xs tracking-wider hover:text-gold transition-colors bg-transparent border-none cursor-pointer p-0"
+                            >
+                              {subOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              <span className="font-medium text-ivory/90 uppercase text-[10px] tracking-[0.2em]">
+                                {sub}
+                              </span>
+                              <span className="text-[9px] opacity-30 ml-2">{talks.length}</span>
+                            </button>
+                          )}
 
-                          {expandedSeries.has(key) && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-2 pl-6 border-l border-gold/5">
+                          {subOpen && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-1 pl-6 border-l border-gold/5">
                               {talks.map((talk, i) => (
-                                <div
+                                <Link
                                   key={`${talk}-${i}`}
-                                  className="group flex items-center justify-between py-1 opacity-60 hover:opacity-100 transition-opacity"
+                                  href={`/ask?q=${encodeURIComponent(talk)}`}
+                                  className="group flex items-center justify-between py-1 opacity-70 hover:opacity-100 transition-opacity no-underline"
                                 >
                                   <span className="text-[11px] leading-relaxed cursor-pointer hover:text-gold transition-colors">
                                     {talk}
                                   </span>
                                   <BookOpen
                                     size={10}
-                                    className="gold-accent opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="gold-accent opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-3"
                                   />
-                                </div>
+                                </Link>
                               ))}
                             </div>
                           )}

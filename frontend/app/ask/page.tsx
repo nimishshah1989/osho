@@ -3,7 +3,8 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Search, Sparkles, Loader2, BookOpen, Orbit } from 'lucide-react';
+import { Search, Sparkles, Loader2, BookOpen, Orbit, ExternalLink } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import Nav from '../../components/Nav';
 import { consumeSSE } from '../../lib/sse';
 
@@ -241,8 +242,54 @@ function AskPageInner() {
                 <div className="h-[1px] flex-1 bg-gold" />
               </div>
 
-              <div className="wisdom-output text-lg md:text-xl leading-relaxed font-serif italic whitespace-pre-wrap opacity-90 pb-10">
-                {wisdom}
+              <div className="wisdom-output prose-osho text-lg md:text-xl leading-relaxed font-serif italic opacity-90 pb-10">
+                <ReactMarkdown
+                  components={{
+                    p: ({ children }) => <p className="mb-5">{children}</p>,
+                    strong: ({ children }) => (
+                      <strong className="text-gold not-italic font-medium">{children}</strong>
+                    ),
+                    em: ({ children }) => <em className="italic">{children}</em>,
+                    h1: ({ children }) => (
+                      <h2 className="text-base tracking-[0.3em] uppercase text-gold mt-8 mb-3 not-italic">
+                        {children}
+                      </h2>
+                    ),
+                    h2: ({ children }) => (
+                      <h3 className="text-sm tracking-[0.3em] uppercase text-gold mt-6 mb-3 not-italic">
+                        {children}
+                      </h3>
+                    ),
+                    h3: ({ children }) => (
+                      <h4 className="text-xs tracking-[0.3em] uppercase text-gold/80 mt-5 mb-2 not-italic">
+                        {children}
+                      </h4>
+                    ),
+                    ul: ({ children }) => (
+                      <ul className="list-disc list-outside pl-6 mb-5 space-y-1">{children}</ul>
+                    ),
+                    ol: ({ children }) => (
+                      <ol className="list-decimal list-outside pl-6 mb-5 space-y-1">{children}</ol>
+                    ),
+                    a: ({ href, children }) => (
+                      <a
+                        href={href ?? '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-gold underline decoration-gold/40 hover:decoration-gold transition-colors"
+                      >
+                        {children}
+                      </a>
+                    ),
+                    blockquote: ({ children }) => (
+                      <blockquote className="border-l-2 border-gold/30 pl-4 my-5 opacity-80">
+                        {children}
+                      </blockquote>
+                    ),
+                  }}
+                >
+                  {wisdom}
+                </ReactMarkdown>
               </div>
 
               {showSources && citations.length > 0 && (
@@ -251,13 +298,28 @@ function AskPageInner() {
                     <BookOpen size={12} /> Sources from this synthesis
                   </h2>
                   <ul className="space-y-2 text-sm opacity-80">
-                    {citations.map((c, i) => (
-                      <li key={`${c.title}-${c.date}-${i}`} className="leading-relaxed">
+                    {citations.map((c, i) => {
+                      const titleNode = c.source_url ? (
+                        <a
+                          href={c.source_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-ivory underline decoration-gold/40 hover:decoration-gold inline-flex items-center gap-1"
+                        >
+                          {c.title ?? 'Unknown'}
+                          <ExternalLink size={10} className="opacity-60" />
+                        </a>
+                      ) : (
                         <span className="text-ivory">{c.title ?? 'Unknown'}</span>
-                        {c.date ? <span className="opacity-50"> · {c.date}</span> : null}
-                        {c.location ? <span className="opacity-50"> · {c.location}</span> : null}
-                      </li>
-                    ))}
+                      );
+                      return (
+                        <li key={`${c.title}-${c.date}-${i}`} className="leading-relaxed">
+                          {titleNode}
+                          {c.date ? <span className="opacity-50"> · {c.date}</span> : null}
+                          {c.location ? <span className="opacity-50"> · {c.location}</span> : null}
+                        </li>
+                      );
+                    })}
                   </ul>
                 </section>
               )}
