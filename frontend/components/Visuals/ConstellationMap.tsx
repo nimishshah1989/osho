@@ -132,10 +132,10 @@ function NebulaPoints({
       (geometry.getAttribute('color') as THREE.BufferAttribute).needsUpdate = true;
     }
 
-    // Gentle autorotation only when not focused
-    if (focusedIdx < 0) {
-      mesh.rotation.y = clock.getElapsedTime() * 0.015;
-    }
+    // No autorotation: rotation desynchronises the cluster centroids from
+    // the camera target stored in CameraController, which made focused
+    // clusters drift off-screen and clicks land on empty space.
+    mesh.rotation.y = 0;
   });
 
   const geometry = useMemo(() => {
@@ -314,7 +314,7 @@ function RaycasterTuner({ focusedCluster }: { focusedCluster: string | null }) {
   useEffect(() => {
     // Bigger hit-radius when zoomed into a cluster makes individual stars
     // actually clickable at typical viewing distance.
-    raycaster.params.Points = { threshold: focusedCluster ? 5 : 2.5 };
+    raycaster.params.Points = { threshold: focusedCluster ? 8 : 2.5 };
   }, [focusedCluster, raycaster]);
   return null;
 }
