@@ -1,4 +1,4 @@
-"""O4 gate: /api/clusters returns named clusters per lens; /api/particle/{id} returns content + context."""
+"""Cluster + search endpoint coverage."""
 
 
 def test_clusters_themes(app_client):
@@ -17,7 +17,6 @@ def test_clusters_timeline_buckets_by_era(app_client):
     r = app_client.get("/api/clusters?lens=timeline")
     assert r.status_code == 200
     names = [c["name"] for c in r.json()["clusters"]]
-    # At least one valid era name present
     assert any(n in {"Bombay", "Poona I", "Rajneeshpuram", "Poona II"} for n in names)
 
 
@@ -26,19 +25,3 @@ def test_clusters_geography_uses_location(app_client):
     assert r.status_code == 200
     names = [c["name"] for c in r.json()["clusters"]]
     assert "Pune" in names or "Poona" in names or "Oregon" in names
-
-
-def test_particle_returns_content_and_context(app_client):
-    r = app_client.get("/api/particle/1")
-    assert r.status_code == 200
-    data = r.json()
-    assert data["id"] == 1
-    assert data["content"].startswith("Meditation")
-    assert data["event"]["title"].startswith("The Book of Secrets")
-    assert isinstance(data["context"], list)
-    assert len(data["context"]) >= 1
-
-
-def test_particle_404(app_client):
-    r = app_client.get("/api/particle/9999")
-    assert r.status_code == 404

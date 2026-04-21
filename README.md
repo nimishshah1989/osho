@@ -1,70 +1,97 @@
-# Osho Wisdom Engine
+# Osho Archive — Keyword Search
 
-A high-performance, scholarly-grade "Warm Brain" engine designed to synthesize Osho's teachings with sub-2s latency and robust multi-cloud resilience.
+A pure, distraction-free search engine over the complete discourses of Osho.
+No AI paraphrasing, no generated introductions — every word on screen is
+Osho's own. The engine runs BM25-ranked full-text search (SQLite FTS5) over
+~1.3M paragraphs and highlights matched terms inline so readers don't have to
+scan whole chapters.
 
 ## Architecture
 
-This project uses a **Split-Cloud Architecture**:
-1.  **Frontend**: Deployed on **Vercel** ([https://osho-zeta.vercel.app](https://osho-zeta.vercel.app)). It serves as a zero-noise, extremist minimalist interface.
-2.  **Backend**: Deployed on **AWS EC2** (`13.206.34.214`). It hosts the 1.3M paragraph ChromaDB index and the FastAPI streaming engine.
+A **Split-Cloud Architecture**:
+1. **Frontend**: Next.js on **Vercel** — <https://osho-zeta.vercel.app>.
+2. **Backend**: FastAPI on **AWS EC2** (`13.206.34.214:8000`), serving an
+   SQLite + FTS5 index of the full archive.
 
-### The Connectivity Link
-The frontend proxies requests to the backend via `frontend/app/api/ask/route.ts`. 
-- **Endpoint**: `http://13.206.34.214:8000/stream` (SSE Events).
+The frontend proxies search requests from `/api/ask` → backend `/api/search`.
 
-## Deployment & Portability
+## Search DSL
 
-### 1. Environment Configuration
-The engine requires a `.env` file in the root directory (or `/home/ubuntu/osho-speaks/.env`) with:
-```env
-GOOGLE_API_KEY='your_aistudio_key'  # Primary Engine (1500 req/day free)
-OPENROUTER_API_KEY='your_api_key'  # Resilient Failover Engine
-```
+Supported query syntax (passed through to SQLite FTS5):
+| Form | Meaning |
+|---|---|
+| `become silent` | any paragraph containing both words (ranked by BM25) |
+| `"become silent"` | exact phrase |
+| `NEAR(silence awareness)` | within 10 words |
+| `NEAR(silence awareness, 5)` | within 5 words |
+| `NEAR(silence awareness, 0)` | adjacent |
+| `zen OR tantra` | boolean OR |
+| `silenc*` | prefix wildcard (matches *silent*, *silence*) |
+| `title: vigyan` | restrict to paragraphs whose discourse title matches |
+| `NEAR("a b" c, 20)` | any of the above, composed |
 
-### 2. Backend Setup (EC2/Ubuntu)
+Results can be sorted by **rank** (default) or **title** (A→Z).
+
+## Deployment
+
+### Backend (EC2 / Ubuntu)
+
 ```bash
-# Clone the repository
-git clone <repo_url>
-cd osho-wisdom-engine
-
-# Initialize Virtual Environment
+git clone <repo_url> && cd osho
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-You also need the 1.3M-paragraph corpus. These files aren't in git:
-- `data/osho.db`       — SQLite with `events` + `paragraphs`
-- `data/chromadb/`     — ChromaDB persistent store
-rsync them onto the box before the next step.
+Place the corpus at `data/osho.db` (SQLite with `events` + `paragraphs`).
 
-### 3. Build the RAM-resident FAISS index (one-time)
-Retrieval runs out of an in-memory FAISS index instead of disk-backed
-ChromaDB — the difference is ~22s vs ~100ms per query. Build it once per
-host:
+**One-time:** build the FTS5 index inside the same DB.
+
 ```bash
-python3 scripts/build_faiss.py
+python3 scripts/build_fts.py
 ```
-This reads `data/chromadb/` and writes `data/faiss/index.faiss` +
-`data/faiss/meta.sqlite` (~2GB RAM at runtime). If these files are
-missing, `HybridSearcher` silently falls back to ChromaDB.
 
-### 4. Start the Engine
+This creates the `paragraphs_fts` virtual table (Porter stemming, unicode
+normalisation) used by `/api/search`.
+
+Start the service:
+
 ```bash
 sudo nohup ./.venv/bin/python3 -u -m uvicorn scripts.cloud_api:app \
   --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
 ```
-`-u` keeps Python stdout unbuffered so `tail -f backend.log` shows
-timing lines (`[search] backend=faiss embed=Xms query=Yms`) in real time.
 
-## Resilience Logic (Elite Bridge)
-The `scripts/openrouter_rag.py` implements a **Triple-Failover** system:
-- **Level 1**: Direct Google Gemini 1.5 Flash (Bypasses rate limits).
-- **Level 2**: NVIDIA Nemotron-3 Super (Failover for Google outages).
-- **Level 3**: OpenAI GPT-OSS + OpenRouter Auto-Fallback.
+### Frontend
 
-## Scholarly Guardrails
-The engine is strictly instructed to:
-- Provide multi-paragraph scholarly synthesis.
-- Use inline citations: `[Source: Book Name]`.
-- Conclude with a full Bibliography.
+```bash
+cd frontend
+npm install
+npm run build
+```
+
+Set `NEXT_PUBLIC_API_URL` (or `API_URL`) in Vercel to point at the EC2 host
+if it moves; the default is `http://13.206.34.214:8000`.
+
+## Endpoints
+
+- `GET /api/search?q=<query>&sort=rank|title&limit=200` — BM25-ranked hits,
+  grouped by discourse, top 3 paragraph matches per discourse.
+- `GET /api/discourse?event_id=<id>` — full paragraphs of a discourse.
+- `GET /api/catalog`, `GET /hierarchy`, `GET /api/clusters` — archive
+  navigation.
+- `GET /health` — status + FTS readiness.
+
+## Tests
+
+```bash
+pytest scripts/tests
+```
+
+Tests run against an in-memory SQLite fixture with FTS5 enabled — no
+dependency on the production archive.
+
+## Scholarly Promise
+
+Nothing on screen is generated by an LLM. Every returned paragraph is Osho
+verbatim, cited with its discourse title, date, and location. Matched terms
+are highlighted inline so the reader lands on the exact sentence.

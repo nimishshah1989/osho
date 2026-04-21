@@ -1,4 +1,4 @@
-"""Hierarchy endpoint + engine-status gate."""
+"""Hierarchy endpoint."""
 
 
 def test_hierarchy_shape(app_client):
@@ -27,11 +27,3 @@ def test_hierarchy_series_extraction(app_client):
             found = True
     assert found, f"expected series 'The Book of Secrets' in tree, got {list(tree)}"
 
-
-def test_engine_status(app_client):
-    r = app_client.get("/api/engine-status")
-    assert r.status_code == 200
-    data = r.json()
-    for key in ("google_key_present", "openrouter_key_present", "searcher_warm"):
-        assert key in data
-        assert isinstance(data[key], bool)
