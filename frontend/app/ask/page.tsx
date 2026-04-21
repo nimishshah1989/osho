@@ -38,9 +38,31 @@ interface DiscourseResponse {
 }
 
 type Sort = 'rank' | 'title';
+type Mode = 'phrase' | 'all' | 'near';
+
+const DEFAULT_PROX = 10;
 
 /**
- * Turn the user's DSL query into a list of highlight patterns.
+ * Transform the user's plain input into an FTS5 query per the chosen mode.
+ * `all` mode is passthrough — advanced users can still hand-type DSL
+ * (quotes, NEAR, OR, prefix*, title:).
+ */
+function buildQuery(raw: string, mode: Mode, prox: number): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (mode === 'phrase') {
+    return `"${trimmed.replace(/"/g, '')}"`;
+  }
+  if (mode === 'near') {
+    const words = trimmed.split(/\s+/).filter(Boolean);
+    if (words.length < 2) return trimmed;
+    return `NEAR(${words.join(' ')}, ${Math.max(0, prox)})`;
+  }
+  return trimmed;
+}
+
+/**
+ * Turn the FTS5 query into a list of highlight patterns.
  * Quoted phrases match literally; bare tokens match whole words
  * (or prefixes when trailing `*`).
  */
@@ -101,9 +123,18 @@ function AskPageInner() {
   const initialQuery = searchParams?.get('q') ?? '';
   const initialSort = (searchParams?.get('sort') as Sort) === 'title' ? 'title' : 'rank';
   const initialEvent = searchParams?.get('event') ?? '';
+  const initialModeParam = searchParams?.get('mode');
+  const initialMode: Mode =
+    initialModeParam === 'phrase' || initialModeParam === 'near' ? initialModeParam : 'all';
+  const initialProxParam = Number(searchParams?.get('prox'));
+  const initialProx = Number.isFinite(initialProxParam) && initialProxParam >= 0 && initialProxParam <= 100
+    ? initialProxParam
+    : DEFAULT_PROX;
 
   const [query, setQuery] = useState(initialQuery);
   const [submittedQuery, setSubmittedQuery] = useState(initialQuery);
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [proximity, setProximity] = useState<number>(initialProx);
   const [sort, setSort] = useState<Sort>(initialSort);
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -118,11 +149,13 @@ function AskPageInner() {
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
   const syncUrl = useCallback(
-    (q: string, s: Sort, event: string) => {
+    (q: string, s: Sort, event: string, m: Mode, prox: number) => {
       const params = new URLSearchParams();
       if (q) params.set('q', q);
       if (s !== 'rank') params.set('sort', s);
       if (event) params.set('event', event);
+      if (m !== 'all') params.set('mode', m);
+      if (m === 'near' && prox !== DEFAULT_PROX) params.set('prox', String(prox));
       const qs = params.toString();
       router.replace(qs ? `/ask?${qs}` : '/ask', { scroll: false });
     },
@@ -130,17 +163,19 @@ function AskPageInner() {
   );
 
   const runSearch = useCallback(
-    async (q: string, s: Sort) => {
-      if (!q.trim()) return;
+    async (rawQ: string, s: Sort, m: Mode, prox: number) => {
+      const fts = buildQuery(rawQ, m, prox);
+      if (!fts) return;
       setLoading(true);
       setError(null);
       try {
-        const r = await fetch(`/api/ask?q=${encodeURIComponent(q)}&sort=${s}`);
+        const r = await fetch(`/api/ask?q=${encodeURIComponent(fts)}&sort=${s}`);
         const body = (await r.json().catch(() => null)) as SearchResponse | { error?: string } | null;
         if (!r.ok) {
           const msg = (body && 'error' in body && body.error) || 'Archive unreachable.';
           throw new Error(msg);
         }
+        setSubmittedQuery(fts);
         setResults(body as SearchResponse);
       } catch (err) {
         setResults(null);
@@ -154,8 +189,7 @@ function AskPageInner() {
 
   useEffect(() => {
     if (initialQuery) {
-      setSubmittedQuery(initialQuery);
-      void runSearch(initialQuery, initialSort);
+      void runSearch(initialQuery, initialSort, initialMode, initialProx);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -193,24 +227,43 @@ function AskPageInner() {
     e.preventDefault();
     const q = query.trim();
     if (!q) return;
-    setSubmittedQuery(q);
     setSelectedEventId('');
-    syncUrl(q, sort, '');
-    void runSearch(q, sort);
+    syncUrl(q, sort, '', mode, proximity);
+    void runSearch(q, sort, mode, proximity);
   };
 
   const handleSortChange = (next: Sort) => {
     if (next === sort) return;
     setSort(next);
-    if (submittedQuery) {
-      syncUrl(submittedQuery, next, selectedEventId);
-      void runSearch(submittedQuery, next);
+    if (query.trim()) {
+      syncUrl(query.trim(), next, selectedEventId, mode, proximity);
+      void runSearch(query.trim(), next, mode, proximity);
+    }
+  };
+
+  const handleModeChange = (next: Mode) => {
+    if (next === mode) return;
+    setMode(next);
+    if (query.trim() && results) {
+      syncUrl(query.trim(), sort, '', next, proximity);
+      setSelectedEventId('');
+      void runSearch(query.trim(), sort, next, proximity);
+    }
+  };
+
+  const handleProximityChange = (next: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(next || 0)));
+    setProximity(clamped);
+    if (mode === 'near' && query.trim() && results) {
+      syncUrl(query.trim(), sort, '', mode, clamped);
+      setSelectedEventId('');
+      void runSearch(query.trim(), sort, mode, clamped);
     }
   };
 
   const selectEvent = (eventId: string) => {
     setSelectedEventId(eventId);
-    syncUrl(submittedQuery, sort, eventId);
+    syncUrl(query.trim(), sort, eventId, mode, proximity);
     // Scroll the right pane into view on mobile
     setTimeout(() => {
       detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -219,7 +272,7 @@ function AskPageInner() {
 
   const clearSelection = () => {
     setSelectedEventId('');
-    syncUrl(submittedQuery, sort, '');
+    syncUrl(query.trim(), sort, '', mode, proximity);
   };
 
   const selectedEvent = results?.events.find((e) => e.event_id === selectedEventId) ?? null;
@@ -237,7 +290,13 @@ function AskPageInner() {
               <input
                 type="text"
                 className="w-full bg-transparent border-b border-gold/30 py-3 pr-12 text-lg md:text-xl focus:border-gold outline-none font-serif italic placeholder:opacity-30"
-                placeholder='e.g.  "become silent"   ·   NEAR(silence awareness, 5)   ·   zen OR tantra   ·   title: vigyan'
+                placeholder={
+                  mode === 'phrase'
+                    ? 'e.g.  falling in love you remain a child'
+                    : mode === 'near'
+                      ? 'e.g.  misery attachment love'
+                      : 'e.g.  silence awareness · title: vigyan · zen OR tantra'
+                }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 aria-label="Search the archive"
@@ -253,7 +312,63 @@ function AskPageInner() {
               </button>
             </form>
 
-            <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-[10px] tracking-[0.3em] uppercase text-ivory/60">
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-[10px] tracking-[0.3em] uppercase text-ivory/60">
+              <div className="flex items-center gap-3">
+                <span>Match:</span>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange('phrase')}
+                  className={mode === 'phrase' ? 'text-gold' : 'hover:text-ivory'}
+                  aria-pressed={mode === 'phrase'}
+                >
+                  Exact phrase
+                </button>
+                <span className="opacity-30">|</span>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange('all')}
+                  className={mode === 'all' ? 'text-gold' : 'hover:text-ivory'}
+                  aria-pressed={mode === 'all'}
+                >
+                  All words
+                </button>
+                <span className="opacity-30">|</span>
+                <button
+                  type="button"
+                  onClick={() => handleModeChange('near')}
+                  className={mode === 'near' ? 'text-gold' : 'hover:text-ivory'}
+                  aria-pressed={mode === 'near'}
+                >
+                  Within N words
+                </button>
+              </div>
+
+              {mode === 'near' && (
+                <div className="flex items-center gap-2">
+                  <span>N =</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={proximity}
+                    onChange={(e) => handleProximityChange(Number(e.target.value))}
+                    className="w-14 bg-transparent border-b border-gold/30 text-gold text-center py-1 focus:border-gold outline-none"
+                    aria-label="Proximity window in words"
+                  />
+                  <span className="opacity-50">words</span>
+                  {[5, 10, 20].map((v) => (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => handleProximityChange(v)}
+                      className={proximity === v ? 'text-gold' : 'hover:text-ivory opacity-60'}
+                    >
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="flex items-center gap-3">
                 <span>Sort:</span>
                 <button
