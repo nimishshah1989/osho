@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Search, Loader2, BookOpen, ArrowLeft } from 'lucide-react';
 import Nav from '../../components/Nav';
+import { useLocale } from '../../lib/i18n';
 
 interface Hit {
   paragraph_id: number;
@@ -118,6 +119,7 @@ function Highlighted({ text, pattern }: { text: string; pattern: RegExp | null }
 }
 
 function AskPageInner() {
+  const { t } = useLocale();
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialQuery = searchParams?.get('q') ?? '';
@@ -284,7 +286,7 @@ function AskPageInner() {
         <div className="max-w-7xl mx-auto px-4 md:px-8">
           <header className="mb-6">
             <h1 className="text-sm tracking-[0.5em] uppercase text-gold opacity-70 mb-4">
-              Ask — Keyword Search
+              {t('ask.title')}
             </h1>
             <form onSubmit={handleSubmit} className="relative">
               <input
@@ -292,21 +294,21 @@ function AskPageInner() {
                 className="w-full bg-transparent border-b border-gold/30 py-3 pr-12 text-lg md:text-xl focus:border-gold outline-none font-serif italic placeholder:opacity-30"
                 placeholder={
                   mode === 'phrase'
-                    ? 'e.g.  falling in love you remain a child'
+                    ? t('ask.placeholder.phrase')
                     : mode === 'near'
-                      ? 'e.g.  misery attachment love'
-                      : 'e.g.  silence awareness · title: vigyan · zen OR tantra'
+                      ? t('ask.placeholder.near')
+                      : t('ask.placeholder.all')
                 }
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                aria-label="Search the archive"
+                aria-label={t('ask.submit')}
                 autoFocus
               />
               <button
                 type="submit"
                 className="absolute right-0 top-1/2 -translate-y-1/2 text-gold disabled:opacity-30"
                 disabled={loading || !query.trim()}
-                aria-label="Search"
+                aria-label={t('ask.submit')}
               >
                 {loading ? <Loader2 className="animate-spin" size={22} /> : <Search size={22} />}
               </button>
@@ -314,14 +316,14 @@ function AskPageInner() {
 
             <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-[10px] tracking-[0.3em] uppercase text-ivory/60">
               <div className="flex items-center gap-3">
-                <span>Match:</span>
+                <span>{t('ask.match')}:</span>
                 <button
                   type="button"
                   onClick={() => handleModeChange('phrase')}
                   className={mode === 'phrase' ? 'text-gold' : 'hover:text-ivory'}
                   aria-pressed={mode === 'phrase'}
                 >
-                  Exact phrase
+                  {t('ask.mode.phrase')}
                 </button>
                 <span className="opacity-30">|</span>
                 <button
@@ -330,7 +332,7 @@ function AskPageInner() {
                   className={mode === 'all' ? 'text-gold' : 'hover:text-ivory'}
                   aria-pressed={mode === 'all'}
                 >
-                  All words
+                  {t('ask.mode.all')}
                 </button>
                 <span className="opacity-30">|</span>
                 <button
@@ -339,13 +341,13 @@ function AskPageInner() {
                   className={mode === 'near' ? 'text-gold' : 'hover:text-ivory'}
                   aria-pressed={mode === 'near'}
                 >
-                  Within N words
+                  {t('ask.mode.near')}
                 </button>
               </div>
 
               {mode === 'near' && (
                 <div className="flex items-center gap-2">
-                  <span>N =</span>
+                  <span>{t('ask.prox.label')}</span>
                   <input
                     type="number"
                     min={0}
@@ -353,9 +355,9 @@ function AskPageInner() {
                     value={proximity}
                     onChange={(e) => handleProximityChange(Number(e.target.value))}
                     className="w-14 bg-transparent border-b border-gold/30 text-gold text-center py-1 focus:border-gold outline-none"
-                    aria-label="Proximity window in words"
+                    aria-label={t('ask.mode.near')}
                   />
-                  <span className="opacity-50">words</span>
+                  <span className="opacity-50">{t('ask.prox.suffix')}</span>
                   {[5, 10, 20].map((v) => (
                     <button
                       key={v}
@@ -370,13 +372,13 @@ function AskPageInner() {
               )}
 
               <div className="flex items-center gap-3">
-                <span>Sort:</span>
+                <span>{t('ask.sort')}:</span>
                 <button
                   type="button"
                   onClick={() => handleSortChange('rank')}
                   className={sort === 'rank' ? 'text-gold' : 'hover:text-ivory'}
                 >
-                  Rank
+                  {t('ask.sort.rank')}
                 </button>
                 <span className="opacity-30">|</span>
                 <button
@@ -384,12 +386,14 @@ function AskPageInner() {
                   onClick={() => handleSortChange('title')}
                   className={sort === 'title' ? 'text-gold' : 'hover:text-ivory'}
                 >
-                  Title
+                  {t('ask.sort.title')}
                 </button>
               </div>
               {results && (
                 <span className="text-ivory/70">
-                  {results.total} {results.total === 1 ? 'discourse' : 'discourses'} matched
+                  {t(results.total === 1 ? 'ask.results.one' : 'ask.results.many', {
+                    n: results.total,
+                  })}
                 </span>
               )}
             </div>
@@ -407,24 +411,24 @@ function AskPageInner() {
             >
               {!results && !loading && !error && (
                 <div className="p-6 text-sm text-ivory/60 font-serif italic">
-                  Search for a word or phrase to see every discourse where Osho spoke it.
+                  {t('ask.empty.pristine')}
                 </div>
               )}
               {loading && !results && (
                 <div className="p-6 text-sm text-ivory/60 flex items-center gap-2">
-                  <Loader2 className="animate-spin" size={14} /> searching…
+                  <Loader2 className="animate-spin" size={14} /> {t('ask.searching')}
                 </div>
               )}
               {results && results.events.length === 0 && (
                 <div className="p-6 text-sm text-ivory/60 font-serif italic">
-                  No discourses match this query.
+                  {t('ask.empty.none')}
                 </div>
               )}
               {results && results.events.length > 0 && (
                 <ul className="divide-y divide-gold/10">
                   <li className="sticky top-0 bg-black/90 backdrop-blur px-4 py-2 text-[9px] tracking-[0.4em] uppercase text-ivory/50 flex justify-between">
-                    <span>Discourse</span>
-                    <span>{sort === 'rank' ? 'Rank' : 'A→Z'}</span>
+                    <span>{t('ask.col.discourse')}</span>
+                    <span>{sort === 'rank' ? t('ask.col.rankShort') : t('ask.col.az')}</span>
                   </li>
                   {results.events.map((ev, i) => {
                     const active = ev.event_id === selectedEventId;
@@ -465,8 +469,8 @@ function AskPageInner() {
               {!selectedEvent && (
                 <div className="p-6 text-sm text-ivory/60 font-serif italic">
                   {results && results.events.length > 0
-                    ? 'Select a discourse on the left to read the matched passages.'
-                    : 'Matched passages — in Osho’s own words — will appear here.'}
+                    ? t('ask.detail.emptyWithResults')
+                    : t('ask.detail.emptyPristine')}
                 </div>
               )}
 
@@ -486,21 +490,21 @@ function AskPageInner() {
                         href={`/read?event_id=${encodeURIComponent(selectedEvent.event_id)}`}
                         className="text-[10px] tracking-[0.3em] uppercase text-gold/80 hover:text-gold inline-flex items-center gap-1"
                       >
-                        <BookOpen size={12} /> Full discourse
+                        <BookOpen size={12} /> {t('ask.detail.full')}
                       </Link>
                       <button
                         type="button"
                         onClick={clearSelection}
                         className="text-[10px] tracking-[0.3em] uppercase text-ivory/50 hover:text-ivory inline-flex items-center gap-1 md:hidden"
                       >
-                        <ArrowLeft size={12} /> Back
+                        <ArrowLeft size={12} /> {t('ask.detail.back')}
                       </button>
                     </div>
                   </div>
 
                   <div className="mb-6">
                     <h3 className="text-[10px] tracking-[0.4em] uppercase text-ivory/60 mb-3">
-                      Top matches
+                      {t('ask.detail.topMatches')}
                     </h3>
                     <ol className="space-y-4">
                       {selectedEvent.hits.map((h) => (
@@ -519,7 +523,7 @@ function AskPageInner() {
 
                   {discourseLoading && (
                     <div className="text-xs text-ivory/60 flex items-center gap-2">
-                      <Loader2 className="animate-spin" size={12} /> loading full discourse…
+                      <Loader2 className="animate-spin" size={12} /> {t('ask.detail.loadingFull')}
                     </div>
                   )}
                   {discourseError && (
@@ -528,7 +532,7 @@ function AskPageInner() {
                   {discourse && discourse.event.id === selectedEvent.event_id && (
                     <details className="mt-4 group">
                       <summary className="cursor-pointer text-[10px] tracking-[0.4em] uppercase text-gold/80 hover:text-gold select-none">
-                        Show entire discourse with matches highlighted ({discourse.paragraphs.length} ¶)
+                        {t('ask.detail.showAll', { n: discourse.paragraphs.length })}
                       </summary>
                       <div className="mt-4 space-y-3 font-serif text-ivory/90 leading-relaxed">
                         {discourse.paragraphs.map((p) => (

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, MessageCircle } from 'lucide-react';
 import Nav from '../../components/Nav';
+import { useLocale } from '../../lib/i18n';
 
 interface Paragraph {
   sequence_number: number;
@@ -22,6 +23,7 @@ interface DiscourseResponse {
 }
 
 function ReaderInner() {
+  const { t } = useLocale();
   const searchParams = useSearchParams();
   const title = searchParams?.get('title') ?? '';
   const eventId = searchParams?.get('event_id') ?? '';
@@ -65,7 +67,7 @@ function ReaderInner() {
     };
   }, [title, eventId]);
 
-  const headerTitle = data?.event.title ?? title ?? 'Discourse';
+  const headerTitle = data?.event.title ?? title ?? t('read.discourse');
 
   return (
     <>
@@ -76,7 +78,7 @@ function ReaderInner() {
             href="/"
             className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase text-ivory/70 hover:text-ivory transition-colors mb-10"
           >
-            <ArrowLeft size={12} /> Back to the Archive
+            <ArrowLeft size={12} /> {t('read.back')}
           </Link>
 
           <header className="mb-12 border-b border-gold/10 pb-8">
@@ -88,7 +90,12 @@ function ReaderInner() {
                 {data.event.date && <span className="text-gold">{data.event.date}</span>}
                 {data.event.location && <span>{data.event.location}</span>}
                 {data.paragraphs.length > 0 && (
-                  <span>{data.paragraphs.length} paragraphs</span>
+                  <span>
+                    {t(
+                      data.paragraphs.length === 1 ? 'read.paragraphs.one' : 'read.paragraphs.many',
+                      { n: data.paragraphs.length },
+                    )}
+                  </span>
                 )}
               </div>
             )}
@@ -96,28 +103,28 @@ function ReaderInner() {
 
           {loading && (
             <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/80">
-              Unfurling the discourse...
+              {t('read.loading')}
             </div>
           )}
 
           {error && !loading && (
             <div className="border border-gold/20 rounded-sm p-6">
               <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
-                Discourse unavailable
+                {t('read.error')}
               </div>
               <div className="text-sm font-serif italic text-ivory/85 mb-4">{error}</div>
               <Link
                 href={`/ask?q=${encodeURIComponent(title)}`}
                 className="inline-flex items-center gap-2 text-[10px] tracking-[0.4em] uppercase text-gold hover:opacity-100 opacity-85 transition-opacity"
               >
-                <MessageCircle size={12} /> Ask Osho about this instead
+                <MessageCircle size={12} /> {t('read.askInstead')}
               </Link>
             </div>
           )}
 
           {data && !loading && !error && data.paragraphs.length === 0 && (
             <div className="text-ivory/80 text-sm font-serif italic">
-              This discourse has no paragraphs indexed yet.
+              {t('read.empty')}
             </div>
           )}
 
