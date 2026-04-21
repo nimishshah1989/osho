@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { X } from 'lucide-react';
+import { useLocale } from '../../lib/i18n';
 
 interface Event {
   id: string;
@@ -121,6 +122,7 @@ function prepare(events: Event[]): Prepared {
 }
 
 export default function Constellation() {
+  const { t } = useLocale();
   const [events, setEvents] = useState<Event[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -163,12 +165,14 @@ export default function Constellation() {
       <main className="min-h-screen bg-black text-ivory pt-32 px-8">
         {error ? (
           <div className="max-w-md border border-gold/20 rounded-sm p-6">
-            <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">Constellation unavailable</div>
+            <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
+              {t('constellation.error')}
+            </div>
             <div className="text-sm font-serif italic text-ivory/85">{error}</div>
           </div>
         ) : (
           <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/80">
-            Unfolding the Constellation...
+            {t('constellation.loading')}
           </div>
         )}
       </main>
@@ -208,12 +212,10 @@ export default function Constellation() {
     <main className="min-h-screen bg-black text-ivory selection:bg-gold/30">
       <div className="max-w-6xl mx-auto pt-28 md:pt-32 pb-20 px-6 md:px-8">
         <h1 className="text-3xl md:text-4xl font-serif italic mb-3 text-white tracking-wide">
-          The Constellation
+          {t('constellation.title')}
         </h1>
         <p className="text-sm text-ivory/85 mb-8 max-w-2xl">
-          Every talk placed at the intersection of <span className="text-gold">time</span>,{' '}
-          <span className="text-gold">place</span>, and <span className="text-gold">theme</span>.
-          Click a cluster to read the talks inside.
+          {t('constellation.lead')}
         </p>
 
         <div className="flex flex-wrap gap-2 mb-8">
@@ -304,8 +306,11 @@ export default function Constellation() {
                   onClick={() => setSelected(cell)}
                 >
                   <title>
-                    {cell.theme} · {cell.place} · {cell.year} · {cell.events.length} talk
-                    {cell.events.length === 1 ? '' : 's'}
+                    {cell.theme} · {cell.place} · {cell.year} ·{' '}
+                    {t(
+                      cell.events.length === 1 ? 'constellation.talks.one' : 'constellation.talks.many',
+                      { n: cell.events.length },
+                    )}
                   </title>
                 </circle>
               );
@@ -314,7 +319,7 @@ export default function Constellation() {
         </div>
 
         <div className="mt-3 text-[10px] tracking-[0.2em] uppercase text-ivory/60">
-          Dot size ∝ number of talks · Theme toggles above hide/show.
+          {t('constellation.legend')}
         </div>
       </div>
 
@@ -327,12 +332,15 @@ export default function Constellation() {
                   {selected.theme} · {selected.place} · {selected.year}
                 </div>
                 <div className="text-xs text-ivory/70">
-                  {selected.events.length} talk{selected.events.length === 1 ? '' : 's'}
+                  {t(
+                    selected.events.length === 1 ? 'constellation.talks.one' : 'constellation.talks.many',
+                    { n: selected.events.length },
+                  )}
                 </div>
               </div>
               <button
                 onClick={() => setSelected(null)}
-                aria-label="Close"
+                aria-label={t('constellation.close')}
                 className="text-ivory/70 hover:text-ivory transition-colors"
               >
                 <X size={18} />

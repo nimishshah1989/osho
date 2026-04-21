@@ -11,6 +11,7 @@ import {
   Globe2,
   Sparkles,
 } from 'lucide-react';
+import { useLocale } from '../../lib/i18n';
 
 interface Event {
   id: string;
@@ -25,11 +26,11 @@ interface CatalogResponse {
 
 type Lens = 'time' | 'era' | 'geography' | 'theme';
 
-const LENS_BUTTONS: { id: Lens; label: string; Icon: typeof Calendar }[] = [
-  { id: 'time', label: 'By Year', Icon: Calendar },
-  { id: 'era', label: 'By Era', Icon: Clock },
-  { id: 'geography', label: 'By Place', Icon: Globe2 },
-  { id: 'theme', label: 'By Theme', Icon: Sparkles },
+const LENS_BUTTONS: { id: Lens; i18nKey: string; Icon: typeof Calendar }[] = [
+  { id: 'time', i18nKey: 'archive.lens.time', Icon: Calendar },
+  { id: 'era', i18nKey: 'archive.lens.era', Icon: Clock },
+  { id: 'geography', i18nKey: 'archive.lens.geography', Icon: Globe2 },
+  { id: 'theme', i18nKey: 'archive.lens.theme', Icon: Sparkles },
 ];
 
 const ERA_ORDER = ['Bombay', 'Poona I', 'Rajneeshpuram', 'Poona II', 'Undated'];
@@ -79,7 +80,7 @@ interface SeriesGroup {
 
 interface Bucket {
   label: string;
-  meta: string;
+  count: number;
   series: SeriesGroup[];
 }
 
@@ -106,7 +107,7 @@ function bucketsFromEvents(events: Event[], bucketKey: (e: Event) => string, ord
       name: s,
       talks: bySeries.get(s)!.slice().sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '') || a.title.localeCompare(b.title)),
     }));
-    return { label: k, meta: `${talks.length} talk${talks.length === 1 ? '' : 's'}`, series };
+    return { label: k, count: talks.length, series };
   });
 }
 
@@ -142,6 +143,7 @@ function buildBuckets(events: Event[], lens: Lens): Bucket[] {
 }
 
 export default function TreeExplorer() {
+  const { t } = useLocale();
   const [events, setEvents] = useState<Event[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -197,16 +199,15 @@ export default function TreeExplorer() {
       <div className="max-w-5xl mx-auto pt-32 pb-20 px-6 md:px-8">
         <div className="mb-10">
           <h1 className="text-4xl md:text-5xl font-serif italic mb-6 text-white tracking-wide">
-            The Archive
+            {t('archive.title')}
           </h1>
           <p className="max-w-2xl text-sm leading-relaxed text-ivory/85">
-            Every indexed discourse, grouped by the lens of your choice. Click any talk to read it
-            in full.
+            {t('archive.lead')}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-10 border-b border-gold/10 pb-3">
-          {LENS_BUTTONS.map(({ id, label, Icon }) => (
+          {LENS_BUTTONS.map(({ id, i18nKey, Icon }) => (
             <button
               key={id}
               onClick={() => setLens(id)}
@@ -218,21 +219,21 @@ export default function TreeExplorer() {
               }`}
             >
               <Icon size={12} />
-              {label}
+              {t(i18nKey)}
             </button>
           ))}
         </div>
 
         {loading && (
           <div className="animate-pulse text-[10px] tracking-[0.5em] uppercase text-gold/80">
-            Unfolding the Archive...
+            {t('archive.loading')}
           </div>
         )}
 
         {error && !loading && (
           <div className="border border-gold/20 rounded-sm p-6">
             <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
-              Archive unavailable
+              {t('archive.error')}
             </div>
             <div className="text-sm font-serif italic text-ivory/85">{error}</div>
           </div>
@@ -240,7 +241,7 @@ export default function TreeExplorer() {
 
         {!loading && !error && buckets.length === 0 && (
           <div className="text-ivory/80 text-sm font-serif italic">
-            The archive appears empty.
+            {t('archive.empty')}
           </div>
         )}
 
@@ -260,7 +261,9 @@ export default function TreeExplorer() {
                     <span className="text-2xl font-serif italic text-gold">{bucket.label}</span>
                     <div className="h-[1px] w-12 bg-gold/10 group-hover:w-20 transition-all" />
                     <span className="text-[9px] tracking-[0.3em] uppercase text-ivory/70">
-                      {bucket.meta}
+                      {t(bucket.count === 1 ? 'archive.talks.one' : 'archive.talks.many', {
+                        n: bucket.count,
+                      })}
                     </span>
                   </div>
                   {expanded.has(bucket.label) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
