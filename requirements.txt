@@ -1,12 +1,6 @@
 fastapi
 uvicorn
-httpx
-google-generativeai
-python-dotenv
-sentence-transformers
-chromadb
-faiss-cpu
-numpy
 pydantic
-openai
+python-dotenv
 pytest
+httpx

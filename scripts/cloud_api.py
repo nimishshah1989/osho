@@ -1,20 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import sys
 import os
-import json
+import re
 import sqlite3
 from collections import Counter
 from contextlib import asynccontextmanager
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.append(BASE_DIR)
-
-from scripts.search import HybridSearcher
-from scripts.openrouter_rag import ask_osho_stream
-
 DB_PATH = os.path.join(BASE_DIR, 'data/osho.db')
 
 ALLOWED_ORIGINS = [
@@ -23,7 +16,6 @@ ALLOWED_ORIGINS = [
     if o.strip()
 ]
 
-# Cluster palette reused across lenses
 LENS_PALETTE = {
     "Meditation":    "#f59e0b",
     "Zen":           "#10b981",
@@ -62,25 +54,28 @@ def _era_from_date(raw: str) -> str:
     return "Poona II"
 
 
-searcher = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global searcher
-    try:
-        print("Wisdom Engine: Loading discourse index into RAM...")
-        searcher = HybridSearcher()
-        searcher.warmup()
-        print("Wisdom Engine: Warm and ready for scholarly synthesis.")
-    except Exception as e:
-        print(f"Wisdom Engine: Failed to ignite. Error: {str(e)}")
+    if not os.path.exists(DB_PATH):
+        print(f"WARNING: DB not found at {DB_PATH}", flush=True)
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        has_fts = cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paragraphs_fts'"
+        ).fetchone()
+        conn.close()
+        if has_fts:
+            print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
+        else:
+            print(
+                "Ask Engine: paragraphs_fts missing — run scripts/build_fts.py.",
+                flush=True,
+            )
     yield
-    if searcher:
-        searcher.close()
 
 
-app = FastAPI(title="Osho Wisdom Engine API", lifespan=lifespan)
+app = FastAPI(title="Osho Archive API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -91,33 +86,19 @@ app.add_middleware(
 )
 
 
-class QueryRequest(BaseModel):
-    query: str
-
-
-def _sse(event: str, data: dict) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
 @app.get("/health")
 def health():
-    return {
-        "status": "present",
-        "engine": "Osho Speaks..",
-        "warm": searcher is not None,
-        "index_size": "1.3M Fragments",
-    }
-
-
-@app.get("/api/engine-status")
-def engine_status():
-    """Surface which RAG engines are configured so /ask failures are debuggable."""
-    from scripts import openrouter_rag
-    return {
-        "google_key_present": bool(getattr(openrouter_rag, "GOOGLE_API_KEY", None)),
-        "openrouter_key_present": bool(getattr(openrouter_rag, "OPENROUTER_API_KEY", None)),
-        "searcher_warm": searcher is not None,
-    }
+    ok = os.path.exists(DB_PATH)
+    fts_ready = False
+    if ok:
+        conn = sqlite3.connect(DB_PATH)
+        fts_ready = bool(
+            conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paragraphs_fts'"
+            ).fetchone()
+        )
+        conn.close()
+    return {"status": "present", "db": ok, "fts": fts_ready}
 
 
 def _series_from_title(title: str) -> str:
@@ -128,36 +109,8 @@ def _series_from_title(title: str) -> str:
     return title.strip()
 
 
-@app.get("/hierarchy")
-def hierarchy():
-    """Returns {year: {series: [talk_title, ...]}} for the /map tree view."""
-    if not os.path.exists(DB_PATH):
-        return {}
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT title, date FROM events WHERE title IS NOT NULL")
-
-    tree: dict = {}
-    for r in cur.fetchall():
-        raw_date = r["date"] or ""
-        year = raw_date[:4]
-        if not year.isdigit():
-            year = "Undated"
-        series = _series_from_title(r["title"])
-        tree.setdefault(year, {}).setdefault(series, []).append(r["title"])
-
-    conn.close()
-    # Sort talks within each series for stable display
-    for y in tree:
-        for s in tree[y]:
-            tree[y][s].sort()
-    return tree
-
-
 @app.get("/api/catalog")
 def catalog():
-    """Flat list of every indexed event — the frontend groups by lens client-side."""
     if not os.path.exists(DB_PATH):
         return {"events": []}
     conn = sqlite3.connect(DB_PATH)
@@ -174,81 +127,135 @@ def catalog():
     return {"events": events}
 
 
-@app.post("/ask")
-async def ask(request: QueryRequest):
-    if not searcher:
-        raise HTTPException(status_code=503, detail="The Engine is still cold.")
+# ---------- Keyword search (pure Osho; no LLM) ----------
+
+# Users type `title : vigyan` (reference app syntax). FTS5 needs `title_search:vigyan`.
+_TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
+
+
+def _rewrite_query(user_query: str) -> str:
+    """Minimal rewrite from the reference app's DSL to FTS5 MATCH syntax.
+
+    All supported operators (phrase "...", NEAR, OR, prefix *) are already
+    valid FTS5 syntax — only `title:` needs mapping to our column name.
+    """
+    return _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
+
+
+@app.get("/api/search")
+def search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(200, ge=1, le=500),
+    sort: str = Query('rank', pattern='^(rank|title)$'),
+):
+    """Keyword search with BM25 ranking, phrase / NEAR / OR / prefix / title: support.
+
+    Returns events sorted by rank (or alphabetical by title). For each event
+    the top 3 matching paragraphs are included so the client can show the
+    first match expanded and link to the rest.
+    """
+    if not os.path.exists(DB_PATH):
+        raise HTTPException(status_code=503, detail="Archive unavailable.")
+
+    fts_query = _rewrite_query(q)
+    if not fts_query:
+        raise HTTPException(status_code=400, detail="Empty query.")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+
     try:
-        context = searcher.search(request.query, n_results=5)
-        wisdom = ""
-        async for chunk in ask_osho_stream(request.query, context):
-            wisdom += chunk
-        return {"wisdom": wisdom, "citations": _citations(context)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Top paragraph hit per event — grouped via a correlated subquery so
+        # "rank" on the outer is the best paragraph score within each event.
+        rows = conn.execute(
+            """
+            SELECT
+                f.event_id,
+                f.paragraph_id,
+                f.sequence_number,
+                f.content,
+                f.title,
+                e.date,
+                e.location,
+                bm25(paragraphs_fts) AS rank
+            FROM paragraphs_fts f
+            LEFT JOIN events e ON e.id = f.event_id
+            WHERE paragraphs_fts MATCH ?
+            ORDER BY rank
+            LIMIT ?
+            """,
+            (fts_query, limit * 5),
+        ).fetchall()
+    except sqlite3.OperationalError as ex:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Invalid query: {ex}")
 
-
-def _citations(context):
-    seen = set()
-    out = []
-    for r in context:
-        key = (r.get("event_title"), r.get("event_date"))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({
-            "id": r.get("id"),
-            "event_id": r.get("event_id"),
-            "title": r.get("event_title"),
-            "date": r.get("event_date"),
-            "location": r.get("event_location"),
-            "source_url": r.get("source_url"),
-        })
-    return out
-
-
-@app.post("/stream")
-async def stream_wisdom(request: QueryRequest):
-    """SSE endpoint emitting event:wisdom chunks, event:citation entries, and a final event:retrieved event."""
-    if not searcher:
-        raise HTTPException(status_code=503, detail="The Engine is still cold.")
-
-    import time
-    t0 = time.perf_counter()
-    context_results = searcher.search(request.query, n_results=5)
-    retrieval_ms = int((time.perf_counter() - t0) * 1000)
-    print(f"[stream] retrieval={retrieval_ms}ms n={len(context_results)} query={request.query!r}")
-
-    async def event_stream():
-        first_chunk_logged = False
-        t_gen = time.perf_counter()
-        try:
-            async for chunk in ask_osho_stream(request.query, context_results):
-                if chunk:
-                    if not first_chunk_logged:
-                        ttft_ms = int((time.perf_counter() - t_gen) * 1000)
-                        print(f"[stream] ttft={ttft_ms}ms")
-                        first_chunk_logged = True
-                    yield _sse("wisdom", {"chunk": chunk})
-            for c in _citations(context_results):
-                yield _sse("citation", c)
-            yield _sse("retrieved", {
-                "ids": [r["id"] for r in context_results if r.get("id") is not None]
+    # Group by event, keep up to 3 paragraph hits per event (first is the
+    # highest-ranked). Event rank = best paragraph rank.
+    events: dict = {}
+    for r in rows:
+        ev_id = r["event_id"]
+        if ev_id not in events:
+            events[ev_id] = {
+                "event_id": ev_id,
+                "title": r["title"],
+                "date": r["date"],
+                "location": r["location"],
+                "rank": r["rank"],
+                "hits": [],
+            }
+        if len(events[ev_id]["hits"]) < 3:
+            events[ev_id]["hits"].append({
+                "paragraph_id": r["paragraph_id"],
+                "sequence_number": r["sequence_number"],
+                "content": r["content"],
             })
-            yield _sse("done", {"ok": True})
-        except Exception as e:
-            yield _sse("error", {"message": str(e)})
 
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    # Count distinct events (not just returned ones)
+    try:
+        (total_events,) = conn.execute(
+            """
+            SELECT COUNT(DISTINCT event_id) FROM paragraphs_fts
+            WHERE paragraphs_fts MATCH ?
+            """,
+            (fts_query,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        total_events = len(events)
+    conn.close()
+
+    out = list(events.values())[:limit]
+    if sort == 'title':
+        out.sort(key=lambda e: (e["title"] or "").lower())
+    # bm25() returns lower-is-better; already sorted that way from the query.
+    return {"query": q, "total": total_events, "events": out}
+
+
+@app.get("/hierarchy")
+def hierarchy():
+    if not os.path.exists(DB_PATH):
+        return {}
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT title, date FROM events WHERE title IS NOT NULL")
+    tree: dict = {}
+    for r in cur.fetchall():
+        raw_date = r["date"] or ""
+        year = raw_date[:4]
+        if not year.isdigit():
+            year = "Undated"
+        series = _series_from_title(r["title"])
+        tree.setdefault(year, {}).setdefault(series, []).append(r["title"])
+    conn.close()
+    for y in tree:
+        for s in tree[y]:
+            tree[y][s].sort()
+    return tree
 
 
 @app.get("/api/clusters")
 def clusters(lens: str = "themes", limit: int = 20):
-    """Cluster metadata per lens. Pulls from SQLite events table."""
     if not os.path.exists(DB_PATH):
         return {"lens": lens, "clusters": []}
     conn = sqlite3.connect(DB_PATH)
@@ -264,13 +271,15 @@ def clusters(lens: str = "themes", limit: int = 20):
             for name in order if buckets[name] > 0
         ]
     elif lens == "geography":
-        cur.execute("SELECT location, COUNT(*) c FROM events WHERE location IS NOT NULL GROUP BY location ORDER BY c DESC LIMIT ?", (limit,))
+        cur.execute(
+            "SELECT location, COUNT(*) c FROM events WHERE location IS NOT NULL GROUP BY location ORDER BY c DESC LIMIT ?",
+            (limit,),
+        )
         clusters_out = [
             {"name": r["location"] or "Unknown", "size": r["c"], "color": _palette(r["location"] or "Unknown")}
             for r in cur.fetchall()
         ]
     else:
-        # Themes / Concepts — derived from event titles via lightweight keyword match
         keywords = {
             "Meditation": ["meditation", "dhyan", "silence"],
             "Zen": ["zen", "bodhidharma", "hsin hsin ming"],
@@ -302,11 +311,6 @@ def clusters(lens: str = "themes", limit: int = 20):
 
 @app.get("/api/discourse")
 def discourse(title: str | None = None, event_id: str | None = None):
-    """Return full paragraphs for one talk, keyed by either exact title or event id.
-
-    When multiple events share a title (re-runs, re-edits) the earliest-dated
-    one wins — the reader can still drill into a specific id via `event_id`.
-    """
     if not title and not event_id:
         raise HTTPException(status_code=400, detail="Provide title or event_id")
     if not os.path.exists(DB_PATH):
@@ -329,11 +333,11 @@ def discourse(title: str | None = None, event_id: str | None = None):
         raise HTTPException(status_code=404, detail="Discourse not found")
 
     cur.execute(
-        "SELECT sequence_number, content FROM paragraphs WHERE event_id = ? ORDER BY sequence_number",
+        "SELECT id, sequence_number, content FROM paragraphs WHERE event_id = ? ORDER BY sequence_number",
         (ev["id"],),
     )
     paragraphs = [
-        {"sequence_number": r["sequence_number"], "content": r["content"]}
+        {"id": r["id"], "sequence_number": r["sequence_number"], "content": r["content"]}
         for r in cur.fetchall()
     ]
     conn.close()
@@ -346,47 +350,6 @@ def discourse(title: str | None = None, event_id: str | None = None):
             "location": ev["location"],
         },
         "paragraphs": paragraphs,
-    }
-
-
-@app.get("/api/particle/{pid}")
-def particle(pid: str):
-    """Full paragraph + neighbors for a given paragraph id."""
-    if not os.path.exists(DB_PATH):
-        raise HTTPException(status_code=404, detail="Particle store unavailable")
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT id, event_id, sequence_number, content FROM paragraphs WHERE id = ?", (pid,))
-    row = cur.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Particle not found")
-
-    cur.execute("SELECT title, date, location FROM events WHERE id = ?", (row["event_id"],))
-    ev = cur.fetchone()
-
-    cur.execute(
-        "SELECT id, sequence_number, content FROM paragraphs WHERE event_id = ? AND sequence_number BETWEEN ? AND ? ORDER BY sequence_number",
-        (row["event_id"], max(0, row["sequence_number"] - 1), row["sequence_number"] + 1),
-    )
-    context = [
-        {"id": r["id"], "sequence_number": r["sequence_number"], "content": r["content"]}
-        for r in cur.fetchall()
-    ]
-    conn.close()
-
-    return {
-        "id": row["id"],
-        "content": row["content"],
-        "sequence_number": row["sequence_number"],
-        "event": {
-            "id": row["event_id"],
-            "title": ev["title"] if ev else None,
-            "date": ev["date"] if ev else None,
-            "location": ev["location"] if ev else None,
-        },
-        "context": context,
     }
 
 

@@ -5,42 +5,30 @@ export const dynamic = 'force-dynamic';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? process.env.API_URL ?? 'http://13.206.34.214:8000';
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const q = searchParams.get('q');
+  const sort = searchParams.get('sort') ?? 'rank';
+
+  if (!q || typeof q !== 'string' || !q.trim()) {
+    return NextResponse.json({ error: 'No query provided' }, { status: 400 });
+  }
+
   try {
-    const { query } = await req.json();
-
-    if (!query || typeof query !== 'string') {
-      return NextResponse.json({ error: 'No query provided' }, { status: 400 });
-    }
-
-    const upstream = await fetch(`${API_BASE}/stream`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
-      cache: 'no-store',
-    });
-
-    if (!upstream.ok || !upstream.body) {
-      const detail = await upstream.text().catch(() => '');
+    const upstream = await fetch(
+      `${API_BASE}/api/search?q=${encodeURIComponent(q)}&sort=${encodeURIComponent(sort)}`,
+      { cache: 'no-store' },
+    );
+    const body = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
       return NextResponse.json(
-        { error: 'A cloud has obscured the moon. Synthesis failed.', detail },
+        { error: (body && body.detail) || 'Archive unreachable.' },
         { status: upstream.status || 502 },
       );
     }
-
-    return new Response(upstream.body, {
-      headers: {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache, no-transform',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      },
-    });
+    return NextResponse.json(body);
   } catch (error) {
     console.error('Ask proxy failed:', error);
-    return NextResponse.json(
-      { error: 'A cloud has obscured the moon. Synthesis failed.' },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: 'Archive unreachable.' }, { status: 502 });
   }
 }
