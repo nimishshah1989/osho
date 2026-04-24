@@ -9,11 +9,12 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        gold: '#d4af37',
+        // CSS-variable-driven: dark mode uses warm gold, light mode uses darker amber
+        // so opacity modifiers (text-gold/60 etc.) still work correctly
+        gold: 'rgb(var(--gold) / <alpha-value>)',
         ivory: '#faf9f6',
       },
       fontFamily: {
-        // Single font family throughout — no serifs, no italics
         sans: ['var(--font-inter)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         serif: ['var(--font-inter)', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
       },

@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search, Loader2, BookOpen, ArrowLeft, Languages } from 'lucide-react';
+import { Search, Loader2, BookOpen, ArrowLeft } from 'lucide-react';
 import Nav from '../components/Nav';
 import { useLocale } from '../lib/i18n';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
@@ -144,11 +144,12 @@ function SearchPageInner() {
   const [discourseLoading, setDiscourseLoading] = useState(false);
   const [discourseError, setDiscourseError] = useState<string | null>(null);
 
-  // Transliteration mode (only relevant when locale === 'hi')
-  const [translitMode, setTranslitMode] = useState(false);
+  // In Hindi mode: auto-apply transliteration whenever the input looks Roman (has ASCII letters).
+  // The user doesn't need to toggle anything — typing Roman in Hindi mode just works.
+  const looksRoman = locale === 'hi' && /[a-zA-Z]/.test(query);
   const devanagariPreview = useMemo(
-    () => (translitMode && query ? romanToDevanagari(query) : ''),
-    [translitMode, query],
+    () => (looksRoman ? romanToDevanagari(query) : ''),
+    [looksRoman, query],
   );
 
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -236,8 +237,8 @@ function SearchPageInner() {
     const raw = query.trim();
     if (!raw) return;
 
-    // In transliteration mode, convert Roman → Devanagari and expand anusvara variants
-    const searchTerm = translitMode && locale === 'hi'
+    // In Hindi mode, auto-convert Roman input → Devanagari with anusvara expansion
+    const searchTerm = locale === 'hi' && /[a-zA-Z]/.test(raw)
       ? buildHindiFtsQuery(romanToDevanagari(raw))
       : raw;
 
@@ -299,7 +300,7 @@ function SearchPageInner() {
 
   const selectedEvent = results?.events.find((e) => e.event_id === selectedEventId) ?? null;
 
-  const placeholder = translitMode
+  const placeholder = locale === 'hi'
     ? t('search.placeholder.roman')
     : mode === 'phrase'
       ? t('search.placeholder.phrase')
@@ -338,13 +339,13 @@ function SearchPageInner() {
               </button>
             </form>
 
-            {/* Hindi transliteration preview */}
-            {translitMode && locale === 'hi' && devanagariPreview && (
-              <div className="mt-2 text-sm text-gold/80 flex items-center gap-2">
+            {/* Auto transliteration preview — shown whenever Hindi locale + Roman input */}
+            {devanagariPreview && (
+              <div className="mt-2 text-sm text-gold flex items-center gap-2">
                 <span className="text-[9px] tracking-[0.3em] uppercase opacity-60">
-                  {t('search.translit.preview')}
+                  {t('search.translit.preview')} →
                 </span>
-                <span>{devanagariPreview}</span>
+                <span className="font-medium">{devanagariPreview}</span>
               </div>
             )}
 
@@ -413,19 +414,6 @@ function SearchPageInner() {
                   {t('search.sort.title')}
                 </button>
               </div>
-
-              {/* Hindi transliteration toggle */}
-              {locale === 'hi' && (
-                <button
-                  type="button"
-                  onClick={() => setTranslitMode((v) => !v)}
-                  className={`flex items-center gap-1.5 ${translitMode ? 'text-gold' : 'hover:text-stone-900 dark:hover:text-ivory'}`}
-                  aria-pressed={translitMode}
-                >
-                  <Languages size={11} />
-                  {t('search.translit.toggle')}
-                </button>
-              )}
 
               {results && (
                 <span className="text-stone-600 dark:text-ivory/70">
