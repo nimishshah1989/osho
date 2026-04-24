@@ -4,27 +4,21 @@
 
 /* ── Theme tokens ─────────────────────────────────────────── */
 :root {
-  /* Light mode (default — dark class overrides below) */
+  /* Light mode defaults */
   --bg: 248, 247, 244;
-  --bg-nav: 248, 247, 244;
-  --bg-panel: 0, 0, 0;
-  --bg-sticky: 248, 247, 244;
   --fg: 28, 25, 23;
-  --fg-muted: 28, 25, 23;
-  --border-subtle: 212, 175, 55;
-
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
-  --gold: 212, 175, 55;
+
+  /* Darker amber in light mode — #7a5c00 → good contrast on white (≈5.8:1) */
+  --gold: 122 92 0;
 }
 
 .dark {
   --bg: 0, 0, 0;
-  --bg-nav: 0, 0, 0;
-  --bg-panel: 255, 255, 255;
-  --bg-sticky: 0, 0, 0;
   --fg: 250, 249, 246;
-  --fg-muted: 250, 249, 246;
-  --border-subtle: 212, 175, 55;
+
+  /* Original warm gold on dark backgrounds */
+  --gold: 212 175 55;
 }
 
 /* ── Base ─────────────────────────────────────────────────── */
@@ -39,31 +33,27 @@ body {
   font-style: normal;
 }
 
-/* Globally suppress italic — design calls for straight type only */
+/* No italics anywhere — design calls for straight type only */
 * {
   font-style: normal !important;
 }
 
 /* ── Utilities ────────────────────────────────────────────── */
 .glass-panel {
-  background: rgba(var(--bg-panel), 0.02);
+  background: rgba(var(--fg), 0.02);
   backdrop-filter: blur(8px);
 }
 
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(var(--bg-panel), 0.02);
-}
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: rgba(var(--fg), 0.02); }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(212, 175, 55, 0.2);
+  background: rgb(var(--gold) / 0.25);
   border-radius: 10px;
 }
 
-/* ── Prose styles used in the reader ─────────────────────── */
+/* ── Prose — reader page ──────────────────────────────────── */
 .prose-osho {
   font-family: var(--font-sans);
   line-height: 1.9;
-  color: rgba(var(--fg), 0.93);
+  color: rgb(var(--fg) / 0.93);
 }
