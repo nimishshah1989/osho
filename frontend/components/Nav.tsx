@@ -22,12 +22,13 @@ export default function Nav() {
     }`;
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 px-5 md:px-8 py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
+    <nav className="fixed top-0 inset-x-0 z-50 px-4 md:px-8 py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
 
       {/* Left cluster: Search · Lang · Theme */}
-      <div className="flex items-center gap-4 md:gap-6">
+      <div className="flex items-center gap-3 md:gap-6">
         <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={linkClass('/')}>
-          <Search size={12} /> {t('nav.search')}
+          <Search size={12} />
+          <span className="hidden sm:inline">{t('nav.search')}</span>
         </Link>
 
         {/* Language toggle */}
@@ -68,19 +69,21 @@ export default function Nav() {
           type="button"
           onClick={toggleTheme}
           aria-label={theme === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
-          className="text-stone-500 dark:text-ivory/55 hover:text-gold dark:hover:text-gold transition-colors pl-1"
+          className="text-stone-500 dark:text-ivory/55 hover:text-gold dark:hover:text-gold transition-colors"
         >
           {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
         </button>
       </div>
 
       {/* Right cluster: Archive · Constellation */}
-      <div className="flex items-center gap-5 md:gap-8">
+      <div className="flex items-center gap-4 md:gap-8">
         <Link href="/archive" aria-current={isActive('/archive') ? 'page' : undefined} className={linkClass('/archive')}>
-          <Library size={12} /> {t('nav.archive')}
+          <Library size={12} />
+          <span className="hidden sm:inline">{t('nav.archive')}</span>
         </Link>
         <Link href="/constellation" aria-current={isActive('/constellation') ? 'page' : undefined} className={linkClass('/constellation')}>
-          <Sparkles size={12} /> {t('nav.constellation')}
+          <Sparkles size={12} />
+          <span className="hidden sm:inline">{t('nav.constellation')}</span>
         </Link>
       </div>
     </nav>
