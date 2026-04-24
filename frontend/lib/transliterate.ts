@@ -23,7 +23,8 @@ const CONSONANTS: [string, string][] = [
   ['Sh',  'ष'],
   ['sh',  'श'],
   ['ng',  'ङ'],
-  ['ny',  'ञ'],
+  // 'ny' omitted — ञ is vanishingly rare in Hindi; greedy match causes न+य splits
+  // to misbehave in common words like 'sannyas'. Users can type ञ directly.
   ['T',   'ट'],
   ['D',   'ड'],
   ['N',   'ण'],
