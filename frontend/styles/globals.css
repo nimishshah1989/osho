@@ -2,46 +2,68 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme tokens ─────────────────────────────────────────── */
 :root {
-  --background: 0, 0, 0;
-  --foreground: 250, 249, 246;
+  /* Light mode (default — dark class overrides below) */
+  --bg: 248, 247, 244;
+  --bg-nav: 248, 247, 244;
+  --bg-panel: 0, 0, 0;
+  --bg-sticky: 248, 247, 244;
+  --fg: 28, 25, 23;
+  --fg-muted: 28, 25, 23;
+  --border-subtle: 212, 175, 55;
+
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
   --gold: 212, 175, 55;
-  --font-serif: var(--font-playfair), 'Georgia', serif;
-  --font-sans: var(--font-inter), -apple-system, sans-serif;
 }
 
+.dark {
+  --bg: 0, 0, 0;
+  --bg-nav: 0, 0, 0;
+  --bg-panel: 255, 255, 255;
+  --bg-sticky: 0, 0, 0;
+  --fg: 250, 249, 246;
+  --fg-muted: 250, 249, 246;
+  --border-subtle: 212, 175, 55;
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
 body {
   margin: 0;
   padding: 0;
-  background: #000;
-  color: #faf9f6;
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  font-style: normal;
 }
 
-.wisdom-output {
-  font-family: var(--font-serif);
+/* Globally suppress italic — design calls for straight type only */
+* {
+  font-style: normal !important;
+}
+
+/* ── Utilities ────────────────────────────────────────────── */
+.glass-panel {
+  background: rgba(var(--bg-panel), 0.02);
+  backdrop-filter: blur(8px);
 }
 
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
-
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(var(--bg-panel), 0.02);
 }
-
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(212, 175, 55, 0.2);
   border-radius: 10px;
 }
 
-.glass-panel {
-  background: rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(8px);
-}
-
-.gold-accent {
-  color: #d4af37;
+/* ── Prose styles used in the reader ─────────────────────── */
+.prose-osho {
+  font-family: var(--font-sans);
+  line-height: 1.9;
+  color: rgba(var(--fg), 0.93);
 }

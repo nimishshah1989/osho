@@ -3,7 +3,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, MessageCircle } from 'lucide-react';
+import { ArrowLeft, Search } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 
@@ -47,24 +47,14 @@ function ReaderInner() {
     fetch(`/api/discourse?${qs.toString()}`)
       .then(async (res) => {
         const body = await res.json().catch(() => null);
-        if (!res.ok) {
-          throw new Error((body && body.error) || `Upstream status ${res.status}`);
-        }
+        if (!res.ok) throw new Error((body && body.error) || `Upstream status ${res.status}`);
         return body as DiscourseResponse;
       })
-      .then((body) => {
-        if (!cancelled) setData(body);
-      })
-      .catch((err: Error) => {
-        if (!cancelled) setError(err.message || 'The discourse could not be retrieved.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .then((body) => { if (!cancelled) setData(body); })
+      .catch((err: Error) => { if (!cancelled) setError(err.message || 'The discourse could not be retrieved.'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [title, eventId]);
 
   const headerTitle = data?.event.title ?? title ?? t('read.discourse');
@@ -72,27 +62,30 @@ function ReaderInner() {
   return (
     <>
       <Nav />
-      <main className="min-h-screen bg-black text-ivory selection:bg-gold/30">
-        <div className="max-w-3xl mx-auto pt-32 pb-24 px-6 md:px-8">
+      <main className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))] selection:bg-gold/30">
+        <div className="max-w-3xl mx-auto pt-28 pb-24 px-6 md:px-8">
+
           <Link
-            href="/"
-            className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase text-ivory/70 hover:text-ivory transition-colors mb-10"
+            href="/archive"
+            className="inline-flex items-center gap-2 text-[9px] tracking-[0.4em] uppercase text-stone-400 dark:text-ivory/70 hover:text-stone-900 dark:hover:text-ivory transition-colors mb-10"
           >
             <ArrowLeft size={12} /> {t('read.back')}
           </Link>
 
-          <header className="mb-12 border-b border-gold/10 pb-8">
-            <h1 className="text-3xl md:text-4xl font-serif italic text-white tracking-wide mb-4">
+          <header className="mb-12 border-b border-gold/15 dark:border-gold/10 pb-8">
+            <h1 className="text-2xl md:text-3xl font-light tracking-wide mb-4 text-[rgb(var(--fg))]">
               {headerTitle}
             </h1>
             {data?.event && (
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-[10px] tracking-[0.3em] uppercase text-ivory/75">
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-[10px] tracking-[0.3em] uppercase text-stone-500 dark:text-ivory/75">
                 {data.event.date && <span className="text-gold">{data.event.date}</span>}
                 {data.event.location && <span>{data.event.location}</span>}
                 {data.paragraphs.length > 0 && (
                   <span>
                     {t(
-                      data.paragraphs.length === 1 ? 'read.paragraphs.one' : 'read.paragraphs.many',
+                      data.paragraphs.length === 1
+                        ? 'read.paragraphs.one'
+                        : 'read.paragraphs.many',
                       { n: data.paragraphs.length },
                     )}
                   </span>
@@ -112,26 +105,26 @@ function ReaderInner() {
               <div className="text-[10px] tracking-[0.4em] uppercase text-gold mb-2">
                 {t('read.error')}
               </div>
-              <div className="text-sm font-serif italic text-ivory/85 mb-4">{error}</div>
+              <div className="text-sm text-stone-600 dark:text-ivory/85 mb-4">{error}</div>
               <Link
-                href={`/ask?q=${encodeURIComponent(title)}`}
+                href={`/?q=${encodeURIComponent(title)}`}
                 className="inline-flex items-center gap-2 text-[10px] tracking-[0.4em] uppercase text-gold hover:opacity-100 opacity-85 transition-opacity"
               >
-                <MessageCircle size={12} /> {t('read.askInstead')}
+                <Search size={12} /> {t('read.searchInstead')}
               </Link>
             </div>
           )}
 
           {data && !loading && !error && data.paragraphs.length === 0 && (
-            <div className="text-ivory/80 text-sm font-serif italic">
+            <div className="text-stone-500 dark:text-ivory/80 text-sm">
               {t('read.empty')}
             </div>
           )}
 
           {data && !loading && data.paragraphs.length > 0 && (
-            <article className="prose-osho font-serif text-base md:text-lg leading-loose space-y-5 text-ivory/95">
+            <article className="prose-osho text-base md:text-lg space-y-5">
               {data.paragraphs.map((p) => (
-                <p key={p.sequence_number} className="whitespace-pre-wrap">
+                <p key={p.sequence_number} className="whitespace-pre-wrap leading-loose">
                   {p.content}
                 </p>
               ))}

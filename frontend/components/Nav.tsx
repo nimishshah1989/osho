@@ -2,62 +2,49 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Library, MessageCircle, Sparkles } from 'lucide-react';
+import { Library, Search, Sparkles, Sun, Moon } from 'lucide-react';
 import { useLocale } from '../lib/i18n';
+import { useTheme } from '../lib/theme';
 
 export default function Nav() {
   const pathname = usePathname();
   const { locale, setLocale, t } = useLocale();
+  const { theme, toggleTheme } = useTheme();
 
-  const items = [
-    { href: '/', label: t('nav.archive'), Icon: Library },
-    { href: '/constellation', label: t('nav.constellation'), Icon: Sparkles },
-    { href: '/ask', label: t('nav.ask'), Icon: MessageCircle },
-  ];
+  const isActive = (href: string) =>
+    pathname === href || (href !== '/' && pathname?.startsWith(href));
+
+  const linkClass = (href: string) =>
+    `text-[9px] md:text-[10px] tracking-[0.3em] md:tracking-[0.4em] uppercase flex items-center gap-2 transition-colors ${
+      isActive(href)
+        ? 'text-gold'
+        : 'text-stone-500 dark:text-ivory/65 hover:text-stone-900 dark:hover:text-ivory'
+    }`;
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 px-6 md:px-8 py-5 flex justify-between items-center backdrop-blur-md bg-black/40 border-b border-gold/5">
-      <Link href="/" className="flex items-center gap-3 no-underline group" aria-label="Osho Speaks home">
-        <div className="w-8 h-[1px] bg-gold group-hover:w-12 transition-all" />
-        <span className="text-[11px] tracking-[0.5em] uppercase text-white font-medium">
-          OSHO{' '}
-          <span
-            className={`text-gold italic ${
-              locale === 'hi' ? 'normal-case tracking-normal text-[12px]' : ''
-            }`}
-          >
-            {t('brand.tagline')}
-          </span>
-        </span>
-      </Link>
+    <nav className="fixed top-0 inset-x-0 z-50 px-5 md:px-8 py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
 
-      <div className="flex gap-5 md:gap-8 items-center">
-        {items.map(({ href, label, Icon }) => {
-          const active = pathname === href || (href !== '/' && pathname?.startsWith(href));
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? 'page' : undefined}
-              className={`text-[9px] md:text-[10px] tracking-[0.3em] md:tracking-[0.4em] uppercase flex items-center gap-2 transition-opacity ${
-                active ? 'text-gold opacity-100' : 'text-ivory/75 hover:text-ivory opacity-100'
-              }`}
-            >
-              <Icon size={12} /> {label}
-            </Link>
-          );
-        })}
+      {/* Left cluster: Search · Lang · Theme */}
+      <div className="flex items-center gap-4 md:gap-6">
+        <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={linkClass('/')}>
+          <Search size={12} /> {t('nav.search')}
+        </Link>
 
+        {/* Language toggle */}
         <div
           role="group"
           aria-label="Language"
-          className="flex items-center gap-1 text-[9px] md:text-[10px] tracking-[0.2em] ml-1 pl-3 border-l border-gold/15"
+          className="flex items-center gap-1 text-[9px] md:text-[10px] tracking-[0.2em] pl-3 border-l border-gold/20 dark:border-gold/15"
         >
           <button
             type="button"
             onClick={() => setLocale('en')}
             aria-pressed={locale === 'en'}
-            className={locale === 'en' ? 'text-gold' : 'text-ivory/60 hover:text-ivory'}
+            className={
+              locale === 'en'
+                ? 'text-gold'
+                : 'text-stone-500 dark:text-ivory/55 hover:text-stone-900 dark:hover:text-ivory'
+            }
           >
             EN
           </button>
@@ -66,11 +53,35 @@ export default function Nav() {
             type="button"
             onClick={() => setLocale('hi')}
             aria-pressed={locale === 'hi'}
-            className={locale === 'hi' ? 'text-gold' : 'text-ivory/60 hover:text-ivory'}
+            className={
+              locale === 'hi'
+                ? 'text-gold'
+                : 'text-stone-500 dark:text-ivory/55 hover:text-stone-900 dark:hover:text-ivory'
+            }
           >
             हिं
           </button>
         </div>
+
+        {/* Day / Night toggle */}
+        <button
+          type="button"
+          onClick={toggleTheme}
+          aria-label={theme === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
+          className="text-stone-500 dark:text-ivory/55 hover:text-gold dark:hover:text-gold transition-colors pl-1"
+        >
+          {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+        </button>
+      </div>
+
+      {/* Right cluster: Archive · Constellation */}
+      <div className="flex items-center gap-5 md:gap-8">
+        <Link href="/archive" aria-current={isActive('/archive') ? 'page' : undefined} className={linkClass('/archive')}>
+          <Library size={12} /> {t('nav.archive')}
+        </Link>
+        <Link href="/constellation" aria-current={isActive('/constellation') ? 'page' : undefined} className={linkClass('/constellation')}>
+          <Sparkles size={12} /> {t('nav.constellation')}
+        </Link>
       </div>
     </nav>
   );
