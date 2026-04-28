@@ -4,20 +4,20 @@
 
 /* ── Theme tokens ─────────────────────────────────────────── */
 :root {
-  /* Light mode defaults */
+  /* Light mode: warm off-white bg, very dark text for elderly readability */
   --bg: 248, 247, 244;
-  --fg: 28, 25, 23;
+  --fg: 15, 12, 10;
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
 
-  /* Darker amber in light mode — #7a5c00 → good contrast on white (≈5.8:1) */
-  --gold: 122 92 0;
+  /* Dark amber for high contrast on light bg — WCAG AA+ (≈7:1) */
+  --gold: 100, 75, 0;
 }
 
 .dark {
   --bg: 0, 0, 0;
   --fg: 250, 249, 246;
 
-  /* Original warm gold on dark backgrounds */
+  /* Warm gold on dark backgrounds */
   --gold: 212 175 55;
 }
 
@@ -31,6 +31,9 @@ body {
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
   font-style: normal;
+  /* Larger base font for elderly readability */
+  font-size: 17px;
+  line-height: 1.7;
 }
 
 /* No italics anywhere — design calls for straight type only */
@@ -54,6 +57,21 @@ body {
 /* ── Prose — reader page ──────────────────────────────────── */
 .prose-osho {
   font-family: var(--font-sans);
-  line-height: 1.9;
-  color: rgb(var(--fg) / 0.93);
+  line-height: 2.0;
+  color: rgb(var(--fg) / 0.95);
+  font-size: 1.125rem;
+}
+
+@media (min-width: 768px) {
+  .prose-osho {
+    font-size: 1.25rem;
+  }
+}
+
+/* ── Mobile touch targets ────────────────────────────────── */
+@media (max-width: 640px) {
+  button, a {
+    min-height: 44px;
+    min-width: 44px;
+  }
 }
