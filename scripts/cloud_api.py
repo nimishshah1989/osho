@@ -244,11 +244,18 @@ def search(
         ev = events[ev_id]
         ev["rank_sum"] += r["rank"]
         ev["hit_count"] += 1
-        if len(ev["hits"]) < 3:
+        # Skip metadata paragraphs from display hits:
+        # seq 0 = title row, boilerplate like "event page in sannyas.wiki:"
+        content = _strip_shailendra(r["content"])
+        is_meta = (
+            r["sequence_number"] == 0
+            or content.lower().startswith("event page in sannyas")
+        )
+        if len(ev["hits"]) < 3 and not is_meta:
             ev["hits"].append({
                 "paragraph_id": r["paragraph_id"],
                 "sequence_number": r["sequence_number"],
-                "content": _strip_shailendra(r["content"]),
+                "content": content,
             })
 
     # Count total distinct events matching (may exceed fetched rows)

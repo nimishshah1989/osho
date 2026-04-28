@@ -100,9 +100,14 @@ def _seed_db(path: str) -> None:
         # Fewer Nietzsche mentions in The Messiah
         (19, "p2", 5, "Nietzsche once said that God is dead."),
         # Politicians and mafia proximity test
-        (20, "p1", 20, "The politicians have always been in alliance with the mafia."),
+        (20, "p1", 20,
+         "The politicians have always been in alliance with the mafia."),
         (21, "p2", 10,
          "When politicians and the mafia join hands, the common man suffers."),
+        # Metadata paragraphs (should be filtered from display hits)
+        (22, "e3", 0, "Vigyan Bhairav Tantra ~ 12"),
+        (23, "e3", 2,
+         "event page in sannyas.wiki: Vigyan Bhairav Tantra ~ 12."),
     ]
     cur.executemany(
         "INSERT INTO paragraphs (id,event_id,sequence_number,content) VALUES (?,?,?,?)",

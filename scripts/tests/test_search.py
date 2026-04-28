@@ -253,6 +253,34 @@ def test_shailendra_text_stripped_from_discourse(app_client):
         )
 
 
+# ── Metadata paragraph filtering ─────────────────────────
+
+def test_seq_zero_excluded_from_hits(app_client):
+    """Sequence 0 (title row) should not appear in display hits."""
+    r = app_client.get("/api/search?q=vigyan")
+    data = r.json()
+    for ev in data["events"]:
+        for hit in ev["hits"]:
+            assert hit["sequence_number"] != 0, (
+                f"Seq 0 (title row) should be filtered: "
+                f"'{hit['content'][:60]}'"
+            )
+
+
+def test_sannyas_wiki_boilerplate_excluded(app_client):
+    """'event page in sannyas.wiki:' boilerplate excluded from hits."""
+    r = app_client.get("/api/search?q=vigyan")
+    data = r.json()
+    for ev in data["events"]:
+        for hit in ev["hits"]:
+            assert not hit["content"].lower().startswith(
+                "event page in sannyas"
+            ), (
+                f"sannyas.wiki boilerplate in hits: "
+                f"'{hit['content'][:60]}'"
+            )
+
+
 # ── Languages endpoint ───────────────────────────────────
 
 def test_languages_endpoint(app_client):

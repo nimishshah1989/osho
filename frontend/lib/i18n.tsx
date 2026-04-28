@@ -56,9 +56,9 @@ const EN: Dict = {
   'search.detail.full': 'Full discourse',
   'search.detail.back': 'Back',
   'search.detail.topMatches': 'Top matches',
-  'search.detail.para': '¶',
+  'search.detail.para': 'Para',
   'search.detail.loadingFull': 'loading full discourse…',
-  'search.detail.showAll': 'Show entire discourse with matches highlighted ({n} ¶)',
+  'search.detail.showAll': 'Show entire discourse with matches highlighted ({n} paragraphs)',
   'search.translit.toggle': 'Type in Roman (phonetic)',
   'search.translit.preview': 'Hindi preview',
 
@@ -137,9 +137,9 @@ const HI: Dict = {
   'search.detail.full': 'पूरा प्रवचन',
   'search.detail.back': 'वापस',
   'search.detail.topMatches': 'सबसे अच्छे मिले अंश',
-  'search.detail.para': '¶',
+  'search.detail.para': 'Para',
   'search.detail.loadingFull': 'पूरा प्रवचन खुल रहा है…',
-  'search.detail.showAll': 'पूरा प्रवचन देखो — हर मिलान हाईलाइट ({n} ¶)',
+  'search.detail.showAll': 'पूरा प्रवचन देखो — हर मिलान हाईलाइट ({n} अनुच्छेद)',
   'search.translit.toggle': 'रोमन में लिखो (उच्चारण से)',
   'search.translit.preview': 'हिंदी में',
 

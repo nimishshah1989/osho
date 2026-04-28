@@ -132,7 +132,7 @@ function Highlighted({ text, pattern }: { text: string; pattern: RegExp | null }
     <>
       {parts.map((part, i) =>
         i % 2 === 1 ? (
-          <mark key={i} className="bg-gold/30 text-[rgb(var(--fg))] font-medium rounded-sm px-0.5">
+          <mark key={i} className="bg-yellow-300 dark:bg-yellow-500/40 text-[rgb(var(--fg))] font-bold rounded-sm px-0.5">
             {part}
           </mark>
         ) : (
@@ -793,7 +793,7 @@ function SearchPageInner() {
                           className="bg-stone-100 dark:bg-ivory/5 border-l-3 border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[15px]"
                         >
                           <div className="text-[10px] tracking-[0.25em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
-                            ¶ {h.sequence_number}
+                            Para {h.sequence_number}
                           </div>
                           <Highlighted text={h.content} pattern={highlightPattern} />
                         </li>
