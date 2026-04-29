@@ -358,12 +358,16 @@ function SearchPageInner() {
 
   const handleLangFilterChange = (val: string) => {
     setLangFilter(val);
-    if (query.trim() && results) {
-      setTimeout(() => {
-        void runSearch(query.trim(), sort, mode, proximity);
-      }, 0);
-    }
   };
+
+  // Re-run search when language filter changes. Using useEffect so the search
+  // fires after React re-renders runSearch with the new langFilter in its closure.
+  const isMountedLangRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedLangRef.current) { isMountedLangRef.current = true; return; }
+    if (query.trim()) void runSearch(query.trim(), sort, mode, proximity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [langFilter]);
 
   const selectEvent = (eventId: string) => {
     setSelectedEventId(eventId);
@@ -605,7 +609,7 @@ function SearchPageInner() {
                 </span>
                 <input
                   type="text"
-                  placeholder="1970"
+                  placeholder="1942"
                   maxLength={4}
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value.replace(/\D/g, '').slice(0, 4))}
