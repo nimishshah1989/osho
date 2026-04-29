@@ -729,7 +729,7 @@ function SearchPageInner() {
                       </div>
                       {selectedEvent.title && (
                         <a
-                          href={`https://www.sannyas.wiki/wiki/Special:Search?search=${encodeURIComponent(selectedEvent.title)}&fulltext=1`}
+                          href={`https://www.sannyas.wiki/index.php?title=Special:Search&search=${encodeURIComponent(selectedEvent.title)}&fulltext=1`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-block mt-2 text-[11px] tracking-[0.15em] uppercase text-gold/60 hover:text-gold transition-colors"
