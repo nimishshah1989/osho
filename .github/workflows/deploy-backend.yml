@@ -1,0 +1,48 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/cloud_api.py'
+      - 'scripts/build_fts.py'
+      - 'data/**'
+      - '.github/workflows/deploy-backend.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BACKEND_HOST }}
+          username: ${{ secrets.BACKEND_USER }}
+          key: ${{ secrets.BACKEND_SSH_KEY }}
+          port: ${{ secrets.BACKEND_PORT || 22 }}
+          script: |
+            set -e
+            cd /home/user/osho  # adjust if different on server
+            git pull origin main
+            # Restart the API server (adjust service name as needed)
+            sudo systemctl restart osho-api || sudo systemctl restart osho || true
+            echo "Backend deployed successfully"
+
+  rebuild-fts:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: contains(github.event.head_commit.modified, 'scripts/build_fts.py')
+    steps:
+      - name: Rebuild FTS index on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.BACKEND_HOST }}
+          username: ${{ secrets.BACKEND_USER }}
+          key: ${{ secrets.BACKEND_SSH_KEY }}
+          port: ${{ secrets.BACKEND_PORT || 22 }}
+          script: |
+            set -e
+            cd /home/user/osho  # adjust if different on server
+            python3 scripts/build_fts.py
+            sudo systemctl restart osho-api || sudo systemctl restart osho || true
+            echo "FTS index rebuilt successfully"
