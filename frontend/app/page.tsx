@@ -439,7 +439,7 @@ function SearchPageInner() {
       <main className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))] pt-20 md:pt-24 pb-16">
         <div className="max-w-7xl mx-auto px-4 md:px-8">
           <header className="mb-6">
-            <h1 className="text-xs tracking-[0.5em] uppercase text-gold opacity-70 mb-4 font-medium">
+            <h1 className="text-sm tracking-[0.35em] uppercase text-gold opacity-70 mb-4 font-medium">
               OSHO · {locale === 'hi' ? 'प्रवचन खोज' : 'Discourse Search'}
             </h1>
 
@@ -451,7 +451,7 @@ function SearchPageInner() {
                     onChange={setQuery}
                     onSubmit={() => doSearch(query)}
                     placeholder={placeholder}
-                    className="w-full bg-transparent border-b-2 border-gold/40 py-3 pr-12 text-lg md:text-xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border-b-2 border-gold/40 py-4 pr-12 text-xl md:text-2xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     disabled={loading}
                     autoFocus
                     ariaLabel={t('search.submit')}
@@ -469,7 +469,7 @@ function SearchPageInner() {
                 <>
                   <input
                     type="text"
-                    className="w-full bg-transparent border-b-2 border-gold/40 py-3 pr-12 text-lg md:text-xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border-b-2 border-gold/40 py-4 pr-12 text-xl md:text-2xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     placeholder={placeholder}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -495,7 +495,7 @@ function SearchPageInner() {
               </div>
             )}
 
-            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-[11px] tracking-[0.25em] uppercase">
+            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-[13px] tracking-[0.15em] uppercase">
               {/* Mode selector */}
               <div className="flex items-center gap-3">
                 <span className="text-stone-500 dark:text-ivory/60">{t('search.match')}:</span>
@@ -658,7 +658,7 @@ function SearchPageInner() {
               )}
               {results && results.events.length > 0 && (
                 <ul className="divide-y divide-gold/10">
-                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[10px] tracking-[0.35em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between">
+                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[12px] tracking-[0.2em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between">
                     <span>{t('search.col.discourse')}</span>
                     <span>{sort === 'rank' ? t('search.col.rankShort') : t('search.col.az')}</span>
                   </li>
@@ -676,17 +676,17 @@ function SearchPageInner() {
                           }`}
                         >
                           <span className="flex-1 min-w-0">
-                            <span className="block text-[15px] leading-snug truncate font-medium">
+                            <span className="block text-[16px] leading-snug truncate font-medium">
                               {ev.title ?? 'Untitled'}
                             </span>
-                            <span className="block text-[11px] tracking-[0.15em] text-stone-500 dark:text-ivory/55 mt-1">
+                            <span className="block text-[12px] tracking-[0.1em] text-stone-500 dark:text-ivory/55 mt-1">
                               {[ev.date, ev.location].filter(Boolean).join(' · ')}
                               {ev.hit_count > 0 && (
                                 <> · <strong className="text-gold">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
                               )}
                             </span>
                           </span>
-                          <span className="text-[11px] tracking-[0.15em] text-stone-400 dark:text-ivory/40 flex-shrink-0 pt-1 font-medium">
+                          <span className="text-[12px] tracking-[0.1em] text-stone-400 dark:text-ivory/40 flex-shrink-0 pt-1 font-medium">
                             {sort === 'rank' ? `#${i + 1}` : ''}
                           </span>
                         </button>
@@ -718,7 +718,7 @@ function SearchPageInner() {
                       <h2 className="text-lg md:text-xl text-gold leading-snug font-medium">
                         {selectedEvent.title ?? 'Untitled'}
                       </h2>
-                      <div className="text-[11px] tracking-[0.25em] uppercase text-stone-500 dark:text-ivory/55 mt-1.5">
+                      <div className="text-[13px] tracking-[0.15em] uppercase text-stone-500 dark:text-ivory/55 mt-1.5">
                         {[selectedEvent.date, selectedEvent.location, selectedEvent.language]
                           .filter(Boolean)
                           .join(' · ')}
@@ -726,17 +726,6 @@ function SearchPageInner() {
                           <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
-                      {/* sannyas.wiki link */}
-                      {selectedEvent.title && (
-                        <a
-                          href={`https://www.sannyas.wiki/${encodeURIComponent(selectedEvent.title.replace(/ /g, '_'))}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-block mt-2 text-[10px] tracking-[0.2em] uppercase text-gold/70 hover:text-gold underline underline-offset-2"
-                        >
-                          sannyas.wiki →
-                        </a>
-                      )}
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       {/* Prev/Next event navigation */}
@@ -751,7 +740,7 @@ function SearchPageInner() {
                           >
                             <ChevronUp size={16} />
                           </button>
-                          <span className="text-[10px] text-stone-400 dark:text-ivory/40 tabular-nums">
+                          <span className="text-[12px] text-stone-400 dark:text-ivory/40 tabular-nums">
                             {selectedIdx + 1}/{results.events.length}
                           </span>
                           <button
@@ -767,14 +756,14 @@ function SearchPageInner() {
                       )}
                       <Link
                         href={`/read?event_id=${encodeURIComponent(selectedEvent.event_id)}`}
-                        className="text-[11px] tracking-[0.25em] uppercase text-gold/80 hover:text-gold inline-flex items-center gap-1 font-medium"
+                        className="text-[13px] tracking-[0.15em] uppercase text-gold/80 hover:text-gold inline-flex items-center gap-1 font-medium"
                       >
                         <BookOpen size={14} /> {t('search.detail.full')}
                       </Link>
                       <button
                         type="button"
                         onClick={clearSelection}
-                        className="text-[11px] tracking-[0.25em] uppercase text-stone-500 dark:text-ivory/55 hover:text-[rgb(var(--fg))] inline-flex items-center gap-1 md:hidden"
+                        className="text-[13px] tracking-[0.15em] uppercase text-stone-500 dark:text-ivory/55 hover:text-[rgb(var(--fg))] inline-flex items-center gap-1 md:hidden"
                       >
                         <ArrowLeft size={14} /> {t('search.detail.back')}
                       </button>
@@ -783,16 +772,16 @@ function SearchPageInner() {
 
                   {/* Top matched passages */}
                   <div className="mb-6">
-                    <h3 className="text-[11px] tracking-[0.35em] uppercase text-stone-500 dark:text-ivory/60 mb-3 font-medium">
+                    <h3 className="text-[12px] tracking-[0.2em] uppercase text-stone-500 dark:text-ivory/60 mb-3 font-medium">
                       {t('search.detail.topMatches')}
                     </h3>
                     <ol className="space-y-4">
                       {selectedEvent.hits.map((h) => (
                         <li
                           key={h.paragraph_id}
-                          className="bg-stone-100 dark:bg-ivory/5 border-l-3 border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[15px]"
+                          className="bg-stone-100 dark:bg-ivory/5 border-l-3 border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
                         >
-                          <div className="text-[10px] tracking-[0.25em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
+                          <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
                             Para {h.sequence_number}
                           </div>
                           <Highlighted text={h.content} pattern={highlightPattern} />

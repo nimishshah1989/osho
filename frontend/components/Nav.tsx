@@ -15,7 +15,7 @@ export default function Nav() {
     pathname === href || (href !== '/' && pathname?.startsWith(href));
 
   const linkClass = (href: string) =>
-    `text-[9px] md:text-[10px] tracking-[0.3em] md:tracking-[0.4em] uppercase flex items-center gap-2 transition-colors ${
+    `text-[11px] md:text-[13px] tracking-[0.2em] md:tracking-[0.25em] uppercase flex items-center gap-2 transition-colors ${
       isActive(href)
         ? 'text-gold'
         : 'text-stone-500 dark:text-ivory/65 hover:text-stone-900 dark:hover:text-ivory'
@@ -35,7 +35,7 @@ export default function Nav() {
         <div
           role="group"
           aria-label="Language"
-          className="flex items-center gap-1 text-[9px] md:text-[10px] tracking-[0.2em] pl-3 border-l border-gold/20 dark:border-gold/15"
+          className="flex items-center gap-1 text-[11px] md:text-[13px] tracking-[0.1em] pl-3 border-l border-gold/20 dark:border-gold/15"
         >
           <button
             type="button"
