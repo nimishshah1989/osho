@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { romanToDevanagari, expandAnusvara } from '../lib/transliterate';
+import { romanToDevanagari, expandAnusvara, expandVowelVariants } from '../lib/transliterate';
 
 interface HindiInputProps {
   value: string;
@@ -57,52 +57,51 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
       return '';
     }, [value]);
 
-    // Generate suggestions for the current Roman word
+    // Generate suggestions for the current Roman word.
+    // Priority order:
+    //   1. Vowel-expanded forms of the primary conversion (e.g. ज्ञान before ज्ञन)
+    //   2. Consonant-alternative variants (sh/Sh, n/N, t/T, d/D)
+    //   3. Anusvara variants of all of the above
     const suggestions = useMemo(() => {
       if (!lastRomanWord) return [];
       const primary = romanToDevanagari(lastRomanWord);
       if (!primary.trim()) return [];
 
-      // Start with the primary conversion
-      const candidates = new Set<string>([primary]);
+      // Consonant-alternative roman strings to try
+      const romanVariants: string[] = [lastRomanWord];
 
-      // Add anusvara variants
-      const anuVars = expandAnusvara(primary);
-      for (const v of anuVars) candidates.add(v);
+      if (/sh/i.test(lastRomanWord)) {
+        romanVariants.push(lastRomanWord.replace(/sh/gi, 'Sh'));
+        romanVariants.push(lastRomanWord.replace(/Sh/gi, 'sh'));
+      }
+      if (/n/.test(lastRomanWord) && !/N/.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/n/g, 'N'));
+      if (/t/.test(lastRomanWord) && !/T/.test(lastRomanWord) && !/th/i.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/t/g, 'T'));
+      if (/d/.test(lastRomanWord) && !/D/.test(lastRomanWord) && !/dh/i.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/d/g, 'D'));
+      if (/r/.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/r/g, 'R')); // ड़/ढ़ variants
 
-      // Add common alternative mappings:
-      // 'sh' could be श or ष, 'n' could be न or ण, etc.
-      // Generate a variant with Sh→ष swaps
-      const withShVariant = lastRomanWord
-        .replace(/sh/gi, 'Sh')
-        .replace(/Sh/gi, (m) => (m === 'Sh' ? 'sh' : 'Sh'));
-      if (withShVariant !== lastRomanWord) {
-        const alt = romanToDevanagari(withShVariant);
-        if (alt !== primary) candidates.add(alt);
+      // For each roman variant: get Devanagari, expand vowels, expand anusvara
+      // Deduplicated, vowel-expanded forms come first (they're more likely correct)
+      const seen = new Set<string>();
+      const ordered: string[] = [];
+
+      const add = (word: string) => {
+        if (!seen.has(word)) { seen.add(word); ordered.push(word); }
+      };
+
+      for (const roman of romanVariants) {
+        const deva = romanToDevanagari(roman);
+        if (!deva.trim()) continue;
+        // Vowel-expanded forms first (ज्ञान before ज्ञन)
+        for (const v of expandVowelVariants(deva)) {
+          for (const a of expandAnusvara(v)) add(a);
+        }
       }
 
-      // Variant: 'n' → 'N' (ण vs न)
-      if (/n/i.test(lastRomanWord) && !/N/.test(lastRomanWord)) {
-        const nVariant = lastRomanWord.replace(/n/g, 'N');
-        const alt = romanToDevanagari(nVariant);
-        if (alt !== primary) candidates.add(alt);
-      }
-
-      // Variant: 't' → 'T' (ट vs त)
-      if (/t/i.test(lastRomanWord) && !/T/.test(lastRomanWord) && !/th/i.test(lastRomanWord)) {
-        const tVariant = lastRomanWord.replace(/t/g, 'T');
-        const alt = romanToDevanagari(tVariant);
-        if (alt !== primary) candidates.add(alt);
-      }
-
-      // Variant: 'd' → 'D' (ड vs द)
-      if (/d/i.test(lastRomanWord) && !/D/.test(lastRomanWord) && !/dh/i.test(lastRomanWord)) {
-        const dVariant = lastRomanWord.replace(/d/g, 'D');
-        const alt = romanToDevanagari(dVariant);
-        if (alt !== primary) candidates.add(alt);
-      }
-
-      return Array.from(candidates).slice(0, 5);
+      return ordered.slice(0, 8);
     }, [lastRomanWord]);
 
     useEffect(() => {

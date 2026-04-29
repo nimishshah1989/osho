@@ -153,7 +153,7 @@ export function expandAnusvara(text: string): string[] {
  * All variants are returned as an array alongside the original;
  * duplicates are eliminated automatically.
  */
-function expandVowelVariants(word: string): string[] {
+export function expandVowelVariants(word: string): string[] {
   const results = new Set<string>([word]);
 
   // Unicode helpers
