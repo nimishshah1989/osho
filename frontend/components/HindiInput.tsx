@@ -82,6 +82,12 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
         romanVariants.push(lastRomanWord.replace(/d/g, 'D'));
       if (/r/.test(lastRomanWord))
         romanVariants.push(lastRomanWord.replace(/r/g, 'R')); // ड़/ढ़ variants
+      // th → Th (थ dental → ठ retroflex) and dh → Dh (ध → ढ)
+      // lets "thik" suggest ठीक alongside थिक
+      if (/th/i.test(lastRomanWord) && !/Th/.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/th/gi, 'Th'));
+      if (/dh/i.test(lastRomanWord) && !/Dh/.test(lastRomanWord))
+        romanVariants.push(lastRomanWord.replace(/dh/gi, 'Dh'));
 
       // For each roman variant: get Devanagari, expand vowels, expand anusvara
       // Deduplicated, vowel-expanded forms come first (they're more likely correct)
