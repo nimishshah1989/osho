@@ -727,6 +727,16 @@ function SearchPageInner() {
                           <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
+                      {selectedEvent.title && (
+                        <a
+                          href={`https://www.sannyas.wiki/w/index.php?search=${encodeURIComponent(selectedEvent.title)}&fulltext=1`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-2 text-[11px] tracking-[0.15em] uppercase text-gold/60 hover:text-gold transition-colors"
+                        >
+                          sannyas.wiki ↗
+                        </a>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       {/* Prev/Next event navigation */}
