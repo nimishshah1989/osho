@@ -180,11 +180,7 @@ function SearchPageInner() {
   const [discourseLoading, setDiscourseLoading] = useState(false);
   const [discourseError, setDiscourseError] = useState<string | null>(null);
 
-  const looksRoman = locale === 'hi' && /[a-zA-Z]/.test(query);
-  const devanagariPreview = useMemo(
-    () => (looksRoman && query.trim() ? romanToDevanagari(query) : ''),
-    [looksRoman, query],
-  );
+  // (Hindi transliteration is now handled inline by the HindiInput component)
 
   const detailRef = useRef<HTMLDivElement | null>(null);
   const firstMatchRef = useRef<HTMLParagraphElement | null>(null);
@@ -492,18 +488,10 @@ function SearchPageInner() {
               )}
             </form>
 
-            {/* Devanagari preview while typing Roman in Hindi mode */}
-            {locale === 'hi' && devanagariPreview && (
-              <div className="mt-2 flex items-center gap-2 text-sm text-gold">
-                <span className="text-[10px] tracking-[0.2em] uppercase opacity-60">
-                  {t('search.translit.preview')} →
-                </span>
-                <span className="font-medium">{devanagariPreview}</span>
-              </div>
-            )}
+            {/* Show transliteration hint for Hindi mode */}
             {locale === 'hi' && !query && (
               <div className="mt-2 text-[11px] text-stone-400 dark:text-ivory/50">
-                रोमन में टाइप करो (जैसे dhyaan, prem, shaanti)
+                रोमन में टाइप करो (जैसे dhyaan) → Space दबाओ → हिंदी में बदल जाएगा
               </div>
             )}
 
@@ -738,7 +726,6 @@ function SearchPageInner() {
                           <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
-
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       {/* Prev/Next event navigation */}

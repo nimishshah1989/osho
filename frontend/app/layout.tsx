@@ -7,8 +7,8 @@ import { ThemeProvider } from "../lib/theme";
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Osho",
-  description: "Search and explore the complete discourses of Osho.",
+  title: "Osho Discourse Search — Every Word, Verbatim",
+  description: "Search and explore the complete discourses of Osho. Every word in Osho's own voice — no paraphrasing, no AI.",
 };
 
 // Inline script runs before React hydration to avoid flash of wrong theme.
@@ -31,7 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark">
       <head>
-        <title>Osho</title>
+        <title>Osho Discourse Search — Every Word, Verbatim</title>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
         {/* eslint-disable-next-line react/no-danger */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />

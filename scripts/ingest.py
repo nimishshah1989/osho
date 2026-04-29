@@ -14,11 +14,11 @@ SCHEMA_PATH = 'db/schema.sql'
 def init_db():
     print("Initializing Database...")
     conn = sqlite3.connect(DB_PATH)
-    
+
     # Read schema
     with open(SCHEMA_PATH, 'r', encoding='utf-8') as f:
         schema = f.read()
-    
+
     # Execute schema
     conn.executescript(schema)
     conn.commit()
@@ -34,29 +34,29 @@ def extract_location(text):
 def ingest_data(conn):
     print("Starting Stream Ingestion...")
     cursor = conn.cursor()
-    
+
     if not os.path.exists(CSV_PATH):
         print(f"Error: {CSV_PATH} not found.")
         return
 
     events_inserted = 0
     paragraphs_inserted = 0
-    
+
     with open(CSV_PATH, 'r', encoding='utf-8', errors='replace') as f:
         reader = csv.DictReader(f)
-        
+
         for row in reader:
             event_id = row.get('id')
             if not event_id:
                 continue
-                
+
             title = row.get('title', 'Unknown Title')
             date_val = row.get('time', '')
             language = row.get('language', 'Unknown')
             event_text = row.get('eventText', '')
-            
+
             location = extract_location(event_text)
-            
+
             # 1. Insert Event
             try:
                 cursor.execute('''
@@ -67,13 +67,13 @@ def ingest_data(conn):
             except sqlite3.Error as e:
                 print(f"Error inserting event {event_id}: {e}")
                 continue
-            
+
             # 2. Chunk Event Text into Paragraphs
             # Split by FileMaker's vertical tab (\x0b) export format
             # Sometimes there might be multiple \x0b or spaces, we split carefully
             raw_text = event_text.replace('\r', '\n').replace('\x0b', '\n')
             chunks = re.split(r'\n+', raw_text)
-            
+
             paragraph_records = []
             seq = 0
             for chunk in chunks:
@@ -82,7 +82,7 @@ def ingest_data(conn):
                     continue
                 paragraph_records.append((event_id, seq, chunk))
                 seq += 1
-            
+
             try:
                 cursor.executemany('''
                     INSERT INTO paragraphs (event_id, sequence_number, content)
@@ -91,7 +91,7 @@ def ingest_data(conn):
                 paragraphs_inserted += len(paragraph_records)
             except sqlite3.Error as e:
                 print(f"Error inserting paragraphs for event {event_id}: {e}")
-            
+
             # Commit every 100 events to manage transaction memory gracefully
             if events_inserted % 100 == 0:
                 conn.commit()

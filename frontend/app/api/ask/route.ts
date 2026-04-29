@@ -14,9 +14,21 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'No query provided' }, { status: 400 });
   }
 
+  const params = new URLSearchParams({
+    q,
+    sort,
+  });
+
+  const language = searchParams.get('language');
+  if (language) params.set('language', language);
+  const dateFrom = searchParams.get('date_from');
+  if (dateFrom) params.set('date_from', dateFrom);
+  const dateTo = searchParams.get('date_to');
+  if (dateTo) params.set('date_to', dateTo);
+
   try {
     const upstream = await fetch(
-      `${API_BASE}/api/search?q=${encodeURIComponent(q)}&sort=${encodeURIComponent(sort)}`,
+      `${API_BASE}/api/search?${params.toString()}`,
       { cache: 'no-store' },
     );
     const body = await upstream.json().catch(() => null);

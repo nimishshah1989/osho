@@ -25,7 +25,10 @@ def build():
     cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
     conn.commit()
 
-    print("Creating paragraphs_fts (content + title columns, porter+unicode61)...", flush=True)
+    print(
+        "Creating paragraphs_fts (porter+unicode61)...",
+        flush=True,
+    )
     cur.execute(
         """
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(

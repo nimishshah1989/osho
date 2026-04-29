@@ -142,16 +142,84 @@ export function expandAnusvara(text: string): string[] {
 }
 
 /**
- * Build an FTS5 query from a Devanagari string, expanding anusvara variants
- * into an OR expression so both spellings are searched.
+ * Expand a Devanagari word into vowel-length variants.
+ *
+ * Three expansions run on every word:
+ *  1. Implicit 'a' between consonants → explicit ā (ा)
+ *     e.g. ज्ञन (gyan) → ज्ञान  |  रमन → रामन
+ *  2. Short i (ि) ↔ long ī (ी)   e.g. शांति → शांती
+ *  3. Short u (ु) ↔ long ū (ू)   e.g. गुरु → गूरू
+ *
+ * All variants are returned as an array alongside the original;
+ * duplicates are eliminated automatically.
+ */
+function expandVowelVariants(word: string): string[] {
+  const results = new Set<string>([word]);
+
+  // Unicode helpers
+  const isConsonant = (c: string): boolean => {
+    const cp = c.codePointAt(0)!;
+    return (cp >= 0x0915 && cp <= 0x0939) || (cp >= 0x0958 && cp <= 0x095f);
+  };
+  const isMatraOrVirama = (c: string): boolean => {
+    const cp = c.codePointAt(0)!;
+    return cp >= 0x093e && cp <= 0x094d;
+  };
+
+  // 1. Insert explicit ā (ा) between two consecutive consonants
+  //    (first consonant has an implicit 'a' with no following matra/virama)
+  let withAA = '';
+  for (let i = 0; i < word.length; i++) {
+    withAA += word[i];
+    if (
+      isConsonant(word[i]) &&
+      i + 1 < word.length &&
+      isConsonant(word[i + 1]) &&
+      !isMatraOrVirama(word[i + 1])
+    ) {
+      withAA += 'ा';
+    }
+  }
+  if (withAA !== word) results.add(withAA);
+
+  // 2. Short i ↔ long ī
+  const longI  = word.replace(/ि/g, 'ी');
+  const shortI = word.replace(/ी/g, 'ि');
+  if (longI  !== word) results.add(longI);
+  if (shortI !== word) results.add(shortI);
+
+  // 3. Short u ↔ long ū
+  const longU  = word.replace(/ु/g, 'ू');
+  const shortU = word.replace(/ू/g, 'ु');
+  if (longU  !== word) results.add(longU);
+  if (shortU !== word) results.add(shortU);
+
+  return Array.from(results);
+}
+
+/**
+ * Build an FTS5 query from a Devanagari string, expanding:
+ *  - vowel-length variants  (a/ā, i/ī, u/ū)
+ *  - anusvara variants      (ं ↔ ङ्/ञ्/ण्/न्/म्)
+ *
+ * Result is an OR expression covering all spelling variations so the
+ * search catches the most common forms regardless of how the text was
+ * originally typed or transcribed.
  */
 export function buildHindiFtsQuery(devanagari: string): string {
   const words = devanagari.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return '';
 
   const expandedWords = words.map((w) => {
-    const variants = expandAnusvara(w);
-    return variants.length > 1 ? `(${variants.join(' OR ')})` : w;
+    const all = new Set<string>();
+    // Expand vowel variants first, then anusvara within each
+    for (const v of expandVowelVariants(w)) {
+      for (const a of expandAnusvara(v)) {
+        all.add(a);
+      }
+    }
+    const variants = Array.from(all);
+    return variants.length > 1 ? `(${variants.join(' OR ')})` : variants[0];
   });
 
   return expandedWords.join(' ');
