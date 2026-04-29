@@ -54,6 +54,12 @@ body {
   border-radius: 10px;
 }
 
+/* ── Devanagari — reset tracking ─────────────────────────── */
+/* Wide letter-spacing breaks the connecting शिरोरेखा bar.    */
+:lang(hi) * {
+  letter-spacing: 0 !important;
+}
+
 /* ── Prose — reader page ──────────────────────────────────── */
 .prose-osho {
   font-family: var(--font-sans);
