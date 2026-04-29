@@ -147,10 +147,153 @@ def catalog():
 
 _TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
 _HAS_DEVANAGARI = re.compile(r'[ऀ-ॿ]')
+_NEAR_RE = re.compile(r'^NEAR\s*\((.+?),\s*(\d+)\)\s*$', re.IGNORECASE)
 
 
 def _rewrite_query(user_query: str) -> str:
     return _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
+
+
+def _parse_near(fts_query: str):
+    """Return (words, distance) if query is a bare NEAR(...) expression, else None."""
+    m = _NEAR_RE.match(fts_query.strip())
+    if not m:
+        return None
+    words = [w.strip() for w in m.group(1).split() if w.strip()]
+    dist = int(m.group(2))
+    return (words, dist) if len(words) >= 2 else None
+
+
+def _min_para_span(seqs_per_word: list) -> int:
+    """
+    Minimum paragraph span (max_seq - min_seq) of any window that contains
+    at least one sequence number from every word's list.
+    Two-pointer sweep over the merged sorted list of (seq_num, word_index) points.
+    """
+    points = sorted(
+        (seq, wi)
+        for wi, seqs in enumerate(seqs_per_word)
+        for seq in seqs
+    )
+    n = len(seqs_per_word)
+    counts: dict = {}
+    covered = 0
+    lo = 0
+    best = 10 ** 9
+    for hi, (seq_hi, wi_hi) in enumerate(points):
+        counts[wi_hi] = counts.get(wi_hi, 0) + 1
+        if counts[wi_hi] == 1:
+            covered += 1
+        while covered == n:
+            best = min(best, seq_hi - points[lo][0])
+            _, wi_lo = points[lo]
+            counts[wi_lo] -= 1
+            if counts[wi_lo] == 0:
+                covered -= 1
+            lo += 1
+    return best
+
+
+def _augment_near_cross_paragraph(
+    conn, words: list, near_dist: int,
+    filter_params: list, where_extra: str,
+    events: dict,
+) -> None:
+    """
+    Extend `events` with discourses where NEAR words appear in different
+    paragraphs that are still close together (within max_span paragraph
+    sequence numbers). Called only for NEAR queries, after the main FTS pass.
+    """
+    # Token distance → paragraph boundary allowance: 30 tokens ≈ one paragraph edge
+    max_span = max(1, near_dist // 30)
+
+    # For each word, collect event_id → [sequence_numbers] from the FTS index
+    word_ev_seqs: list = []
+    for word in words:
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT f.event_id, f.sequence_number
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                """,
+                (word, *filter_params),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return
+        ev_seqs: dict = {}
+        for r in rows:
+            ev_seqs.setdefault(r["event_id"], []).append(r["sequence_number"])
+        word_ev_seqs.append(ev_seqs)
+
+    if not word_ev_seqs:
+        return
+
+    # Events that contain ALL words (across any paragraphs)
+    common = set(word_ev_seqs[0])
+    for d in word_ev_seqs[1:]:
+        common &= set(d)
+
+    # Keep only events not already found by the NEAR FTS pass, with span <= max_span
+    extra_ids = [
+        ev_id for ev_id in common
+        if ev_id not in events
+        and _min_para_span([d.get(ev_id, []) for d in word_ev_seqs]) <= max_span
+    ]
+    if not extra_ids:
+        return
+
+    # Fetch best paragraphs for the extra events via OR query
+    or_query = ' OR '.join(words)
+    ph = ','.join('?' * len(extra_ids))
+    try:
+        extra_rows = conn.execute(
+            f"""
+            SELECT
+                f.event_id, f.paragraph_id, f.sequence_number, f.content,
+                f.title, e.date, e.location, e.language,
+                bm25(paragraphs_fts) AS rank
+            FROM paragraphs_fts f
+            LEFT JOIN events e ON e.id = f.event_id
+            WHERE paragraphs_fts MATCH ?
+              AND f.event_id IN ({ph})
+            ORDER BY rank
+            """,
+            (or_query, *extra_ids),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+
+    for r in extra_rows:
+        ev_id = r["event_id"]
+        if ev_id not in events:
+            events[ev_id] = {
+                "event_id": ev_id,
+                "title": r["title"],
+                "date": r["date"],
+                "location": r["location"],
+                "language": r["language"],
+                "best_rank": r["rank"],
+                "rank_sum": 0.0,
+                "hit_count": 0,
+                "hits": [],
+            }
+        ev = events[ev_id]
+        ev["rank_sum"] += r["rank"]
+        ev["hit_count"] += 1
+        content = _strip_shailendra(r["content"])
+        is_meta = (
+            r["sequence_number"] == 0
+            or content.lower().startswith("event page in sannyas")
+        )
+        if len(ev["hits"]) < 3 and not is_meta:
+            ev["hits"].append({
+                "paragraph_id": r["paragraph_id"],
+                "sequence_number": r["sequence_number"],
+                "content": content,
+            })
 
 
 def _phrase_text(fts_query: str) -> str:
@@ -272,6 +415,19 @@ def search(
                 "sequence_number": r["sequence_number"],
                 "content": content,
             })
+
+    # Cross-paragraph NEAR: extend results with events where words span
+    # adjacent paragraphs (missed by FTS5's within-paragraph NEAR operator)
+    near_parsed = _parse_near(fts_query)
+    if near_parsed is not None:
+        _augment_near_cross_paragraph(
+            conn,
+            words=near_parsed[0],
+            near_dist=near_parsed[1],
+            filter_params=params[1:],   # language / date filters (no fts_query)
+            where_extra=where_extra,
+            events=events,
+        )
 
     # Count total distinct events matching (may exceed fetched rows)
     count_params: list = [fts_query]
