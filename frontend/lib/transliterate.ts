@@ -128,7 +128,7 @@ export function expandAnusvara(text: string): string[] {
   if (withAnusvara !== text) results.add(withAnusvara);
 
   // Final standalone nasal → anusvara: नहीन → नहीं, सम्भव → सम्भं (suggestion only)
-  const withFinalAnusvara = text.replace(/[नम]$/u, 'ं');
+  const withFinalAnusvara = text.replace(/[नम]$/, 'ं');
   if (withFinalAnusvara !== text) results.add(withFinalAnusvara);
 
   // Expand anusvara → appropriate nasal based on the following consonant

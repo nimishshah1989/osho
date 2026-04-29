@@ -9,7 +9,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { romanToDevanagari, expandAnusvara, expandVowelVariants } from '../lib/transliterate';
+import { romanToDevanagari } from '../lib/transliterate';
 
 interface HindiInputProps {
   value: string;
@@ -26,24 +26,52 @@ export interface HindiInputHandle {
   focus: () => void;
 }
 
+// Module-level cache persists across renders — avoids re-fetching the same word
+const suggestionCache = new Map<string, string[]>();
+
+async function fetchGoogleSuggestions(word: string): Promise<string[]> {
+  if (suggestionCache.has(word)) return suggestionCache.get(word)!;
+  try {
+    const url = `https://inputtools.google.com/request?text=${encodeURIComponent(word)}&itc=hi-t-i0-und&num=8&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage`;
+    const res = await fetch(url);
+    const data = await res.json();
+    // Response: ["SUCCESS", [["word", ["cand1", "cand2", ...], {...}]]]
+    if (data[0] === 'SUCCESS' && data[1]?.[0]?.[1]?.length) {
+      const candidates: string[] = data[1][0][1];
+      suggestionCache.set(word, candidates);
+      return candidates;
+    }
+  } catch {
+    // Network error or CORS — fall through to local fallback
+  }
+  // Fallback: local rule-based transliteration
+  const local = romanToDevanagari(word);
+  if (local.trim()) {
+    const result = [local];
+    suggestionCache.set(word, result);
+    return result;
+  }
+  return [];
+}
+
 /**
- * Hindi transliteration input — Quillpad / Google Input Tools style.
+ * Hindi transliteration input — powered by Google Input Tools API.
  *
  * Behavior:
- * - User types Roman characters in the input field
- * - A floating suggestion panel shows candidate Devanagari conversions
+ * - User types Roman characters; a floating suggestion panel shows Devanagari candidates
  * - On Space: top suggestion replaces the Roman word in-place
- * - On number key (1-5): selects that numbered suggestion
+ * - On number key (1-8): selects that numbered suggestion
  * - On Escape: dismisses suggestions and keeps Roman text
  * - On Enter: submits the form (converting any pending Roman word first)
  * - Already-converted Devanagari words stay in the input
- * - Backspace works normally; deleting into a converted word keeps it as-is
  */
 const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
   ({ value, onChange, onSubmit, placeholder, className, disabled, autoFocus, ariaLabel }, ref) => {
     const inputRef = useRef<HTMLInputElement>(null);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+    const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useImperativeHandle(ref, () => ({
       focus: () => inputRef.current?.focus(),
@@ -57,63 +85,25 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
       return '';
     }, [value]);
 
-    // Generate suggestions for the current Roman word.
-    // Priority order:
-    //   1. Vowel-expanded forms of the primary conversion (e.g. ज्ञान before ज्ञन)
-    //   2. Consonant-alternative variants (sh/Sh, n/N, t/T, d/D)
-    //   3. Anusvara variants of all of the above
-    const suggestions = useMemo(() => {
-      if (!lastRomanWord) return [];
-      const primary = romanToDevanagari(lastRomanWord);
-      if (!primary.trim()) return [];
-
-      // Consonant-alternative roman strings to try
-      const romanVariants: string[] = [lastRomanWord];
-
-      if (/sh/i.test(lastRomanWord)) {
-        romanVariants.push(lastRomanWord.replace(/sh/gi, 'Sh'));
-        romanVariants.push(lastRomanWord.replace(/Sh/gi, 'sh'));
-      }
-      if (/n/.test(lastRomanWord) && !/N/.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/n/g, 'N'));
-      if (/t/.test(lastRomanWord) && !/T/.test(lastRomanWord) && !/th/i.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/t/g, 'T'));
-      if (/d/.test(lastRomanWord) && !/D/.test(lastRomanWord) && !/dh/i.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/d/g, 'D'));
-      if (/r/.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/r/g, 'R')); // ड़/ढ़ variants
-      // th → Th (थ dental → ठ retroflex) and dh → Dh (ध → ढ)
-      // lets "thik" suggest ठीक alongside थिक
-      if (/th/i.test(lastRomanWord) && !/Th/.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/th/gi, 'Th'));
-      if (/dh/i.test(lastRomanWord) && !/Dh/.test(lastRomanWord))
-        romanVariants.push(lastRomanWord.replace(/dh/gi, 'Dh'));
-
-      // For each roman variant: get Devanagari, expand vowels, expand anusvara
-      // Deduplicated, vowel-expanded forms come first (they're more likely correct)
-      const seen = new Set<string>();
-      const ordered: string[] = [];
-
-      const add = (word: string) => {
-        if (!seen.has(word)) { seen.add(word); ordered.push(word); }
-      };
-
-      for (const roman of romanVariants) {
-        const deva = romanToDevanagari(roman);
-        if (!deva.trim()) continue;
-        // Vowel-expanded forms first (ज्ञान before ज्ञन)
-        for (const v of expandVowelVariants(deva)) {
-          for (const a of expandAnusvara(v)) add(a);
-        }
-      }
-
-      return ordered.slice(0, 8);
-    }, [lastRomanWord]);
-
+    // Fetch suggestions with 300ms debounce
     useEffect(() => {
-      setShowSuggestions(suggestions.length > 0);
-      setSelectedSuggestion(0);
-    }, [suggestions]);
+      if (!lastRomanWord) {
+        setSuggestions([]);
+        setShowSuggestions(false);
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        fetchGoogleSuggestions(lastRomanWord).then((candidates) => {
+          setSuggestions(candidates);
+          setShowSuggestions(candidates.length > 0);
+          setSelectedSuggestion(0);
+        });
+      }, 300);
+      return () => {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+      };
+    }, [lastRomanWord]);
 
     const commitWord = useCallback(
       (suggestionIndex: number = 0) => {
@@ -133,7 +123,6 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
         if (!showSuggestions || suggestions.length === 0) {
           if (e.key === 'Enter') {
             e.preventDefault();
-            // Convert any remaining Roman word before submitting
             if (lastRomanWord && suggestions.length > 0) {
               const converted = commitWord(0);
               onChange(converted);
@@ -145,9 +134,9 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
           return;
         }
 
-        // Number keys 1-5 select a suggestion
+        // Number keys 1-8 select a suggestion
         const num = parseInt(e.key, 10);
-        if (num >= 1 && num <= 5 && num <= suggestions.length) {
+        if (num >= 1 && num <= 8 && num <= suggestions.length) {
           e.preventDefault();
           const converted = commitWord(num - 1);
           onChange(converted + ' ');
@@ -226,9 +215,9 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
         {showSuggestions && suggestions.length > 0 && (
           <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-[rgb(var(--bg))] border border-gold/30 rounded-md shadow-lg overflow-hidden">
             <div className="px-3 py-1.5 text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/50 border-b border-gold/10">
-              {lastRomanWord} → (Space to accept, 1-{suggestions.length} to pick)
+              {lastRomanWord} → (Space to accept, 1–{Math.min(suggestions.length, 8)} to pick)
             </div>
-            {suggestions.map((s, i) => (
+            {suggestions.slice(0, 8).map((s, i) => (
               <button
                 key={s}
                 type="button"
