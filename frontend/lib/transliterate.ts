@@ -64,6 +64,7 @@ const VOWELS: [string, string, string][] = [
   ['u',  'उ', 'ु'], // ु
   ['e',  'ए', 'े'], // े
   ['o',  'ओ', 'ो'], // ो
+  ['M',  'ं', 'ं'], // anusvara — capital M: naheeM → नहीं
 ];
 
 function convertWord(word: string): string {
@@ -125,6 +126,10 @@ export function expandAnusvara(text: string): string[] {
   // Collapse explicit nasal+halant → anusvara
   const withAnusvara = text.replace(/[ङञणनम]्/g, 'ं');
   if (withAnusvara !== text) results.add(withAnusvara);
+
+  // Final standalone nasal → anusvara: नहीन → नहीं, सम्भव → सम्भं (suggestion only)
+  const withFinalAnusvara = text.replace(/[नम]$/u, 'ं');
+  if (withFinalAnusvara !== text) results.add(withFinalAnusvara);
 
   // Expand anusvara → appropriate nasal based on the following consonant
   const NASAL: [RegExp, string][] = [
