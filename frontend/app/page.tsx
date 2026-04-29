@@ -694,6 +694,9 @@ function SearchPageInner() {
                             </span>
                             <span className="block text-[12px] tracking-[0.1em] text-stone-500 dark:text-ivory/55 mt-1">
                               {[ev.date, ev.location].filter(Boolean).join(' · ')}
+                              {ev.language && (
+                                <span className="ml-1 text-[10px] tracking-[0.15em] uppercase text-gold/50">[{ev.language}]</span>
+                              )}
                               {ev.hit_count > 0 && (
                                 <> · <strong className="text-gold">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
                               )}
