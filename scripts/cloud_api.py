@@ -336,7 +336,7 @@ def search(
     params: list = [fts_query]
 
     if language:
-        filters.append("e.language = ?")
+        filters.append("LOWER(e.language) = LOWER(?)")
         params.append(language)
     if date_from:
         padded_from = date_from if len(date_from) > 4 else f"{date_from}-01-01"

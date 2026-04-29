@@ -174,6 +174,7 @@ function SearchPageInner() {
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
 
   const [selectedEventId, setSelectedEventId] = useState<string>(initialEvent);
   const [discourse, setDiscourse] = useState<DiscourseResponse | null>(null);
@@ -270,6 +271,13 @@ function SearchPageInner() {
   useEffect(() => {
     if (initialQuery) void runSearch(initialQuery, initialSort, initialMode, initialProx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/languages')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.languages)) setAvailableLanguages(d.languages); })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -586,7 +594,7 @@ function SearchPageInner() {
                 <span className="text-stone-500 dark:text-ivory/60">
                   {locale === 'hi' ? 'भाषा' : 'Lang'}:
                 </span>
-                {['', 'English', 'Hindi'].map((lang) => (
+                {(['', ...availableLanguages.length ? availableLanguages : ['English', 'Hindi']]).map((lang) => (
                   <button
                     key={lang}
                     type="button"
