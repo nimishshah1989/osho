@@ -306,19 +306,20 @@ function SearchPageInner() {
       const raw = rawQ.trim();
       if (!raw) return;
 
-      // If there's still Roman text in Hindi mode, convert it for FTS
+      // Transliterate Roman \u2192 Devanagari if needed.
+      // Only expand OR variants (vowel/anusvara) for 'all words' mode \u2014
+      // phrase and near modes need literal terms, not OR expressions.
+      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(raw);
+      const devanagari = isRoman ? romanToDevanagari(raw) : raw;
+      const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
       const searchTerm =
-        locale === 'hi' && /[a-zA-Z]/.test(raw)
-          ? buildHindiFtsQuery(romanToDevanagari(raw))
-          : /[\u0900-\u097F]/.test(raw)
-            ? buildHindiFtsQuery(raw)
-            : raw;
+        hasDevanagari && mode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
 
       setSelectedEventId('');
       syncUrl(searchTerm, sort, '', mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     },
-    [locale, sort, mode, proximity, syncUrl, runSearch],
+    [locale, mode, sort, proximity, syncUrl, runSearch],
   );
 
   const handleSubmit = (e: React.FormEvent) => {

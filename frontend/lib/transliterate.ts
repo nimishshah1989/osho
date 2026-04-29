@@ -166,12 +166,18 @@ function expandVowelVariants(word: string): string[] {
     return cp >= 0x093e && cp <= 0x094d;
   };
 
-  // 1. Insert explicit ā (ा) between two consecutive consonants
-  //    (first consonant has an implicit 'a' with no following matra/virama)
+  // 1. Insert explicit ā (ा) after the final consonant of a conjunct when
+  //    followed by another consonant with no matra/virama.
+  //    This handles "ज्ञन" → "ज्ञान" but NOT "इसका" → "इसाका".
+  //    The virama check (U+094D) ensures we only expand inside conjuncts,
+  //    not between ordinary standalone consonants that already carry inherent 'a'.
+  const VIRAMA_CP = 0x094d;
   let withAA = '';
   for (let i = 0; i < word.length; i++) {
     withAA += word[i];
+    const prevCp = i > 0 ? (word.codePointAt(i - 1) ?? 0) : 0;
     if (
+      prevCp === VIRAMA_CP &&
       isConsonant(word[i]) &&
       i + 1 < word.length &&
       isConsonant(word[i + 1]) &&
