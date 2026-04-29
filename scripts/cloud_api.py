@@ -245,55 +245,70 @@ def _augment_near_cross_paragraph(
     if not extra_ids:
         return
 
-    # Fetch best paragraphs for the extra events via OR query
-    or_query = ' OR '.join(words)
+    # For each word, fetch its best paragraph per extra event so the snippet
+    # always shows one paragraph per word (making both words visible in the UI).
     ph = ','.join('?' * len(extra_ids))
-    try:
-        extra_rows = conn.execute(
-            f"""
-            SELECT
-                f.event_id, f.paragraph_id, f.sequence_number, f.content,
-                f.title, e.date, e.location, e.language,
-                bm25(paragraphs_fts) AS rank
-            FROM paragraphs_fts f
-            LEFT JOIN events e ON e.id = f.event_id
-            WHERE paragraphs_fts MATCH ?
-              AND f.event_id IN ({ph})
-            ORDER BY rank
-            """,
-            (or_query, *extra_ids),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return
+    seen_para_ids: set = set()
 
-    for r in extra_rows:
-        ev_id = r["event_id"]
-        if ev_id not in events:
-            events[ev_id] = {
-                "event_id": ev_id,
-                "title": r["title"],
-                "date": r["date"],
-                "location": r["location"],
-                "language": r["language"],
-                "best_rank": r["rank"],
-                "rank_sum": 0.0,
-                "hit_count": 0,
-                "hits": [],
-            }
-        ev = events[ev_id]
-        ev["rank_sum"] += r["rank"]
-        ev["hit_count"] += 1
-        content = _strip_shailendra(r["content"])
-        is_meta = (
-            r["sequence_number"] == 0
-            or content.lower().startswith("event page in sannyas")
-        )
-        if len(ev["hits"]) < 3 and not is_meta:
-            ev["hits"].append({
-                "paragraph_id": r["paragraph_id"],
-                "sequence_number": r["sequence_number"],
-                "content": content,
-            })
+    for word in words:
+        try:
+            word_rows = conn.execute(
+                f"""
+                SELECT
+                    f.event_id, f.paragraph_id, f.sequence_number, f.content,
+                    f.title, e.date, e.location, e.language,
+                    bm25(paragraphs_fts) AS rank
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                  AND f.event_id IN ({ph})
+                ORDER BY rank
+                """,
+                (word, *extra_ids),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            continue
+
+        # Keep only the best (lowest BM25) paragraph per event for this word
+        best_for_event: dict = {}
+        for r in word_rows:
+            ev_id = r["event_id"]
+            if ev_id not in best_for_event:
+                best_for_event[ev_id] = r
+
+        for ev_id, r in best_for_event.items():
+            if ev_id not in events:
+                events[ev_id] = {
+                    "event_id": ev_id,
+                    "title": r["title"],
+                    "date": r["date"],
+                    "location": r["location"],
+                    "language": r["language"],
+                    "best_rank": r["rank"],
+                    "rank_sum": 0.0,
+                    "hit_count": 0,
+                    "hits": [],
+                }
+            ev = events[ev_id]
+            ev["rank_sum"] += r["rank"]
+            ev["hit_count"] += 1
+            content = _strip_shailendra(r["content"])
+            is_meta = (
+                r["sequence_number"] == 0
+                or content.lower().startswith("event page in sannyas")
+            )
+            # Add this word's best paragraph if not already shown
+            if (
+                not is_meta
+                and r["paragraph_id"] not in seen_para_ids
+                and len(ev["hits"]) < 3
+            ):
+                seen_para_ids.add(r["paragraph_id"])
+                ev["hits"].append({
+                    "paragraph_id": r["paragraph_id"],
+                    "sequence_number": r["sequence_number"],
+                    "content": content,
+                })
 
 
 def _phrase_text(fts_query: str) -> str:
