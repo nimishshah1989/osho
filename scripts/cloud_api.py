@@ -146,10 +146,19 @@ def catalog():
 # ---------- Keyword search (pure Osho; no LLM) ----------
 
 _TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
+_HAS_DEVANAGARI = re.compile(r'[ऀ-ॿ]')
 
 
 def _rewrite_query(user_query: str) -> str:
     return _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
+
+
+def _phrase_text(fts_query: str) -> str:
+    """If query is a bare phrase (starts+ends with "), return the inner text; else ''."""
+    q = fts_query.strip()
+    if q.startswith('"') and q.endswith('"') and len(q) > 2:
+        return q[1:-1]
+    return ''
 
 
 @app.get("/api/search")
@@ -223,6 +232,12 @@ def search(
         conn.close()
         raise HTTPException(status_code=400, detail=f"Invalid query: {ex}")
 
+    # For Devanagari phrase queries, FTS5 tokenises away matras so "मेरा"
+    # and "मेरी" collapse to the same token. Post-filter to exact string match.
+    phrase = _phrase_text(fts_query)
+    if phrase and _HAS_DEVANAGARI.search(phrase):
+        rows = [r for r in rows if phrase in r["content"]]
+
     # Group by event. Track all hits for ranking, keep top 3 for display.
     events: dict = {}
     total_hits = 0
@@ -267,21 +282,26 @@ def search(
     if date_to:
         count_params.append(padded_to)
 
-    try:
-        row = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
-            FROM paragraphs_fts f
-            LEFT JOIN events e ON e.id = f.event_id
-            WHERE paragraphs_fts MATCH ?
-            {where_extra}
-            """,
-            count_params,
-        ).fetchone()
-        total_events = row["ev_count"]
-        total_hits = row["hit_count"]
-    except sqlite3.OperationalError:
+    if phrase and _HAS_DEVANAGARI.search(phrase):
+        # Counts come from the already-filtered events dict (post-filter applied above)
         total_events = len(events)
+        total_hits = sum(ev["hit_count"] for ev in events.values())
+    else:
+        try:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                """,
+                count_params,
+            ).fetchone()
+            total_events = row["ev_count"]
+            total_hits = row["hit_count"]
+        except sqlite3.OperationalError:
+            total_events = len(events)
 
     conn.close()
 

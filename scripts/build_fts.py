@@ -26,7 +26,7 @@ def build():
     conn.commit()
 
     print(
-        "Creating paragraphs_fts (porter+unicode61)...",
+        "Creating paragraphs_fts (porter+unicode61, diacritics=1)...",
         flush=True,
     )
     cur.execute(
@@ -38,7 +38,7 @@ def build():
             paragraph_id UNINDEXED,
             sequence_number UNINDEXED,
             title_search,
-            tokenize = 'porter unicode61 remove_diacritics 2'
+            tokenize = 'porter unicode61 remove_diacritics 1'
         )
         """
     )
