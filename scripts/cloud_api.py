@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
 import math
@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import unicodedata
+import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -18,6 +19,53 @@ ALLOWED_ORIGINS = [
     for o in os.getenv("ALLOWED_ORIGINS", "https://osho-zeta.vercel.app").split(",")
     if o.strip()
 ]
+
+ADMIN_KEY = os.getenv("ADMIN_KEY", "osho-admin")
+
+# Tags used for auto-classification on ingest
+_ADMIN_TOPIC_TAGS: dict[str, str] = {
+    'love': 'love', 'meditation': 'meditation', 'death': 'death',
+    'god': 'god', 'freedom': 'freedom', 'awareness': 'awareness witnessing',
+    'silence': 'silence', 'mind': 'mind', 'ego': 'ego',
+    'consciousness': 'consciousness', 'bliss': 'bliss ananda',
+    'truth': 'truth', 'existence': 'existence', 'creativity': 'creativity',
+    'fear': 'fear', 'anger': 'anger', 'body': 'body',
+    'breath': 'breath breathing', 'dreams': 'dream dreams',
+    'energy': 'energy', 'surrender': 'surrender', 'devotion': 'devotion bhakti',
+    'transformation': 'transformation', 'society': 'society',
+    'relationship': 'relationship', 'sex': 'sex sexuality',
+    'courage': 'courage', 'loneliness': 'loneliness aloneness',
+    'children': 'children child', 'education': 'education',
+    'science': 'science', 'beauty': 'beauty beautiful',
+    'laughter': 'laughter humor', 'art': 'art', 'nature': 'nature',
+    'women': 'women woman', 'disciple': 'disciple discipleship',
+    'enlightenment': 'enlightenment awakening', 'prayer': 'prayer',
+    'religion': 'religion religious',
+}
+
+
+def _check_admin(request: Request) -> None:
+    key = request.headers.get("x-admin-key", "")
+    if not key or key != ADMIN_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _ensure_event_tags(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS event_tags (
+            event_id TEXT, tag TEXT, PRIMARY KEY (event_id, tag)
+        )
+    """)
+
+
+def _auto_classify(title: str, content: str) -> list[str]:
+    text = (title + " " + content).lower()
+    matched = []
+    for tag, keywords_str in _ADMIN_TOPIC_TAGS.items():
+        if any(kw in text for kw in keywords_str.split()):
+            matched.append(tag)
+    return sorted(matched)
+
 
 LENS_PALETTE = {
     "Meditation":    "#f59e0b",
@@ -688,6 +736,176 @@ def discourse(title: str | None = None, event_id: str | None = None):
         },
         "paragraphs": paragraphs,
     }
+
+
+# ─── Admin endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/admin/events")
+def admin_events(
+    request: Request,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    q: str = Query(""),
+    language: str = Query(""),
+):
+    _check_admin(request)
+    if not os.path.exists(DB_PATH):
+        return {"events": [], "total": 0}
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        has_tags = bool(cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
+        ).fetchone())
+        where_parts, params = ["title IS NOT NULL"], []
+        if q:
+            where_parts.append("(title LIKE ? OR location LIKE ?)")
+            params += [f"%{q}%", f"%{q}%"]
+        if language:
+            where_parts.append("language = ?")
+            params.append(language)
+        where = " AND ".join(where_parts)
+        total = cur.execute(f"SELECT COUNT(*) FROM events WHERE {where}", params).fetchone()[0]
+        rows = cur.execute(
+            f"SELECT id, title, date, location, language FROM events WHERE {where}"
+            f" ORDER BY COALESCE(date,''), title LIMIT ? OFFSET ?",
+            params + [per_page, (page - 1) * per_page],
+        ).fetchall()
+        tags_map: dict = {}
+        if has_tags and rows:
+            ids = [r["id"] for r in rows]
+            ph = ",".join("?" * len(ids))
+            for r in cur.execute(
+                f"SELECT event_id, tag FROM event_tags WHERE event_id IN ({ph})", ids
+            ).fetchall():
+                tags_map.setdefault(r[0], []).append(r[1])
+        events = [
+            {
+                "id": r["id"], "title": r["title"], "date": r["date"],
+                "location": r["location"], "language": r["language"],
+                "tags": sorted(tags_map.get(r["id"], [])),
+            }
+            for r in rows
+        ]
+    return {"events": events, "total": total, "page": page, "per_page": per_page}
+
+
+@app.patch("/admin/events/{event_id}")
+async def admin_update_event(event_id: str, request: Request, body: dict = Body(...)):
+    _check_admin(request)
+    allowed = {"title", "date", "location", "language"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid fields")
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        sets = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE events SET {sets} WHERE id = ?", list(updates.values()) + [event_id])
+        conn.commit()
+    return {"ok": True}
+
+
+@app.put("/admin/events/{event_id}/tags")
+async def admin_set_tags(event_id: str, request: Request, body: dict = Body(...)):
+    _check_admin(request)
+    tags = [t.strip().lower() for t in body.get("tags", []) if str(t).strip()]
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        _ensure_event_tags(conn)
+        conn.execute("DELETE FROM event_tags WHERE event_id = ?", (event_id,))
+        for tag in tags:
+            conn.execute(
+                "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)", (event_id, tag)
+            )
+        conn.commit()
+    return {"ok": True, "tags": sorted(tags)}
+
+
+@app.delete("/admin/events/{event_id}")
+async def admin_delete_event(event_id: str, request: Request):
+    _check_admin(request)
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        para_ids = [
+            r[0] for r in
+            conn.execute("SELECT id FROM paragraphs WHERE event_id = ?", (event_id,)).fetchall()
+        ]
+        if para_ids:
+            ph = ",".join("?" * len(para_ids))
+            conn.execute(f"DELETE FROM paragraphs_fts WHERE rowid IN ({ph})", para_ids)
+        conn.execute("DELETE FROM paragraphs WHERE event_id = ?", (event_id,))
+        conn.execute("DELETE FROM event_tags WHERE event_id = ?", (event_id,))
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.get("/admin/all-tags")
+def admin_all_tags(request: Request):
+    _check_admin(request)
+    if not os.path.exists(DB_PATH):
+        return {"tags": []}
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        has_tags = bool(conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
+        ).fetchone())
+        if not has_tags:
+            return {"tags": []}
+        rows = conn.execute(
+            "SELECT tag, COUNT(*) as cnt FROM event_tags GROUP BY tag ORDER BY cnt DESC"
+        ).fetchall()
+    return {"tags": [{"tag": r[0], "count": r[1]} for r in rows]}
+
+
+@app.post("/admin/ingest")
+async def admin_ingest(request: Request, body: dict = Body(...)):
+    _check_admin(request)
+    title    = (body.get("title") or "").strip()
+    date     = (body.get("date") or "").strip() or None
+    location = (body.get("location") or "").strip() or None
+    language = (body.get("language") or "English").strip()
+    content  = (body.get("content") or "").strip()
+    manual_tags = [t.strip().lower() for t in body.get("tags", []) if str(t).strip()]
+
+    if not title or not content:
+        raise HTTPException(status_code=400, detail="title and content are required")
+
+    # Split into paragraphs
+    raw = [p.strip() for p in re.split(r'\n{2,}', content)]
+    paragraphs = [p for p in raw if len(p) >= 20]
+    if not paragraphs:
+        paragraphs = [p for p in [ln.strip() for ln in content.split('\n')] if len(p) >= 10]
+    if not paragraphs:
+        raise HTTPException(status_code=400, detail="No usable paragraphs in content")
+
+    auto_tags = _auto_classify(title, content)
+    all_tags = sorted(set(manual_tags) | set(auto_tags))
+    event_id = str(uuid.uuid4())
+
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        _ensure_event_tags(conn)
+        conn.execute(
+            "INSERT INTO events (id, title, date, location, language) VALUES (?, ?, ?, ?, ?)",
+            (event_id, title, date, location, language),
+        )
+        for seq, para in enumerate(paragraphs, 1):
+            conn.execute(
+                "INSERT INTO paragraphs (event_id, sequence_number, content, is_embedded)"
+                " VALUES (?, ?, ?, 0)",
+                (event_id, seq, para),
+            )
+        # Index into FTS
+        norm_title = _normalize_devanagari(title)
+        conn.execute("""
+            INSERT INTO paragraphs_fts
+                (content, title, event_id, paragraph_id, sequence_number, title_search)
+            SELECT content, ?, event_id, id, sequence_number, ?
+            FROM paragraphs WHERE event_id = ?
+        """, (norm_title, norm_title, event_id))
+        for tag in all_tags:
+            conn.execute(
+                "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)", (event_id, tag)
+            )
+        conn.commit()
+
+    return {"ok": True, "event_id": event_id, "paragraphs": len(paragraphs), "tags": all_tags}
 
 
 if __name__ == "__main__":
