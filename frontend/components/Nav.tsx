@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Library, Search, Sparkles, Sun, Moon } from 'lucide-react';
+import { Library, Search, Sparkles, Sun, Moon, HelpCircle } from 'lucide-react';
 import { useLocale } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 
@@ -84,6 +84,10 @@ export default function Nav() {
         <Link href="/constellation" aria-current={isActive('/constellation') ? 'page' : undefined} className={linkClass('/constellation')}>
           <Sparkles size={12} />
           <span className="hidden sm:inline">{t('nav.constellation')}</span>
+        </Link>
+        <Link href="/help" aria-current={isActive('/help') ? 'page' : undefined} className={linkClass('/help')}>
+          <HelpCircle size={12} />
+          <span className="hidden sm:inline">Help</span>
         </Link>
       </div>
     </nav>

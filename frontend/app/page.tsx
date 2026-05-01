@@ -188,6 +188,7 @@ function SearchPageInner() {
   const [results, setResults] = useState<SearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
 
   const [selectedEventId, setSelectedEventId] = useState<string>(initialEvent);
   const [discourse, setDiscourse] = useState<DiscourseResponse | null>(null);
@@ -287,6 +288,13 @@ function SearchPageInner() {
   }, []);
 
   useEffect(() => {
+    fetch('/api/languages')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d.languages)) setAvailableLanguages(d.languages); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     if (!selectedEventId) {
       setDiscourse(null);
       setDiscourseError(null);
@@ -372,12 +380,16 @@ function SearchPageInner() {
 
   const handleLangFilterChange = (val: string) => {
     setLangFilter(val);
-    if (query.trim() && results) {
-      setTimeout(() => {
-        void runSearch(query.trim(), sort, mode, proximity);
-      }, 0);
-    }
   };
+
+  // Re-run search when language filter changes. Using useEffect so the search
+  // fires after React re-renders runSearch with the new langFilter in its closure.
+  const isMountedLangRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedLangRef.current) { isMountedLangRef.current = true; return; }
+    if (query.trim()) void runSearch(query.trim(), sort, mode, proximity);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [langFilter]);
 
   const selectEvent = (eventId: string) => {
     setSelectedEventId(eventId);
@@ -596,7 +608,7 @@ function SearchPageInner() {
                 <span className="text-stone-500 dark:text-ivory/60">
                   {locale === 'hi' ? 'भाषा' : 'Lang'}:
                 </span>
-                {['', 'English', 'Hindi'].map((lang) => (
+                {(['', ...availableLanguages.length ? availableLanguages : ['English', 'Hindi']]).map((lang) => (
                   <button
                     key={lang}
                     type="button"
@@ -619,7 +631,7 @@ function SearchPageInner() {
                 </span>
                 <input
                   type="text"
-                  placeholder="1970"
+                  placeholder="1942"
                   maxLength={4}
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -696,6 +708,9 @@ function SearchPageInner() {
                             </span>
                             <span className="block text-[12px] tracking-[0.1em] text-stone-500 dark:text-ivory/55 mt-1">
                               {[ev.date, ev.location].filter(Boolean).join(' · ')}
+                              {ev.language && (
+                                <span className="ml-1 text-[10px] tracking-[0.15em] uppercase text-gold/50">[{ev.language}]</span>
+                              )}
                               {ev.hit_count > 0 && (
                                 <> · <strong className="text-gold">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
                               )}
@@ -741,6 +756,16 @@ function SearchPageInner() {
                           <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
+                      {selectedEvent.title && (
+                        <a
+                          href={`https://www.sannyas.wiki/index.php?title=${encodeURIComponent(selectedEvent.title.replace(/ /g, '_'))}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-block mt-2 text-[11px] tracking-[0.15em] uppercase text-gold/60 hover:text-gold transition-colors"
+                        >
+                          sannyas.wiki ↗
+                        </a>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 flex-shrink-0">
                       {/* Prev/Next event navigation */}
