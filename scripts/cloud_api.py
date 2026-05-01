@@ -1,10 +1,12 @@
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
+import heapq
 import math
 import os
 import re
 import sqlite3
+import sys
 import unicodedata
 import uuid
 from collections import Counter
@@ -65,6 +67,12 @@ _ADMIN_TOPIC_TAGS: dict[str, str] = {
     'art':            'art कला',
     'relationship':   'relationship intimacy संबंध रिश्ता',
 }
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return bool(conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone())
 
 
 def _check_admin(request: Request) -> None:
@@ -211,7 +219,6 @@ def _min_para_span(seqs_per_word: list[list[int]]) -> int:
     Uses a sliding-window / merge-pointer approach over sorted lists.
     Returns sys.maxsize if any word list is empty.
     """
-    import heapq, sys
     if any(not lst for lst in seqs_per_word):
         return sys.maxsize
     # Heap entries: (seq_number, word_index, position_in_that_list)
@@ -338,16 +345,13 @@ async def lifespan(app: FastAPI):
         print(f"WARNING: DB not found at {DB_PATH}", flush=True)
     else:
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
-            has_fts = conn.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paragraphs_fts'"
-            ).fetchone()
+            has_fts = _table_exists(conn, 'paragraphs_fts')
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:
-            print(
-                "Ask Engine: paragraphs_fts missing — run scripts/build_fts.py.",
-                flush=True,
-            )
+            print("Ask Engine: paragraphs_fts missing — run scripts/build_fts.py.", flush=True)
+    if ADMIN_KEY == "osho-admin":
+        print("WARNING: ADMIN_KEY is using the default value. Set ADMIN_KEY env var.", flush=True)
     yield
 
 
@@ -398,10 +402,7 @@ def catalog():
         )
         rows = cur.fetchall()
 
-        # Check if event_tags table exists (built by build_tags.py)
-        has_tags = bool(cur.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
-        ).fetchone())
+        has_tags = _table_exists(conn, 'event_tags')
 
         # Build tags map: event_id → sorted list of tags
         tags_map: dict = {}
@@ -429,10 +430,7 @@ def tags():
     if not os.path.exists(DB_PATH):
         return {"tags": []}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
-        has_tags = bool(conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
-        ).fetchone())
-        if not has_tags:
+        if not _table_exists(conn, 'event_tags'):
             return {"tags": []}
         rows = conn.execute(
             "SELECT tag, COUNT(*) as cnt FROM event_tags GROUP BY tag ORDER BY cnt DESC"
@@ -463,6 +461,10 @@ def search(
     fts_query = _rewrite_query(q)
     if not fts_query:
         raise HTTPException(status_code=400, detail="Empty query.")
+
+    # Validate date range
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(status_code=400, detail="date_from must be ≤ date_to")
 
     # Build filter clauses
     filters = []
@@ -778,15 +780,13 @@ def admin_events(
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        has_tags = bool(cur.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
-        ).fetchone())
+        has_tags = _table_exists(conn, 'event_tags')
         where_parts, params = ["e.title IS NOT NULL"], []
         if q:
             where_parts.append("(e.title LIKE ? OR e.location LIKE ?)")
             params += [f"%{q}%", f"%{q}%"]
         if language:
-            where_parts.append("e.language = ?")
+            where_parts.append("LOWER(e.language) = LOWER(?)")
             params.append(language)
         if tag and has_tags:
             where_parts.append("EXISTS (SELECT 1 FROM event_tags et WHERE et.event_id = e.id AND et.tag = ?)")
@@ -870,10 +870,7 @@ def admin_all_tags(request: Request):
     if not os.path.exists(DB_PATH):
         return {"tags": []}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
-        has_tags = bool(conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
-        ).fetchone())
-        if not has_tags:
+        if not _table_exists(conn, 'event_tags'):
             return {"tags": []}
         rows = conn.execute(
             "SELECT tag, COUNT(*) as cnt FROM event_tags GROUP BY tag ORDER BY cnt DESC"
@@ -912,12 +909,11 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
             "INSERT INTO events (id, title, date, location, language) VALUES (?, ?, ?, ?, ?)",
             (event_id, title, date, location, language),
         )
-        for seq, para in enumerate(paragraphs, 1):
-            conn.execute(
-                "INSERT INTO paragraphs (event_id, sequence_number, content, is_embedded)"
-                " VALUES (?, ?, ?, 0)",
-                (event_id, seq, para),
-            )
+        conn.executemany(
+            "INSERT INTO paragraphs (event_id, sequence_number, content, is_embedded)"
+            " VALUES (?, ?, ?, 0)",
+            [(event_id, seq, para, 0) for seq, para in enumerate(paragraphs, 1)],
+        )
         # Index into FTS
         norm_title = _normalize_devanagari(title)
         conn.execute("""
@@ -926,10 +922,10 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
             SELECT content, ?, event_id, id, sequence_number, ?
             FROM paragraphs WHERE event_id = ?
         """, (norm_title, norm_title, event_id))
-        for tag in all_tags:
-            conn.execute(
-                "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)", (event_id, tag)
-            )
+        conn.executemany(
+            "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
+            [(event_id, tag) for tag in all_tags],
+        )
         conn.commit()
 
     return {"ok": True, "event_id": event_id, "paragraphs": len(paragraphs), "tags": all_tags}
