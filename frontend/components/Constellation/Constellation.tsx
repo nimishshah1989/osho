@@ -440,12 +440,7 @@ export default function Constellation() {
   const [openSeries, setOpenSeries] = useState<string | null>(null);
 
   useEffect(() => {
-    const base =
-      process.env.NEXT_PUBLIC_API_URL ??
-      (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
-        ? ''
-        : 'http://localhost:8000');
-    fetch(`${base}/api/catalog`, { cache: 'no-store' })
+    fetch('/api/catalog', { cache: 'no-store' })
       .then((r) => r.json())
       .then((d: { events: Event[] }) => { setEvents(d.events); setLoading(false); })
       .catch(() => { setError('Could not load archive.'); setLoading(false); });
