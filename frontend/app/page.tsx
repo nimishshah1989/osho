@@ -27,6 +27,7 @@ interface Hit {
   paragraph_id: number;
   sequence_number: number;
   content: string;
+  hl?: string;
 }
 
 interface EventHit {
@@ -103,11 +104,7 @@ function extractHighlights(query: string): RegExp | null {
   const parts: string[] = [];
   for (const p of phrases) {
     if (!p) continue;
-    if (HAS_DEVANAGARI.test(p)) {
-      parts.push(escape(p));
-    } else {
-      parts.push(escape(p));
-    }
+    parts.push(escape(p));
   }
   for (const w of words) {
     if (w.endsWith('*')) {
@@ -125,7 +122,24 @@ function extractHighlights(query: string): RegExp | null {
   return new RegExp(`(${parts.join('|')})`, 'gi');
 }
 
-function Highlighted({ text, pattern }: { text: string; pattern: RegExp | null }) {
+function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern: RegExp | null }) {
+  // Backend sends FTS5 highlight markers «...» that correctly reflect porter-stemmed matches.
+  if (hl) {
+    const parts = hl.split(/(«[^»]*»)/);
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.startsWith('«') ? (
+            <mark key={i} className="bg-yellow-300 dark:bg-yellow-500/40 text-[rgb(var(--fg))] font-bold rounded-sm px-0.5">
+              {part.slice(1, -1)}
+            </mark>
+          ) : (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          ),
+        )}
+      </>
+    );
+  }
   if (!pattern) return <>{text}</>;
   const parts = text.split(pattern);
   return (
@@ -684,7 +698,7 @@ function SearchPageInner() {
                           onClick={() => selectEvent(ev.event_id)}
                           className={`w-full text-left px-4 py-3.5 transition-colors flex justify-between items-start gap-4 ${
                             active
-                              ? 'bg-gold/15 text-gold border-l-3 border-gold'
+                              ? 'bg-gold/15 text-gold border-l-[3px] border-gold'
                               : 'hover:bg-stone-100 dark:hover:bg-ivory/5'
                           }`}
                         >
@@ -805,12 +819,12 @@ function SearchPageInner() {
                       {selectedEvent.hits.map((h) => (
                         <li
                           key={h.paragraph_id}
-                          className="bg-stone-100 dark:bg-ivory/5 border-l-3 border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
+                          className="bg-stone-100 dark:bg-ivory/5 border-l-[3px] border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
                         >
                           <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
                             Para {h.sequence_number}
                           </div>
-                          <Highlighted text={h.content} pattern={highlightPattern} />
+                          <Highlighted text={h.content} hl={h.hl} pattern={highlightPattern} />
                         </li>
                       ))}
                     </ol>
