@@ -445,7 +445,7 @@ function SeriesCard({
         className="w-full text-left px-4 py-3.5"
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="text-[15px] font-medium leading-snug text-[rgb(var(--fg))] truncate flex-1">
+          <div className="text-[15px] font-medium leading-snug text-[rgb(var(--fg))] line-clamp-2 flex-1">
             {s.name}
           </div>
           <span className="text-gold/50 flex-shrink-0 text-[18px] leading-none mt-0.5">
