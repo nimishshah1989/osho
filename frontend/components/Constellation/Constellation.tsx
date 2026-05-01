@@ -182,11 +182,21 @@ const THEMES: { name: string; color: string; bg: string; keys: string[] }[] = [
 
 // ─── Era definitions ──────────────────────────────────────────────────────────
 
+// Osho's first recorded talks were at meditation camps from the mid-1950s,
+// while he was a professor in Jabalpur. The full arc of his teaching life:
+//   Early period  1955–1968  camps, Jabalpur, all-India wandering
+//   Bombay        1969–1973  moved to Bombay, early ashram followers
+//   Poona I       1974–1981  Shree Rajneesh Ashram
+//   Oregon        1981–1985  Rajneeshpuram commune
+//   World Tour    1985–1986  Uruguay, Greece, Portugal, UK, etc.
+//   Poona II      1987–1990  return to Pune as Osho
 const ERAS: { name: string; label: string; from: number; to: number; color: string }[] = [
-  { name: 'Bombay', label: 'Bombay  1965–1974',      from: 1960, to: 1973, color: '#60a5fa' },
-  { name: 'Poona I', label: 'Poona I  1974–1981',    from: 1974, to: 1980, color: '#d4af37' },
-  { name: 'Oregon', label: 'Oregon  1981–1987',      from: 1981, to: 1986, color: '#ef4444' },
-  { name: 'Poona II', label: 'Poona II  1987–1990',  from: 1987, to: 1995, color: '#10b981' },
+  { name: 'Early',    label: 'Early  1955–1968',      from: 1950, to: 1968, color: '#a3a3a3' },
+  { name: 'Bombay',   label: 'Bombay  1969–1973',     from: 1969, to: 1973, color: '#60a5fa' },
+  { name: 'Poona I',  label: 'Poona I  1974–1981',    from: 1974, to: 1980, color: '#d4af37' },
+  { name: 'Oregon',   label: 'Oregon  1981–1985',     from: 1981, to: 1985, color: '#ef4444' },
+  { name: 'World Tour', label: 'World Tour  1985–1986', from: 1985, to: 1986, color: '#8b5cf6' },
+  { name: 'Poona II', label: 'Poona II  1987–1990',   from: 1987, to: 1995, color: '#10b981' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
