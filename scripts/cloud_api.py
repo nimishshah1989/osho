@@ -184,7 +184,7 @@ def search(
     params: list = [fts_query]
 
     if language:
-        filters.append("e.language = ?")
+        filters.append("LOWER(e.language) = LOWER(?)")
         params.append(language)
     if date_from:
         padded_from = date_from if len(date_from) > 4 else f"{date_from}-01-01"
@@ -205,6 +205,7 @@ def search(
                 f.paragraph_id,
                 f.sequence_number,
                 f.content,
+                highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl,
                 f.title,
                 e.date,
                 e.location,
@@ -252,10 +253,13 @@ def search(
             or content.lower().startswith("event page in sannyas")
         )
         if len(ev["hits"]) < 3 and not is_meta:
+            raw_hl = r["hl"] or r["content"]
+            hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
             ev["hits"].append({
                 "paragraph_id": r["paragraph_id"],
                 "sequence_number": r["sequence_number"],
                 "content": content,
+                "hl": hl,
             })
 
     # Count total distinct events matching (may exceed fetched rows)

@@ -27,6 +27,7 @@ interface Hit {
   paragraph_id: number;
   sequence_number: number;
   content: string;
+  hl?: string;
 }
 
 interface EventHit {
@@ -125,7 +126,24 @@ function extractHighlights(query: string): RegExp | null {
   return new RegExp(`(${parts.join('|')})`, 'gi');
 }
 
-function Highlighted({ text, pattern }: { text: string; pattern: RegExp | null }) {
+function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern: RegExp | null }) {
+  // Backend sends FTS5 highlight markers «...» that correctly reflect porter-stemmed matches.
+  if (hl) {
+    const parts = hl.split(/(«[^»]*»)/);
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.startsWith('«') ? (
+            <mark key={i} className="bg-yellow-300 dark:bg-yellow-500/40 text-[rgb(var(--fg))] font-bold rounded-sm px-0.5">
+              {part.slice(1, -1)}
+            </mark>
+          ) : (
+            <React.Fragment key={i}>{part}</React.Fragment>
+          ),
+        )}
+      </>
+    );
+  }
   if (!pattern) return <>{text}</>;
   const parts = text.split(pattern);
   return (
@@ -785,7 +803,7 @@ function SearchPageInner() {
                           <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
                             Para {h.sequence_number}
                           </div>
-                          <Highlighted text={h.content} pattern={highlightPattern} />
+                          <Highlighted text={h.content} hl={h.hl} pattern={highlightPattern} />
                         </li>
                       ))}
                     </ol>
