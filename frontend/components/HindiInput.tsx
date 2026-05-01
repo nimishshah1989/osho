@@ -70,15 +70,18 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
       const anuVars = expandAnusvara(primary);
       for (const v of anuVars) candidates.add(v);
 
-      // Add common alternative mappings:
-      // 'sh' could be श or ष, 'n' could be न or ण, etc.
-      // Generate a variant with Sh→ष swaps
-      const withShVariant = lastRomanWord
-        .replace(/sh/gi, 'Sh')
-        .replace(/Sh/gi, (m) => (m === 'Sh' ? 'sh' : 'Sh'));
-      if (withShVariant !== lastRomanWord) {
-        const alt = romanToDevanagari(withShVariant);
-        if (alt !== primary) candidates.add(alt);
+      // Alternative: 'sh' → श (default) vs 'Sh' → ष
+      // Produce the opposite case: if input has lowercase 'sh', try 'Sh' (ष), and vice versa
+      const hasLowerSh = /sh/.test(lastRomanWord);
+      const hasUpperSh = /Sh/.test(lastRomanWord);
+      if (hasLowerSh || hasUpperSh) {
+        const shVariant = hasLowerSh
+          ? lastRomanWord.replace(/sh/g, 'Sh')
+          : lastRomanWord.replace(/Sh/g, 'sh');
+        if (shVariant !== lastRomanWord) {
+          const alt = romanToDevanagari(shVariant);
+          if (alt !== primary) candidates.add(alt);
+        }
       }
 
       // Variant: 'n' → 'N' (ण vs न)

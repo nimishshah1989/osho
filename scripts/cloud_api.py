@@ -1,8 +1,11 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+import contextlib
+import math
 import os
 import re
 import sqlite3
+import unicodedata
 from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -63,17 +66,210 @@ def _era_from_date(raw: str) -> str:
     return "Poona II"
 
 
+# ─── Devanagari normalisation ────────────────────────────────────────────────
+# Mirrors the same logic in build_fts.py — must stay in sync.
+# Converts nasal-consonant+virama → anusvara (ं) when the nasal belongs to
+# the same phonological class as the following consonant.
+# This collapses अनन्त ↔ अनंत, मन्त्र ↔ मंत्र, etc. at query time,
+# matching the canonical form stored in the FTS index.
+
+_NASAL_RULES = [
+    ('ङ', 'क', 'ङ'),  # velar
+    ('ञ', 'च', 'ञ'),  # palatal
+    ('ण', 'ट', 'ण'),  # retroflex
+    ('न', 'त', 'न'),  # dental
+    ('म', 'प', 'म'),  # labial
+]
+_VIRAMA   = '्'
+_ANUSVARA = 'ं'
+
+_NASAL_PATTERNS = [
+    re.compile(
+        re.escape(nasal + _VIRAMA) + r'(?=[' + re.escape(lo) + '-' + re.escape(hi) + '])'
+    )
+    for nasal, lo, hi in _NASAL_RULES
+]
+
+
+def _normalize_devanagari(text: str) -> str:
+    if not text:
+        return text
+    text = unicodedata.normalize('NFC', text)
+    for pat in _NASAL_PATTERNS:
+        text = pat.sub(_ANUSVARA, text)
+    return text
+
+
+# ─── Query rewriting ─────────────────────────────────────────────────────────
+
+_TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
+
+
+def _rewrite_query(user_query: str) -> str:
+    q = _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
+    return _normalize_devanagari(q)
+
+
+# ─── Cross-paragraph NEAR support ────────────────────────────────────────────
+# FTS5 NEAR() only matches within a single row (paragraph). For large distances
+# (N ≥ 30) we also look for events where each query word appears in paragraphs
+# whose sequence_numbers are within N // 30 steps of each other.
+
+_NEAR_RE = re.compile(
+    r'^NEAR\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)\s*$',
+    re.IGNORECASE,
+)
+
+
+def _parse_near(fts_query: str):
+    """Return (words, distance) if query is a bare NEAR(...) expression, else None."""
+    m = _NEAR_RE.match(fts_query.strip())
+    if not m:
+        return None
+    words_raw, dist_str = m.group(1), m.group(2)
+    words = [w.strip().strip('"') for w in words_raw.split() if w.strip().strip('"')]
+    if len(words) < 2:
+        return None
+    return words, int(dist_str)
+
+
+def _min_para_span(seqs_per_word: list[list[int]]) -> int:
+    """Given sorted sequence-number lists per word, return the minimum
+    window width that contains at least one paragraph per word.
+
+    Uses a sliding-window / merge-pointer approach over sorted lists.
+    Returns sys.maxsize if any word list is empty.
+    """
+    import heapq, sys
+    if any(not lst for lst in seqs_per_word):
+        return sys.maxsize
+    # Heap entries: (seq_number, word_index, position_in_that_list)
+    heap = [(seqs[0], i, 0) for i, seqs in enumerate(seqs_per_word)]
+    heapq.heapify(heap)
+    max_val = max(seqs[0] for seqs in seqs_per_word)
+    best = sys.maxsize
+    while True:
+        min_val, wi, pos = heapq.heappop(heap)
+        best = min(best, max_val - min_val)
+        if best == 0:
+            break
+        npos = pos + 1
+        if npos >= len(seqs_per_word[wi]):
+            break
+        nval = seqs_per_word[wi][npos]
+        max_val = max(max_val, nval)
+        heapq.heappush(heap, (nval, wi, npos))
+    return best
+
+
+def _augment_near_cross_paragraph(
+    conn: sqlite3.Connection,
+    words: list[str],
+    para_span: int,
+    where_extra: str,
+    filter_params: list,
+) -> dict:
+    """Return event dicts for cross-paragraph matches of all words in `words`.
+
+    For each word we query FTS independently. Then for each event that appears
+    in ALL per-word result sets, we compute the minimum paragraph window that
+    covers one occurrence of each word. Events whose window ≤ para_span are
+    returned with up to 3 sample hit paragraphs.
+    """
+    # Per-word: {event_id → sorted list of sequence_numbers}
+    per_word: list[dict[int, list[int]]] = []
+    for word in words:
+        word_fts = _normalize_devanagari(word)
+        try:
+            wrows = conn.execute(
+                f"""
+                SELECT f.event_id, f.sequence_number
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                """,
+                ([word_fts] + filter_params),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        d: dict[int, list[int]] = {}
+        for r in wrows:
+            d.setdefault(r[0], []).append(r[1])
+        per_word.append(d)
+
+    # Intersect: events present in every word's result
+    if not per_word:
+        return {}
+    common_ids = set(per_word[0].keys())
+    for d in per_word[1:]:
+        common_ids &= d.keys()
+
+    events: dict = {}
+    for ev_id in common_ids:
+        seqs_per_word = [sorted(d[ev_id]) for d in per_word]
+        span = _min_para_span(seqs_per_word)
+        if span > para_span:
+            continue
+
+        # Fetch event metadata and a few sample paragraphs
+        ev_row = conn.execute(
+            "SELECT title, date, location, language FROM events WHERE id = ?",
+            (ev_id,),
+        ).fetchone()
+        if not ev_row:
+            continue
+
+        # Collect the closest paragraphs (union of matching seqs, keep first 5)
+        all_seqs: list[int] = []
+        for seqs in seqs_per_word:
+            all_seqs.extend(seqs)
+        all_seqs = sorted(set(all_seqs))[:5]
+
+        hits = []
+        for seq in all_seqs:
+            para = conn.execute(
+                "SELECT id, content FROM paragraphs WHERE event_id = ? AND sequence_number = ?",
+                (ev_id, seq),
+            ).fetchone()
+            if para and len(hits) < 3:
+                content = _strip_shailendra(para[1] or '')
+                is_meta = (
+                    seq == 0
+                    or content.lower().startswith("event page in sannyas")
+                )
+                if not is_meta:
+                    hits.append({
+                        "paragraph_id": para[0],
+                        "sequence_number": seq,
+                        "content": content,
+                        "hl": None,
+                    })
+
+        events[ev_id] = {
+            "event_id": ev_id,
+            "title": ev_row[0],
+            "date": ev_row[1],
+            "location": ev_row[2],
+            "language": ev_row[3],
+            "rank": 0.0,
+            "hit_count": len(all_seqs),
+            "hits": hits,
+            "_cross_para": True,
+        }
+
+    return events
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not os.path.exists(DB_PATH):
         print(f"WARNING: DB not found at {DB_PATH}", flush=True)
     else:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        has_fts = cur.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paragraphs_fts'"
-        ).fetchone()
-        conn.close()
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            has_fts = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='paragraphs_fts'"
+            ).fetchone()
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:
@@ -100,14 +296,13 @@ def health():
     ok = os.path.exists(DB_PATH)
     fts_ready = False
     if ok:
-        conn = sqlite3.connect(DB_PATH)
-        fts_ready = bool(
-            conn.execute(
-                "SELECT 1 FROM sqlite_master"
-                " WHERE type='table' AND name='paragraphs_fts'"
-            ).fetchone()
-        )
-        conn.close()
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            fts_ready = bool(
+                conn.execute(
+                    "SELECT 1 FROM sqlite_master"
+                    " WHERE type='table' AND name='paragraphs_fts'"
+                ).fetchone()
+            )
     return {"status": "present", "db": ok, "fts": fts_ready}
 
 
@@ -123,38 +318,28 @@ def _series_from_title(title: str) -> str:
 def catalog():
     if not os.path.exists(DB_PATH):
         return {"events": []}
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT id, title, date, location FROM events"
-        " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title"
-    )
-    events = [
-        {
-            "id": r["id"],
-            "title": r["title"],
-            "date": r["date"],
-            "location": r["location"],
-        }
-        for r in cur.fetchall()
-    ]
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id, title, date, location FROM events"
+            " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title"
+        )
+        events = [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "date": r["date"],
+                "location": r["location"],
+            }
+            for r in cur.fetchall()
+        ]
     return {"events": events}
-
-
-# ---------- Keyword search (pure Osho; no LLM) ----------
-
-_TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
-
-
-def _rewrite_query(user_query: str) -> str:
-    return _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
 
 
 @app.get("/api/search")
 def search(
-    q: str = Query(..., min_length=1),
+    q: str = Query(..., min_length=1, max_length=500),
     limit: int = Query(200, ge=1, le=500),
     sort: str = Query('rank', pattern='^(rank|title)$'),
     language: Optional[str] = Query(
@@ -176,135 +361,134 @@ def search(
     if not fts_query:
         raise HTTPException(status_code=400, detail="Empty query.")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-
     # Build filter clauses
     filters = []
-    params: list = [fts_query]
+    filter_params: list = []
+    padded_from = ''
+    padded_to = ''
 
     if language:
         filters.append("LOWER(e.language) = LOWER(?)")
-        params.append(language)
+        filter_params.append(language)
     if date_from:
         padded_from = date_from if len(date_from) > 4 else f"{date_from}-01-01"
         filters.append("e.date >= ?")
-        params.append(padded_from)
+        filter_params.append(padded_from)
     if date_to:
         padded_to = date_to if len(date_to) > 4 else f"{date_to}-12-31"
         filters.append("e.date <= ?")
-        params.append(padded_to)
+        filter_params.append(padded_to)
 
     where_extra = (" AND " + " AND ".join(filters)) if filters else ""
 
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT
-                f.event_id,
-                f.paragraph_id,
-                f.sequence_number,
-                f.content,
-                highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl,
-                f.title,
-                e.date,
-                e.location,
-                e.language,
-                bm25(paragraphs_fts) AS rank
-            FROM paragraphs_fts f
-            LEFT JOIN events e ON e.id = f.event_id
-            WHERE paragraphs_fts MATCH ?
-            {where_extra}
-            ORDER BY rank
-            LIMIT ?
-            """,
-            (*params, limit * 10),
-        ).fetchall()
-    except sqlite3.OperationalError as ex:
-        conn.close()
-        raise HTTPException(status_code=400, detail=f"Invalid query: {ex}")
+    near_parsed = _parse_near(fts_query)
 
-    # Group by event. Track all hits for ranking, keep top 3 for display.
-    events: dict = {}
-    total_hits = 0
-    for r in rows:
-        total_hits += 1
-        ev_id = r["event_id"]
-        if ev_id not in events:
-            events[ev_id] = {
-                "event_id": ev_id,
-                "title": r["title"],
-                "date": r["date"],
-                "location": r["location"],
-                "language": r["language"],
-                "best_rank": r["rank"],
-                "rank_sum": 0.0,
-                "hit_count": 0,
-                "hits": [],
-            }
-        ev = events[ev_id]
-        ev["rank_sum"] += r["rank"]
-        ev["hit_count"] += 1
-        # Skip metadata paragraphs from display hits:
-        # seq 0 = title row, boilerplate like "event page in sannyas.wiki:"
-        content = _strip_shailendra(r["content"])
-        is_meta = (
-            r["sequence_number"] == 0
-            or content.lower().startswith("event page in sannyas")
-        )
-        if len(ev["hits"]) < 3 and not is_meta:
-            raw_hl = r["hl"] or r["content"]
-            hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
-            ev["hits"].append({
-                "paragraph_id": r["paragraph_id"],
-                "sequence_number": r["sequence_number"],
-                "content": content,
-                "hl": hl,
-            })
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
 
-    # Count total distinct events matching (may exceed fetched rows)
-    count_params: list = [fts_query]
-    if language:
-        count_params.append(language)
-    if date_from:
-        count_params.append(padded_from)
-    if date_to:
-        count_params.append(padded_to)
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT
+                    f.event_id,
+                    f.paragraph_id,
+                    f.sequence_number,
+                    f.content,
+                    highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl,
+                    f.title,
+                    e.date,
+                    e.location,
+                    e.language,
+                    bm25(paragraphs_fts) AS rank
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                ORDER BY rank
+                LIMIT ?
+                """,
+                ([fts_query] + filter_params + [limit * 10]),
+            ).fetchall()
+        except sqlite3.OperationalError as ex:
+            raise HTTPException(status_code=400, detail="Invalid search syntax.")
 
-    try:
-        row = conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
-            FROM paragraphs_fts f
-            LEFT JOIN events e ON e.id = f.event_id
-            WHERE paragraphs_fts MATCH ?
-            {where_extra}
-            """,
-            count_params,
-        ).fetchone()
-        total_events = row["ev_count"]
-        total_hits = row["hit_count"]
-    except sqlite3.OperationalError:
-        total_events = len(events)
+        # Group by event. Track all hits for ranking, keep top 3 for display.
+        events: dict = {}
+        for r in rows:
+            ev_id = r["event_id"]
+            if ev_id not in events:
+                events[ev_id] = {
+                    "event_id": ev_id,
+                    "title": r["title"],
+                    "date": r["date"],
+                    "location": r["location"],
+                    "language": r["language"],
+                    "best_rank": r["rank"],
+                    "hit_count": 0,
+                    "hits": [],
+                }
+            ev = events[ev_id]
+            ev["hit_count"] += 1
+            content = _strip_shailendra(r["content"])
+            is_meta = (
+                r["sequence_number"] == 0
+                or content.lower().startswith("event page in sannyas")
+            )
+            if len(ev["hits"]) < 3 and not is_meta:
+                raw_hl = r["hl"] or r["content"]
+                hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
+                ev["hits"].append({
+                    "paragraph_id": r["paragraph_id"],
+                    "sequence_number": r["sequence_number"],
+                    "content": content,
+                    "hl": hl,
+                })
 
-    conn.close()
+        # Augment with cross-paragraph NEAR matches when N is large enough
+        # (FTS5 NEAR only matches within a single paragraph row)
+        if near_parsed:
+            near_words, near_dist = near_parsed
+            # Only augment for N≥30; N<30 is tight enough that same-para is correct
+            if near_dist >= 30:
+                para_span = max(1, near_dist // 30)
+                cross = _augment_near_cross_paragraph(
+                    conn, near_words, para_span, where_extra, filter_params
+                )
+                for ev_id, cev in cross.items():
+                    if ev_id not in events:
+                        events[ev_id] = cev
+
+        # Count distinct events and hits
+        try:
+            count_row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                """,
+                ([fts_query] + filter_params),
+            ).fetchone()
+            total_events = count_row["ev_count"]
+            total_hits = count_row["hit_count"]
+        except sqlite3.OperationalError:
+            total_events = len(events)
+            total_hits = sum(e["hit_count"] for e in events.values())
 
     # Compute combined rank: BM25 is negative (lower=better).
-    # Multiply best paragraph score by a bonus that rewards more hits.
-    # More hits → larger multiplier → more negative score → ranks higher.
-    import math
     for ev in events.values():
-        hit_bonus = math.log1p(ev["hit_count"])
-        ev["rank"] = ev["best_rank"] * max(hit_bonus, 1.0)
+        hit_bonus = math.log1p(ev.get("hit_count", 1))
+        best = ev.get("best_rank", 0.0)
+        ev["rank"] = best * max(hit_bonus, 1.0)
 
     out = sorted(events.values(), key=lambda e: e["rank"])[:limit]
     if sort == 'title':
         out.sort(key=lambda e: (e["title"] or "").lower())
 
-    # Clean up internal fields before response
+    # Remove internal ranking fields before response
     for ev in out:
-        del ev["best_rank"]
-        del ev["rank_sum"]
+        ev.pop("best_rank", None)
 
     return {
         "query": q,
@@ -319,12 +503,11 @@ def languages():
     """Return distinct languages in the archive for filter UI."""
     if not os.path.exists(DB_PATH):
         return {"languages": []}
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT DISTINCT language FROM events"
-        " WHERE language IS NOT NULL ORDER BY language"
-    ).fetchall()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT language FROM events"
+            " WHERE language IS NOT NULL ORDER BY language"
+        ).fetchall()
     return {"languages": [r[0] for r in rows]}
 
 
@@ -333,12 +516,11 @@ def date_range():
     """Return min/max year in the archive for date filter UI."""
     if not os.path.exists(DB_PATH):
         return {"min_year": None, "max_year": None}
-    conn = sqlite3.connect(DB_PATH)
-    row = conn.execute(
-        "SELECT MIN(SUBSTR(date,1,4)), MAX(SUBSTR(date,1,4))"
-        " FROM events WHERE date IS NOT NULL AND LENGTH(date) >= 4"
-    ).fetchone()
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        row = conn.execute(
+            "SELECT MIN(SUBSTR(date,1,4)), MAX(SUBSTR(date,1,4))"
+            " FROM events WHERE date IS NOT NULL AND LENGTH(date) >= 4"
+        ).fetchone()
     return {"min_year": row[0], "max_year": row[1]}
 
 
@@ -346,19 +528,18 @@ def date_range():
 def hierarchy():
     if not os.path.exists(DB_PATH):
         return {}
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cur.execute("SELECT title, date FROM events WHERE title IS NOT NULL")
-    tree: dict = {}
-    for r in cur.fetchall():
-        raw_date = r["date"] or ""
-        year = raw_date[:4]
-        if not year.isdigit():
-            year = "Undated"
-        series = _series_from_title(r["title"])
-        tree.setdefault(year, {}).setdefault(series, []).append(r["title"])
-    conn.close()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        cur.execute("SELECT title, date FROM events WHERE title IS NOT NULL")
+        tree: dict = {}
+        for r in cur.fetchall():
+            raw_date = r["date"] or ""
+            year = raw_date[:4]
+            if not year.isdigit():
+                year = "Undated"
+            series = _series_from_title(r["title"])
+            tree.setdefault(year, {}).setdefault(series, []).append(r["title"])
     for y in tree:
         for s in tree[y]:
             tree[y][s].sort()
@@ -369,60 +550,59 @@ def hierarchy():
 def clusters(lens: str = "themes", limit: int = 20):
     if not os.path.exists(DB_PATH):
         return {"lens": lens, "clusters": []}
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
 
-    if lens == "timeline":
-        cur.execute("SELECT date FROM events WHERE date IS NOT NULL")
-        buckets = Counter(_era_from_date(r["date"]) for r in cur.fetchall())
-        order = ["Bombay", "Poona I", "Rajneeshpuram", "Poona II", "Unknown"]
-        clusters_out = [
-            {"name": name, "size": buckets[name], "color": _palette(name)}
-            for name in order if buckets[name] > 0
-        ]
-    elif lens == "geography":
-        cur.execute(
-            "SELECT location, COUNT(*) c FROM events"
-            " WHERE location IS NOT NULL"
-            " GROUP BY location ORDER BY c DESC LIMIT ?",
-            (limit,),
-        )
-        clusters_out = [
-            {
-                "name": r["location"] or "Unknown",
-                "size": r["c"],
-                "color": _palette(r["location"] or "Unknown"),
+        if lens == "timeline":
+            cur.execute("SELECT date FROM events WHERE date IS NOT NULL")
+            buckets = Counter(_era_from_date(r["date"]) for r in cur.fetchall())
+            order = ["Bombay", "Poona I", "Rajneeshpuram", "Poona II", "Unknown"]
+            clusters_out = [
+                {"name": name, "size": buckets[name], "color": _palette(name)}
+                for name in order if buckets[name] > 0
+            ]
+        elif lens == "geography":
+            cur.execute(
+                "SELECT location, COUNT(*) c FROM events"
+                " WHERE location IS NOT NULL"
+                " GROUP BY location ORDER BY c DESC LIMIT ?",
+                (limit,),
+            )
+            clusters_out = [
+                {
+                    "name": r["location"] or "Unknown",
+                    "size": r["c"],
+                    "color": _palette(r["location"] or "Unknown"),
+                }
+                for r in cur.fetchall()
+            ]
+        else:
+            keywords = {
+                "Meditation": ["meditation", "dhyan", "silence"],
+                "Zen": ["zen", "bodhidharma", "hsin hsin ming"],
+                "Tantra": ["tantra", "vigyan bhairav"],
+                "Sufism": ["sufi", "rumi"],
+                "Love": ["love", "intimacy"],
+                "Philosophy": ["philosoph", "heraclitus", "nietzsche"],
             }
-            for r in cur.fetchall()
-        ]
-    else:
-        keywords = {
-            "Meditation": ["meditation", "dhyan", "silence"],
-            "Zen": ["zen", "bodhidharma", "hsin hsin ming"],
-            "Tantra": ["tantra", "vigyan bhairav"],
-            "Sufism": ["sufi", "rumi"],
-            "Love": ["love", "intimacy"],
-            "Philosophy": ["philosoph", "heraclitus", "nietzsche"],
-        }
-        cur.execute("SELECT title FROM events")
-        counts = Counter()
-        for r in cur.fetchall():
-            t = (r["title"] or "").lower()
-            matched = False
-            for theme, keys in keywords.items():
-                if any(k in t for k in keys):
-                    counts[theme] += 1
-                    matched = True
-                    break
-            if not matched:
-                counts["Misc"] += 1
-        clusters_out = [
-            {"name": name, "size": size, "color": _palette(name)}
-            for name, size in counts.most_common(limit)
-        ]
+            cur.execute("SELECT title FROM events")
+            counts: Counter = Counter()
+            for r in cur.fetchall():
+                t = (r["title"] or "").lower()
+                matched = False
+                for theme, keys in keywords.items():
+                    if any(k in t for k in keys):
+                        counts[theme] += 1
+                        matched = True
+                        break
+                if not matched:
+                    counts["Misc"] += 1
+            clusters_out = [
+                {"name": name, "size": size, "color": _palette(name)}
+                for name, size in counts.most_common(limit)
+            ]
 
-    conn.close()
     return {"lens": lens, "clusters": clusters_out}
 
 
@@ -433,40 +613,38 @@ def discourse(title: str | None = None, event_id: str | None = None):
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="Discourse store unavailable")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
 
-    if event_id:
-        cur.execute(
-            "SELECT id, title, date, location, language FROM events WHERE id = ?",
-            (event_id,),
-        )
-    else:
-        cur.execute(
-            "SELECT id, title, date, location, language FROM events"
-            " WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
-            (title,),
-        )
-    ev = cur.fetchone()
-    if not ev:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Discourse not found")
+        if event_id:
+            cur.execute(
+                "SELECT id, title, date, location, language FROM events WHERE id = ?",
+                (event_id,),
+            )
+        else:
+            cur.execute(
+                "SELECT id, title, date, location, language FROM events"
+                " WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
+                (title,),
+            )
+        ev = cur.fetchone()
+        if not ev:
+            raise HTTPException(status_code=404, detail="Discourse not found")
 
-    cur.execute(
-        "SELECT id, sequence_number, content FROM paragraphs"
-        " WHERE event_id = ? ORDER BY sequence_number",
-        (ev["id"],),
-    )
-    paragraphs = [
-        {
-            "id": r["id"],
-            "sequence_number": r["sequence_number"],
-            "content": _strip_shailendra(r["content"]),
-        }
-        for r in cur.fetchall()
-    ]
-    conn.close()
+        cur.execute(
+            "SELECT id, sequence_number, content FROM paragraphs"
+            " WHERE event_id = ? ORDER BY sequence_number",
+            (ev["id"],),
+        )
+        paragraphs = [
+            {
+                "id": r["id"],
+                "sequence_number": r["sequence_number"],
+                "content": _strip_shailendra(r["content"]),
+            }
+            for r in cur.fetchall()
+        ]
 
     return {
         "event": {
