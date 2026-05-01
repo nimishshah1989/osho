@@ -13,7 +13,6 @@ interface EventRow {
   tags: string[];
 }
 
-interface TagRow { tag: string; count: number }
 
 const COMMON_TAGS = [
   'love','meditation','death','god','freedom','awareness','silence','mind','ego',
@@ -348,71 +347,6 @@ function BrowseTab({ adminKey }: { adminKey: string }) {
   );
 }
 
-// ─── Tags Tab ─────────────────────────────────────────────────────────────────
-
-function TagsTab({ adminKey }: { adminKey: string }) {
-  const [tags, setTags] = useState<TagRow[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [tagEvents, setTagEvents] = useState<EventRow[]>([]);
-  const [tagTotal, setTagTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    api('all-tags', adminKey).then((r) => r.json()).then((d) => setTags(d.tags ?? []));
-  }, [adminKey]);
-
-  const selectTag = async (tag: string) => {
-    if (selected === tag) { setSelected(null); setTagEvents([]); return; }
-    setSelected(tag); setLoading(true);
-    const res = await api(`events?per_page=200&tag=${encodeURIComponent(tag)}`, adminKey);
-    const data = await res.json();
-    setTagEvents(data.events ?? []);
-    setTagTotal(data.total ?? 0);
-    setLoading(false);
-  };
-
-  return (
-    <div className="space-y-4">
-      <p className="text-sm text-stone-500">{tags.length} tags across all talks. Click a tag to see which talks have it.</p>
-      <div className="flex flex-wrap gap-2">
-        {tags.map(({ tag, count }) => (
-          <button key={tag} onClick={() => selectTag(tag)}
-            className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-              selected === tag
-                ? 'bg-amber-600 border-amber-600 text-white'
-                : 'border-stone-300 text-stone-600 hover:border-amber-500'
-            }`}>
-            {tag} <span className="opacity-70">{count.toLocaleString()}</span>
-          </button>
-        ))}
-      </div>
-
-      {selected && (
-        <div className="space-y-2">
-          <p className="text-sm font-medium text-stone-700">
-            Talks tagged <strong>"{selected}"</strong>
-            {!loading && ` — ${tagTotal.toLocaleString()} total${tagTotal > 200 ? ', showing first 200' : ''}`}
-          </p>
-          {loading ? (
-            <p className="text-sm text-stone-400">Loading…</p>
-          ) : (
-            <div className="space-y-1 max-h-96 overflow-y-auto">
-              {tagEvents.map((ev) => (
-                <div key={ev.id} className="px-3 py-2 border border-stone-200 rounded text-sm">
-                  <p className="font-medium text-stone-800">{ev.title}</p>
-                  <p className="text-xs text-stone-400">
-                    {[ev.date?.slice(0,10), ev.location, ev.language].filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Login screen ─────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }: { onLogin: (k: string) => void }) {
@@ -460,7 +394,7 @@ function LoginScreen({ onLogin }: { onLogin: (k: string) => void }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'upload' | 'browse' | 'tags';
+type Tab = 'upload' | 'browse';
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useAdminKey();
@@ -483,19 +417,18 @@ export default function AdminPage() {
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
         {/* Tabs */}
         <div className="flex gap-1 border-b border-stone-200 pb-3">
-          {(['upload', 'browse', 'tags'] as Tab[]).map((t) => (
+          {(['upload', 'browse'] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-sm rounded transition-colors capitalize ${
+              className={`px-4 py-1.5 text-sm rounded transition-colors ${
                 tab === t
                   ? 'bg-amber-600 text-white'
                   : 'text-stone-500 hover:text-stone-800'
-              }`}>{t === 'upload' ? 'Upload New Talk' : t === 'browse' ? 'Browse & Edit' : 'Tags'}</button>
+              }`}>{t === 'upload' ? 'Upload New Talk' : 'Browse & Edit'}</button>
           ))}
         </div>
 
         {tab === 'upload' && <UploadTab adminKey={adminKey} />}
         {tab === 'browse' && <BrowseTab adminKey={adminKey} />}
-        {tab === 'tags'   && <TagsTab   adminKey={adminKey} />}
       </div>
     </div>
   );
