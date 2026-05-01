@@ -322,19 +322,51 @@ def catalog():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, title, date, location FROM events"
+            "SELECT id, title, date, location, language FROM events"
             " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title"
         )
+        rows = cur.fetchall()
+
+        # Check if event_tags table exists (built by build_tags.py)
+        has_tags = bool(cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
+        ).fetchone())
+
+        # Build tags map: event_id → sorted list of tags
+        tags_map: dict = {}
+        if has_tags:
+            for r in cur.execute("SELECT event_id, tag FROM event_tags").fetchall():
+                tags_map.setdefault(r[0], []).append(r[1])
+
         events = [
             {
-                "id": r["id"],
-                "title": r["title"],
-                "date": r["date"],
+                "id":       r["id"],
+                "title":    r["title"],
+                "date":     r["date"],
                 "location": r["location"],
+                "language": r["language"],
+                "tags":     sorted(tags_map.get(r["id"], [])),
             }
-            for r in cur.fetchall()
+            for r in rows
         ]
     return {"events": events}
+
+
+@app.get("/api/tags")
+def tags():
+    """Return all topic tags with event counts, sorted by frequency."""
+    if not os.path.exists(DB_PATH):
+        return {"tags": []}
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        has_tags = bool(conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
+        ).fetchone())
+        if not has_tags:
+            return {"tags": []}
+        rows = conn.execute(
+            "SELECT tag, COUNT(*) as cnt FROM event_tags GROUP BY tag ORDER BY cnt DESC"
+        ).fetchall()
+    return {"tags": [{"tag": r[0], "count": r[1]} for r in rows]}
 
 
 @app.get("/api/search")
