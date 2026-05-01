@@ -613,7 +613,7 @@ export default function Constellation() {
   }
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8">
+    <main className="max-w-5xl mx-auto px-4 pt-20 md:pt-24 pb-12">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-medium text-gold tracking-wide mb-1">
