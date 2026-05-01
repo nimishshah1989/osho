@@ -354,6 +354,7 @@ function TagsTab({ adminKey }: { adminKey: string }) {
   const [tags, setTags] = useState<TagRow[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tagEvents, setTagEvents] = useState<EventRow[]>([]);
+  const [tagTotal, setTagTotal] = useState(0);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -363,10 +364,10 @@ function TagsTab({ adminKey }: { adminKey: string }) {
   const selectTag = async (tag: string) => {
     if (selected === tag) { setSelected(null); setTagEvents([]); return; }
     setSelected(tag); setLoading(true);
-    const res = await api(`events?per_page=200&q=${encodeURIComponent(tag)}`, adminKey);
+    const res = await api(`events?per_page=200&tag=${encodeURIComponent(tag)}`, adminKey);
     const data = await res.json();
-    // Filter to only events that actually have this tag
-    setTagEvents((data.events ?? []).filter((e: EventRow) => e.tags.includes(tag)));
+    setTagEvents(data.events ?? []);
+    setTagTotal(data.total ?? 0);
     setLoading(false);
   };
 
@@ -390,7 +391,7 @@ function TagsTab({ adminKey }: { adminKey: string }) {
         <div className="space-y-2">
           <p className="text-sm font-medium text-stone-700">
             Talks tagged <strong>"{selected}"</strong>
-            {!loading && ` — ${tagEvents.length.toLocaleString()}`}
+            {!loading && ` — ${tagTotal.toLocaleString()} total${tagTotal > 200 ? ', showing first 200' : ''}`}
           </p>
           {loading ? (
             <p className="text-sm text-stone-400">Loading…</p>

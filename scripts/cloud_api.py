@@ -770,6 +770,7 @@ def admin_events(
     per_page: int = Query(50, ge=1, le=200),
     q: str = Query(""),
     language: str = Query(""),
+    tag: str = Query(""),
 ):
     _check_admin(request)
     if not os.path.exists(DB_PATH):
@@ -780,18 +781,21 @@ def admin_events(
         has_tags = bool(cur.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
         ).fetchone())
-        where_parts, params = ["title IS NOT NULL"], []
+        where_parts, params = ["e.title IS NOT NULL"], []
         if q:
-            where_parts.append("(title LIKE ? OR location LIKE ?)")
+            where_parts.append("(e.title LIKE ? OR e.location LIKE ?)")
             params += [f"%{q}%", f"%{q}%"]
         if language:
-            where_parts.append("language = ?")
+            where_parts.append("e.language = ?")
             params.append(language)
+        if tag and has_tags:
+            where_parts.append("EXISTS (SELECT 1 FROM event_tags et WHERE et.event_id = e.id AND et.tag = ?)")
+            params.append(tag)
         where = " AND ".join(where_parts)
-        total = cur.execute(f"SELECT COUNT(*) FROM events WHERE {where}", params).fetchone()[0]
+        total = cur.execute(f"SELECT COUNT(*) FROM events e WHERE {where}", params).fetchone()[0]
         rows = cur.execute(
-            f"SELECT id, title, date, location, language FROM events WHERE {where}"
-            f" ORDER BY COALESCE(date,''), title LIMIT ? OFFSET ?",
+            f"SELECT e.id, e.title, e.date, e.location, e.language FROM events e WHERE {where}"
+            f" ORDER BY COALESCE(e.date,''), e.title LIMIT ? OFFSET ?",
             params + [per_page, (page - 1) * per_page],
         ).fetchall()
         tags_map: dict = {}
