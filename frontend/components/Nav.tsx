@@ -15,7 +15,7 @@ export default function Nav() {
     pathname === href || (href !== '/' && pathname?.startsWith(href));
 
   const linkClass = (href: string) =>
-    `text-[11px] md:text-[13px] tracking-[0.2em] md:tracking-[0.25em] uppercase flex items-center gap-2 transition-colors ${
+    `text-[11px] md:text-[13px] tracking-[0.2em] md:tracking-[0.25em] uppercase flex items-center gap-1.5 transition-colors ${
       isActive(href)
         ? 'text-gold'
         : 'text-stone-500 dark:text-ivory/65 hover:text-stone-900 dark:hover:text-ivory'
@@ -27,7 +27,7 @@ export default function Nav() {
       {/* Left cluster: Search · Lang · Theme */}
       <div className="flex items-center gap-3 md:gap-6">
         <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={linkClass('/')}>
-          <Search size={12} />
+          <Search size={14} />
           <span className="hidden sm:inline">{t('nav.search')}</span>
         </Link>
 
@@ -71,22 +71,22 @@ export default function Nav() {
           aria-label={theme === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
           className="text-stone-500 dark:text-ivory/55 hover:text-gold dark:hover:text-gold transition-colors"
         >
-          {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
+          {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
       </div>
 
-      {/* Right cluster: Archive · Constellation */}
+      {/* Right cluster: Archive · Constellation · Help */}
       <div className="flex items-center gap-4 md:gap-8">
         <Link href="/archive" aria-current={isActive('/archive') ? 'page' : undefined} className={linkClass('/archive')}>
-          <Library size={12} />
+          <Library size={14} />
           <span className="hidden sm:inline">{t('nav.archive')}</span>
         </Link>
         <Link href="/constellation" aria-current={isActive('/constellation') ? 'page' : undefined} className={linkClass('/constellation')}>
-          <Sparkles size={12} />
+          <Sparkles size={14} />
           <span className="hidden sm:inline">{t('nav.constellation')}</span>
         </Link>
         <Link href="/help" aria-current={isActive('/help') ? 'page' : undefined} className={linkClass('/help')}>
-          <HelpCircle size={12} />
+          <HelpCircle size={14} />
           <span className="hidden sm:inline">Help</span>
         </Link>
       </div>
