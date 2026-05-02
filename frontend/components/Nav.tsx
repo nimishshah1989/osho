@@ -22,20 +22,20 @@ export default function Nav() {
     }`;
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 px-4 md:px-8 py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
+    <nav className="fixed top-0 inset-x-0 z-50 px-3 md:px-8 py-3 md:py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
 
       {/* Left cluster: Search · Lang · Theme */}
-      <div className="flex items-center gap-3 md:gap-6">
+      <div className="flex items-center gap-2 md:gap-6">
         <Link href="/" aria-current={isActive('/') ? 'page' : undefined} className={linkClass('/')}>
           <Search size={12} />
-          <span className="hidden sm:inline">{t('nav.search')}</span>
+          <span>{t('nav.search')}</span>
         </Link>
 
         {/* Language toggle */}
         <div
           role="group"
           aria-label="Language"
-          className="flex items-center gap-1 text-[11px] md:text-[13px] tracking-[0.1em] pl-3 border-l border-gold/20 dark:border-gold/15"
+          className="flex items-center gap-1 text-[11px] md:text-[13px] tracking-[0.1em] pl-2 md:pl-3 border-l border-gold/20 dark:border-gold/15"
         >
           <button
             type="button"
@@ -75,11 +75,11 @@ export default function Nav() {
         </button>
       </div>
 
-      {/* Right cluster: Archive · Constellation */}
-      <div className="flex items-center gap-4 md:gap-8">
+      {/* Right cluster: Archive · Constellation · Help */}
+      <div className="flex items-center gap-3 md:gap-8">
         <Link href="/archive" aria-current={isActive('/archive') ? 'page' : undefined} className={linkClass('/archive')}>
           <Library size={12} />
-          <span className="hidden sm:inline">{t('nav.archive')}</span>
+          <span>{t('nav.archive')}</span>
         </Link>
         <Link href="/constellation" aria-current={isActive('/constellation') ? 'page' : undefined} className={linkClass('/constellation')}>
           <Sparkles size={12} />
@@ -87,7 +87,7 @@ export default function Nav() {
         </Link>
         <Link href="/help" aria-current={isActive('/help') ? 'page' : undefined} className={linkClass('/help')}>
           <HelpCircle size={12} />
-          <span className="hidden sm:inline">Help</span>
+          <span>Help</span>
         </Link>
       </div>
     </nav>
