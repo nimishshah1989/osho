@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Osho — The Zen Tree</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{
+  background:#07070f;
+  font-family:'Inter',sans-serif;
+  display:flex;
+  flex-direction:column;
+  height:100dvh;
+}
+header{
+  text-align:center;
+  padding:13px 20px 9px;
+  border-bottom:1px solid rgba(201,168,76,.1);
+  flex-shrink:0;
+}
+header h1{
+  font-family:'Playfair Display',serif;
+  font-weight:400;
+  font-size:clamp(13px,1.8vw,18px);
+  letter-spacing:6px;
+  color:#c9a84c;
+  text-transform:uppercase;
+}
+header p{
+  font-size:10px;
+  letter-spacing:2.5px;
+  color:rgba(201,168,76,.35);
+  margin-top:4px;
+  text-transform:uppercase;
+}
+#tree-wrap{flex:1;min-height:0;position:relative}
+#tree-svg{width:100%;height:100%;display:block;cursor:default}
+
+/* branch node hover */
+.node-b{cursor:pointer}
+.node-b .b-circle{transition:fill .2s,stroke-opacity .2s}
+.node-b:hover .b-circle{fill:#1c1628;stroke-opacity:1}
+.node-b.active .b-circle{fill:#1c1628;stroke-opacity:1}
+
+/* leaf node */
+.node-l{cursor:pointer}
+.node-l .l-dot{transition:r .15s,opacity .15s}
+.node-l:hover .l-dot{r:7;opacity:1}
+
+/* leaf groups hidden by default */
+.leaf-group{
+  opacity:0;
+  pointer-events:none;
+  transition:opacity .35s ease;
+}
+.leaf-group.open{opacity:1;pointer-events:all}
+
+/* leaf connector lines */
+.leaf-conn{
+  opacity:0;
+  transition:opacity .35s ease;
+  stroke-dasharray:3 5;
+}
+.leaf-conn.open{opacity:1}
+
+/* overlay */
+#overlay{
+  position:fixed;inset:0;
+  background:rgba(7,7,15,.94);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  display:flex;align-items:center;justify-content:center;
+  z-index:300;
+  opacity:0;pointer-events:none;
+  transition:opacity .3s;
+}
+#overlay.open{opacity:1;pointer-events:all}
+#ov-card{
+  max-width:600px;width:92%;
+  padding:46px 50px;
+  background:#0d0b1c;
+  border:1px solid rgba(201,168,76,.22);
+  position:relative;
+  transform:translateY(14px);
+  transition:transform .3s ease;
+}
+#overlay.open #ov-card{transform:translateY(0)}
+#ov-branch{
+  font-size:10px;letter-spacing:3px;text-transform:uppercase;
+  color:#c9a84c;margin-bottom:14px;
+}
+#ov-title{
+  font-family:'Playfair Display',serif;
+  font-style:italic;
+  font-size:clamp(19px,2.6vw,26px);
+  color:#e8dfc8;
+  margin-bottom:24px;
+  line-height:1.3;
+}
+#ov-text{
+  font-size:clamp(13px,1.35vw,15px);
+  line-height:1.9;
+  color:rgba(232,223,200,.8);
+  font-weight:300;
+}
+#ov-source{
+  margin-top:22px;
+  padding-top:16px;
+  border-top:1px solid rgba(201,168,76,.1);
+  font-size:11px;
+  color:rgba(201,168,76,.5);
+  letter-spacing:1px;
+  font-style:italic;
+}
+#ov-close{
+  position:absolute;top:14px;right:18px;
+  background:none;border:none;
+  color:rgba(201,168,76,.4);font-size:26px;
+  cursor:pointer;line-height:1;padding:4px 6px;
+  transition:color .2s;
+}
+#ov-close:hover{color:#c9a84c}
+@media(max-width:540px){
+  #ov-card{padding:30px 22px}
+  #ov-title{font-size:19px}
+}
+/* instruction hint */
+#hint{
+  position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  font-size:9px;letter-spacing:2px;text-transform:uppercase;
+  color:rgba(201,168,76,.2);pointer-events:none;white-space:nowrap;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Osho &nbsp;&middot;&nbsp; Zen</h1>
+  <p>Tap a branch &nbsp;&middot;&nbsp; then a leaf to open the teaching</p>
+</header>
+
+<div id="tree-wrap">
+  <svg id="tree-svg" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <filter id="glow-soft" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glow-lg" x="-80%" y="-80%" width="260%" height="260%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+    <g id="g-trunk-lines"></g>
+    <g id="g-leaf-conns"></g>
+    <g id="g-quadrant-nodes"></g>
+    <g id="g-branch-nodes"></g>
+    <g id="g-leaf-nodes"></g>
+    <g id="g-center"></g>
+  </svg>
+  <div id="hint">select a branch to begin</div>
+</div>
+
+<div id="overlay">
+  <div id="ov-card">
+    <button id="ov-close">&times;</button>
+    <div id="ov-branch"></div>
+    <div id="ov-title"></div>
+    <div id="ov-text"></div>
+    <div id="ov-source"></div>
+  </div>
+</div>
+
+<script type="application/json" id="tree-data">
+{"quadrants":[{"id":"self","label":"Self","desc":"Who am I? The nature of mind, thought, and consciousness.","branches":[{"name":"The Mind as Prison","leaves":[{"id":"leaf-0","title":"Every thought is a wall","text":"Enlightenment is possible only when you are utterly empty \u2014 no thought, no feeling, just utter silence. Then what happens remains. It never goes away. So the question is significant for all. In your longing, in your desire, in your passion you are vulnerable to hallucinate, to start thinking or feeling that which you would like to experience. But this is dangerous because it will become your final block. You will never be able to reach beyond this barrier. It is good to be alert from the very beginning. Never imagine! Remember all that you can do for enlightenment is a preparedness, a silent being, a serenity. Enlightenment will come at the right moment, whenever you are absolutely silent. You don't have to imagine it, you don't have to even worry about what it is like. You don't have to find the definition of it, you don't have to be...","source":"The Great Pilgrimage ~ 26"},{"id":"leaf-1","title":"The mind is never here","text":"People have always thought that mind means word, speech, thoughts -- but that is not true. They are very close, concurrent, so close that you can get the conception that they are one. But when you get deeper into meditation and leave the world of words and speech, you suddenly find there is an empty mind beyond them which is your real mind. To distinguish it, we call it the empty heart. Either to call it no-mind, real-mind, empty heart... they are all synonymous. But ordinarily, you are so close to thinking, emotions, words, that you cannot conceive there is a sky beyond the clouds, that there is a full moon beyond the clouds. You will have to go beyond the clouds to see the moon. THE MONK CONTINUED, \"WHAT IS THIS MIND WHICH LIES BEYOND WORDS AND SPEECH?\"","source":"Hyakujo The Everest of Zen ~ 08"},{"id":"leaf-2","title":"You are not what you think","text":"If you analyze the matter, you will understand there is a great psychological insight. A stranger comes -- not even in his dreams has he thought that a master would jump on him. He has come to ask, \"What is the truth?\" Now this question does not deserve in any way that the master should jump immediately on him, and sit on his chest with his staff in his hand. Obviously, at this moment, all the thinking of that stranger will stop. What can you think in such a situation? For a moment the whole mind comes to a complete, screeching stop.","source":"Nansen The Point of Departure ~ 01"},{"id":"leaf-3","title":"Thinking is the disease","text":"That's what happened to Maulingaputta. After two years he completely forgot about the time. Those two years were of such silence.... For a few days he counted, then he dropped the idea of counting. For a few days thoughts passed through his mind, but how long can they...? If you are not interested in them, if you are just a mirror, they come like clouds and go away, without leaving any trace behind. After two years he was pure innocence -- no question, no answer, no debate, no challenge. Those were all parts of the personality that had melted down in those two years living in the energy field of a buddha.","source":"Rinzai Master of the Irrational ~ 01"}]},{"name":"The Witness","leaves":[{"id":"leaf-4","title":"Watch but do not follow","text":"God is the tick of this whole existence. You cannot find God by dissecting, God can be found only in a poetic vision of unity. God is a synergetic experience. Science can never reveal it, philosophy can never come to it -- only a poetic approach, a very passive, a very loving approach, can. When you fall en rapport with existence, when you are no more separate as a seeker, when you are no more separate as a watcher, when you are no more separate as an observer, when you are lost into it, utterly lost it is there, the tick.","source":"Zen The Path of Paradox Vol 1 ~ 01"},{"id":"leaf-5","title":"Distance from your anger","text":"So the whole question is: What are you doing in the world? Are you a participant in it? or a watcher? If you are a participant you have become unreal and the world has become real. It is you who put your reality into the world, and then the world becomes real. It depends on you: you can take it back. Once you take it back, you become aware, the world starts becoming unreal. The reality of the world depends on how much you participate and how much you witness. Those rare moments of witnessing, and you will see Hindus are right when they say the world is maya -- illusion.","source":"Zen The Path of Paradox Vol 2 ~ 05"},{"id":"leaf-6","title":"The sky and the clouds","text":"It is your mind. Once your mind is at rest, once it disappears, your body can remain asleep but your inner eye, your inner sensitivity, your awareness, can remain burning like a small flame -- not only watching your body, but also watching the silent mind, and the stillness surrounding you. The enlightened man cannot sleep in the same way that the unenlightened one sleeps. When the unenlightened man sleeps, he is simply unconscious. The enlightened man sleeps but he is not unconscious.","source":"Zen: The Solitary Bird ~ 14"},{"id":"leaf-7","title":"Consciousness is not content","text":"Suddenly a door opens into the cosmos. You see from where your life has been coming. You see you are no more, only existence is. This pure nothingness, this shunyata is the only religious experience there is. Christianity is the only religion in the world which is becoming aware that their congregation is disappearing -- they are all going to Poona! In resurrection you will be men of Zen. Deepen your witnessing through relaxation and dissolution into consciousness. This auditorium has become an ocean of consciousness. Ten thousand buddhas are disappearing into one oceanic feeling, into one oceanic experience. Only a pure witnessing buddha remains, utterly transparent, so he cannot make any shadow. Go more and more into your being, your center. Feel the very source of your life -- pulsating, throbbing, alive.","source":"The Zen Manifesto ~ 02"}]},{"name":"The Gateless Gate","leaves":[{"id":"leaf-8","title":"Stop \u2014 you are already there","text":"No-mind is the buddha. Your ego is your immaturity. Your egolessness is your awakening. Just die to this moment deep enough so that you can have a resurrection. Then you will know that no-mind is the buddha. And it has always been so. But to those who cannot understand, the compassionate ones have been saying to them that the mind is the buddha. It is just out of compassion to keep you from crying, because if you are not mature enough -- and it is said , \"You are not at all; you are just a soap bubble. Inside is nothingness and that is your nature\" -- the retarded ones will be driven crazy. The physician knows perfectly well in what quantity the medicine has to be given, at what time the disciple needs the ultimate hit so that he disappears, leaving behind him just a pure space.","source":"Zen The Quantum Leap ~ 01"},{"id":"leaf-9","title":"The seeker becomes the sought","text":"Gautam Buddha is a category in himself. Very few people have understood him. Even in the countries where Buddhism is a national religion, Thailand, Japan, Taiwan, it has become an intellectual philosophy. Zazen, the original contribution of the man, has disappeared. Perhaps you are the people who are the closest contemporaries of Gautam Buddha at this moment. In this silence, in this emptiness, in this quantum leap from mind to no-mind you have entered a different space, which is neither outer nor inner, but transcendental to both. Do you see the point? Do you understand this tremendous answer, \"IF I WERE SITTING BLANKLY, I WOULD BE DOING SOMETHING,\" RETORTED YAKUSAN. Yakusan is right and wrong. Yakusan is right: it is true, a thousand buddhas cannot say anything about the transcendental. But I say also that Yakusan is not right, because a thousand buddhas here can experience it; there is no...","source":"Zen The Quantum Leap ~ 09"},{"id":"leaf-10","title":"An empty hand, an open door","text":"Emptiness does not have the negative connotation that it carries in our minds. When I show you a room which is completely empty, there are two ways to say something about it. Either you can say that the room is empty or you can say that the room is full of space. Exactly the very word 'room' means space. The more furniture you bring in the less room there is. You can fill the whole room with junk and the room disappears. It is there and it is not there. You cannot throw it out, but you can hide it behind your furniture, behind your refrigerator, behind your television. Take them all out... what remains? Roominess, emptiness; in a positive sense, a pure space.","source":"Live Zen ~ 01"},{"id":"leaf-11","title":"Going through going nowhere","text":"I call Zen the only living religion because it is not a religion, but only a religiousness. It has no dogma, it does not depend on any founder. It has no past; in fact it has nothing to teach you. It is the strangest thing that has happened in the whole history of mankind -- strangest because it enjoys in emptiness, it blossoms in nothingness. It is fulfilled in innocence, in not knowing. It does not discriminate between the mundane and the sacred. For it, all that is, is sacred.","source":"Live Zen ~ 01"}]}]},{"id":"work","label":"Work & Action","desc":"How do I act? Effort, creativity, and engagement with the world.","branches":[{"name":"Chop Wood, Carry Water","leaves":[{"id":"leaf-12","title":"The master cooks, and that's it","text":"Born in 724, Hyakujo was also known as Pai Chang. As a young boy Hyakujo was taken to a temple by his mother, and upon entering, she bowed to the Buddhist statue. Pointing to the statue, Hyakujo asked his mother, \"What is that?\" His mother replied, \"That is a buddha.\" Hyakujo said, \"He looks like a man. I want to become a buddha afterwards.\" This small incident of his childhood has great implications. Buddha never wanted to be in any way extraordinary or special for the simple reason that if he was special and extraordinary, that would discourage people to become buddhas because they know they are ordinary, they are not special; they are not incarnations of God, they don't have divine miraculous powers. They cannot walk on water; they cannot bring a dead Lazarus back to life... Just look at Jesus and Buddha and you will find that Buddha...","source":"Hyakujo The Everest of Zen ~ 01"},{"id":"leaf-13","title":"Nothing special in the doing","text":"We are trying a great experiment, that independent individuals can live together without enslaving anyone. Here everybody is equal. It does not matter what job he is doing. He may be editing, he may be cleaning, he may be cooking, it does not matter. What matters is that you should cook with awareness, as if a buddha is cooking. And you are cooking for other buddhas; your cooking has to be done with great awareness and love. It is not a duty; it is your contribution, your share, to the commune. It is as valuable as anybody else's work. If you are cleaning bathrooms, it is as respectable as being the president of the commune or the secretary of the commune. There is no question of jealousy at all, because nobody is superior to anybody else.","source":"Joshu The Lion's Roar ~ 02"},{"id":"leaf-14","title":"Full attention, no applause needed","text":"It is true, Maneesha, common sense is very rare because to be ordinary ... the ego prevents you. It wants you to be extraordinary, to be special, to be a V.V.I.P. It does not allow you to be ordinary, simple, nobody, a nothingness -- which is your real nature. In that ordinariness, in that nobodiness, is your real home. Outside it is only misery, suffering, death, anguish, angst. Settling in your simple innocence, knowing nothing ... just being, and you have become an emperor without any empire. No anxiety of the empire at all, just a pure emperor.","source":"Zen: The Solitary Bird ~ 13"},{"id":"leaf-15","title":"The work is the meditation","text":"The master said, \"There is no problem. You start cooking. Just remember one thing: never come again to me. Whenever I need to, I will call you. Don't ask anyone anything; just remain like a shadow, working.\" In China and Japan, rice is the main food. The cook was preparing rice for a thousand monks. He would get up early in the morning and go to bed late at night. There was no time for questioning, nor did he have any question. Just think: thirty years, cleaning rice, cooking rice. He became completely silent. He was not doing any meditation, but the mind was not needed. His work was so simple that mind retired on its own. People had even forgotten that there was a monk who never came to the assembly, who never asked anything, who never read any sutra. People had no idea even what his name was...","source":"Zen The Quantum Leap ~ 13"}]},{"name":"The Seeking Trap","leaves":[{"id":"leaf-16","title":"Effort creates the distance","text":"But the intellectual mind, not understanding the inner process of enlightenment, noncausal, nonlogical, immediately jumps to the conclusion that there is a contradiction. Here you are saying that there are no mental processes which are of any use. By your mind you cannot reach buddhahood, you will have to drop the mind, so what is the use of mental processes? Mind as a whole entity has to be pushed aside so that you can see clearly and directly, without any thoughts gathering in front of your eyes. There is no goal. The moment you find utter silence and a deep understanding of yourself, your roots, you simply have a laugh -- just a laugh that \"I have been searching for the person who is hiding behind me, inside me, at my very center.\"","source":"Hyakujo The Everest of Zen ~ 02"},{"id":"leaf-17","title":"You already have what you seek","text":"Truth needs guts and courage. It comes out of a loving search. The inquirer is a lover; he is trying to find the ultimate lover. Even the ordinary love affairs are stepping-stones. But love is in bondage. The society has sealed every love. Anything that becomes a law becomes dead. When love becomes a marriage you are committing suicide. If love remains a freedom, step-by-step you will be able to reach your innermost being. It is saying that if you go deep in meditation a moment comes when the lover finds the beloved -- not as a separate entity, but as one with himself. One is both: the lover and the loved. This non-duality takes you to the highest peak of consciousness.","source":"Kyozan A True Man of Zen ~ 03"},{"id":"leaf-18","title":"Striving is the obstacle","text":"Chikanzenji burned all the scriptures. That was symbolic. Now he no longer remembered anything, now he had forgotten all search, now he no longer cared. Unconcerned he lived a very ordinary life -- he was no longer even a monk. He had no pretensions any more, he had no ego goals any more. Remember, there are two kinds of ego goals: one, the worldly, and the other, the other-worldly. Some people are searching for money; some people are searching for power, prestige, pull; some people are searching for God, moksha, nirvana, enlightenment -- but the search continues. And who is searching? The same ego. The moment you drop the search you drop the ego also. The moment there is no seeking, the seeker cannot exist.","source":"Zen The Path of Paradox Vol 1 ~ 04"},{"id":"leaf-19","title":"Cease \u2014 and it is here","text":"Listen to it. Ordinarily people who don't know what meditation is, write that meditation is concentration. There are thousands of books in which you will find this statement, this utterly stupid statement -- that meditation is concentration. Meditation is not concentration -- it is the last thing that meditation can be. In fact, concentration is just the diametrically opposite. In concentration you are very tense, focussed, looking for something. Yes, concentration is good if you are looking for tiny things. If you are searching for an ant, concentration is perfectly good -- but not good for God. God is so vast, so tremendously vast. If you look with concentration you will find an ant, not God. For God you have to be utterly open, unconcentrated, open from every side, not searching, not looking. An unfocussed consciousness is what meditation is -- unfocussed consciousness.","source":"Zen The Path of Paradox Vol 1 ~ 01"}]}]},{"id":"love","label":"Love & Connection","desc":"How do I connect? Relationship, love, and belonging.","branches":[{"name":"From Wholeness, Not Need","leaves":[{"id":"leaf-20","title":"Loneliness or aloneness","text":"The master is nothing but a great hope for the disciple, simply waiting for you to understand a simple thing which he cannot deliver to you as matter because it is immaterial. But its pricelessness is such that he cannot ignore it either, he has to do something in order to provoke you and challenge you to search inwards. All these anecdotes are nothing but provocations, challenges. These statements have arisen out of deep love and compassion, not out of mind. This has to be remembered about every anecdote, every dialogue, every small Zen haiku: that the master is trying in some way the impossible. And the impossible does happen once in a while. So it cannot be denied, and it cannot be said that the whole thing is futile ... no need to bother about others. Enlightenment brings with itself a tremendous love for all those who are in...","source":"Dogen The Zen Master ~ 08"},{"id":"leaf-21","title":"Love that doesn't imprison","text":"But language is linear. A line moves; one by one things start happening. In logic also things start happening one by one. And if one thing happens then the other cannot happen. Just see it: if you say one thing then you cannot say the opposite -- you have prohibited it. In existence the opposites exist together. Life exists with death; love exists with hate -- there is no denying. It is not that love exists so hate cannot exist. They exist together. Light exists with darkness -- but if you make it a sentence, if you say, 'In the room there was light' you cannot say immediately 'In the room there was darkness'. Now it has become impossible. You have confined it. You have dropped the paradoxical. Existence is paradoxical.","source":"Zen The Path of Paradox Vol 1 ~ 03"},{"id":"leaf-22","title":"Two wholes, not two halves","text":"Philosophy is logic; poetry is love. Philosophy dissects, analyses; poetry synthesises, puts things together. Philosophy is basically destructive; poetry is life-giving. Analysis is the method of philosophy -- and it is the method of science, the method of psychoanalysts. Sooner or later psychoanalysis will have to be replaced by the more profound psychosynthesis. Assagioli is far more right than Sigmund Freud because synthesis is closer to truth. The world is one. It is a unity. Nothing is separate. Everything pulsates together. We are joined with each other, interlinked. The whole life is a net. Even the small leaf around this Chuang Tzu auditorium is joined with the farthest star. If something happens to this leaf something is going to happen to that farthest star too. Everything is together, this togetherness. Existence is a family.","source":"Zen The Path of Paradox Vol 1 ~ 01"},{"id":"leaf-23","title":"You can only give what you have","text":"When you see the roseflowers blossoming, have you ever thought that all this color, all this softness, all this beauty was hidden somewhere in the seed? But the seed alone was not enough to become a rose, it needed the support of existence -- the soil, the water, the sun. Then the seed disappeared into the soil and the rosebush started growing. Now it needs air, it needs water, it needs the earth, it needs the sun, it needs the moon. All these together transform the seed which was almost like a dead piece of stone. Suddenly a transformation, a metamorphosis. These roses, these colors, this beauty, this fragrance, cannot come from it unless existence has it already. It all may be hidden, it may be covered in the seed. But anything that happens means it was there already -- maybe as a potential.","source":"God Is Dead Now Zen Is ~ 01"}]},{"name":"The Sword That Kills","leaves":[{"id":"leaf-24","title":"The master takes everything","text":"This word 'surrender' is one of the difficult ones, because in the West it always means humiliation -- armies surrender, nations surrender -- it does not have a right connotation. In the Eastern languages it has nothing to do with armies or nations surrendering, it means that you have seen into the eyes of the master, you have felt his presence, he has touched your heart. Nothing is said, but he has overwhelmed you. You were just a stranger, but he opened his whole heart. Out of gratitude you bow down to him. It is just a symbolic gesture that you are ready to receive; that you will not resist, you will trust; that it is not going to be a relationship between teacher and student. \"I want to be a disciple, I am in search of a master and in you I feel the freshness, the breeze, the radiation....","source":"Zen The Diamond Thunderbolt ~ 10"},{"id":"leaf-25","title":"Trust without insurance","text":"The disciple starts melting into the master. The disciple destroys all distance between himself and the master; the disciple yields, the disciple surrenders, the disciple effaces himself. He becomes a nonentity, he becomes a nothingness. And in that nothingness his heart opens. In that absence his ego has disappeared and the master can penetrate into his being. The disciple is receptive, vulnerable, unguarded; he drops all armor. He drops all defense measures. He is ready to die. If the master says, 'Die!' he will not wait for a single moment. The master is his soul, his very being; his devotion is unconditional and absolute. And to know absolute devotion is to know God. To know absolute surrender is to know the secret-most mystery of life.","source":"The Dhammapada Vol 03 ~ 08"},{"id":"leaf-26","title":"Wisdom cannot be borrowed","text":"A disciple is the rarest flowering of human consciousness, because beyond the disciple there is only one peak more \u2014 the master. And one who has been totally a disciple one day becomes a master. Disciplehood is a process of becoming a master. But one should not start with the idea of becoming a master; otherwise one is going to miss, because then it is again an ego trip. One should come simply to evaporate. The word 'disciple' is also beautiful \u2014 it means one who is ready to learn. Hence the word 'discipline' \u2014 discipline means creating a space for learning. And disciple means being ready to learn. Who can be ready to learn? Only one who is ready to drop all his prejudices. If you come as a Christian or a Hindu or a Mohammedan, you can't be a disciple. If you simply come as a human being,...","source":"The Dhammapada Vol 03 ~ 08"},{"id":"leaf-27","title":"Surrender is not defeat","text":"Kyozan was a very simple man -- not the philosophic kind, not a poet, nor a sculptor. Zen is full of unique masters, but Kyozan's uniqueness is his simplicity. He is just like a child. Isan, it seems, took it as a challenge: if an ordinary man like Kyozan cannot be transformed into a buddha, how can you allow others to trust in the existence of the buddha? Choosing Kyozan as his successor, and waiting for forty years -- what patience! -- almost transforming a stone into a diamond. But Isan was determined to make one point absolutely clear to humanity: if Kyozan, a simple and ordinary person, not belonging to any speciality, any category, without any talent, any genius -- if he can become enlightened, it will be a proof. Isan said to his other disciples, 'Today he is not ready, he is just a seed. But tomorrow you...","source":"Kyozan A True Man of Zen ~ 01"}]}]},{"id":"beyond","label":"The Beyond","desc":"What is deeper? Presence, impermanence, and the mystery.","branches":[{"name":"This Moment Only","leaves":[{"id":"leaf-28","title":"The past is ash, the future smoke","text":"Death is a created problem. Try to understand it. Because you don't allow the past to die, it goes on being accumulated, it becomes heavy on you, it is a dead load. If you allow the past to die each moment as the time passes, if you finish with it, then each moment you are born again and you don't accumulate the dead past. Then you don't accumulate death and there is therefore no problem to tackle, there is no problem to deal with. Each moment you become fresh -- and you know that this freshness is eternal, timeless. Even when the so-called death will be happening, you will not be dying. In that moment life has become past, so you don't cling to it. You have learned one thing in life -- not to cling. So you don't cling to it and the problem does not arise. If you...","source":"Zen The Path of Paradox Vol 1 ~ 02"},{"id":"leaf-29","title":"Tomorrow never arrives","text":"And I am not saying that you will ever become perfect, because the day you become perfect you are no more needed -- the perfect ones are discarded immediately. So life never becomes perfect; it goes on moving. From one totality to another totality, from one imperfection to another imperfection, it goes on, it goes on. Imperfection is simply life, aliveness, growth, evolution. So why go on condemning imperfection? Now you think you have got the feeling that 'I am perfect as I am right now'. You are not. But I am not saying strive for perfection; that is again the same trap. I am saying wherever you are, live this moment totally -- this is the only way it can be lived.","source":"Zen The Path of Paradox Vol 2 ~ 08"},{"id":"leaf-30","title":"The present contains eternity","text":"Zen says that God is not extrinsic to religion, it is intrinsic. It is not there, it is here. In fact there is no 'there' for Zen, all is here. And God is not then, God is now -- and there is no other time. There is no other space, no other time. This moment is all. In this moment the whole existence converges, in this moment all is available. If you cannot see it that does not mean that it is not available -- it simply means you don't have the vision to see it. God has not to be searched for, you have only to open your eyes. God is already the case.","source":"Zen The Path of Paradox Vol 1 ~ 01"},{"id":"leaf-31","title":"Life happens only now","text":"You come across a rose flower and the moment you see it, immediately language jumps in and something inside your mind says, 'A beautiful rose flower.' And you have destroyed something. Now it is neither beautiful nor a rose -- a word is there. Don't allow the word to interfere with each and every of your experiences. Sometimes just be there with the rose and don't say, 'A rose.' There is no need. The rose has no name, the names are given by us. And the name is not the real thing. So if you stay too attached to the name you will miss the real. The name will come in your eyes and you will project something -- all the past roses.","source":"Zen The Path of Paradox Vol 1 ~ 03"}]},{"name":"Death as Teacher","leaves":[{"id":"leaf-32","title":"What dies was never you","text":"Satori becomes possible for a great number of people because sometimes it needs no preparations; sometimes it happens by chance. The situation is created, but unknowingly. There are so many people, a great number of them, who have known it. They may not know it as satori, may not have interpreted it as satori, but they have known it. A great surging love can create it. Even through chemical drugs satori is possible: through mescaline, LSD, marijuana, it is possible, because even through chemical change the mind can expand into a glimpse. After all, all of us have chemical bodies. A sudden danger can penetrate you so much that the glimpse becomes possible. Sometimes a great shock can make you so still in the moment that the glimpse becomes possible. Anything can become a source of satori. It depends on you. It never depends on anything else. You are passing...","source":"Dynamics of Meditation ~ 10"},{"id":"leaf-33","title":"Impermanence is the door","text":"In meditation, once you are gone in, you are gone in. Then, even when you resurrect you are a totally different person. The old personality is nowhere to be found. You have to start your life again from ABC. You have to learn everything with fresh eyes, with a totally new heart. That's why meditation creates fear. The UPANISHADS say that the master is a death. It is an incomplete sentence. The master is a death but also a rebirth, a resurrection. A master is nothing but meditation. A master simply gives you a meditation; he cannot do anything else. He gives you the meditation to die and to be reborn.","source":"Rinzai Master of the Irrational ~ 01"},{"id":"leaf-34","title":"Fear of death is fear of life","text":"The man who had died was a master, and a master is more alive even in his death than you are in your life. The master never dies. That is the very secret that has made him a master -- that he knows there is no death. He has got hold of eternity in his hands. He carries immortality in his very depths. You can burn his body, but you cannot burn his eternity, his immortality. Joshu is right when he says, \"Look at the strange procession! In the wake of one living man... and that living man is lying down in the coffin; thousands of dead bodies are following.\"","source":"Joshu The Lion's Roar ~ 07"},{"id":"leaf-35","title":"Live as if this were the last","text":"Second thing: life and death are not so much apart as we think. You think life happened the day you were born, and death will happen the day you die. So there is a seventy or eighty or one hundred years' gap. It is not so. Birthing and dying go on together your whole life. The moment you start breathing you start dying too. EACH moment there is life and there is death -- two wheels of the same cart. They go together. They are simultaneous. You cannot put them so far apart -- seventy years is too much distance. You cannot put them so far apart -- they are there every moment. Every moment something is being born in you and something is dying.","source":"Zen The Path of Paradox Vol 3 ~ 07"}]},{"name":"The Cosmic Joke","leaves":[{"id":"leaf-36","title":"Zen masters do not weep","text":"And because he asked again -- Te Shan had answered completely -- now to ask him again in a different way, in a tricky way.... It was a tradition in Zen that masters used to go to each other -- Zen is a very joyful, playful, nonserious religion -- and as Te Shan saw that Hsueh Feng was trying to bring the question again from a different angle, he hit him with his staff and said, \"What are you saying? Have you not heard -- we don't have any verbal expression, we don't have any doctrine, so in what way can you serve? In what way can you be a vehicle for this ancient school? The only way to be part of this school... you cannot be a vehicle, you cannot be a messenger, you cannot be a missionary because we don't have any message and we don't have any...","source":"The Great Zen Master Ta Hui ~ 05"},{"id":"leaf-37","title":"Seriousness is the ego's game","text":"Sannyas is relaxing in life, trusting in life, resting in life. Nowhere to go, nothing to achieve, then the whole energy is available to dance and sing and celebrate. A sannyasin means one who is not trying to solve the mystery of life but is diving deep into the mystery itself. Living the mystery is sannyas, not solving the mystery. If you start solving it you become serious. If you start living it you become more and more playful. Sannyas changes your outlook. Religion is not a question of changing life patterns, of changing things and situations. Religion changes you, not your situation. It does not change things: it changes the way you look at things. It changes your eyes, your vision; it gives you an insight. Then God is not something against life: then God is the intrinsic core of life. Then spirit is not anti-matter but the highest...","source":"The Dhammapada Vol 03 ~ 08"},{"id":"leaf-38","title":"The divine must be laughing","text":"'Preoccupation' means: in the past, in the future, never herenow. When you are herenow, there is no game. Games stop, then you flow with the river of life. Then there is spontaneity and there is great intelligence and there is great celebration. Games stop, you don't take things seriously. If you win, good. If you fail, good. It makes no difference. That's what I mean by 'games disappear' -- I don't mean that when you become alert, awakened, you don't live life, the ordinary life. You still live the ordinary life, you still chop wood, you still carry water -- but with great serenity. You still laugh, you still love -- but with a totally different quality.","source":"Zen The Path of Paradox Vol 2 ~ 07"},{"id":"leaf-39","title":"Life as play, not burden","text":"But Mahakashyapa became the first Zen master. He is rarely mentioned in the Buddhist scriptures because he rarely spoke. And because he received the transmission without words, nobody knows what he has received. When finally forced by other disciples -- older, more prominent -- Mahakashyapa said, \"I have not received, I have only recognized. In that great silence when you were all becoming restless I started becoming restful. My silence became deeper, to a point that I suddenly saw that it is so ridiculous to search for truth because I am the truth. At that very moment I could not contain it, and I laughed. The flower was given to me as a confirmation that 'your laughter means you have opened your wings in the sky. You are released.'\"","source":"The Great Zen Master Ta Hui ~ 31"}]}]}],"branches":[],"leaves":[]}
+</script>
+
+<script>
+'use strict';
+const DATA  = JSON.parse(document.getElementById('tree-data').textContent);
+const NS    = 'http://www.w3.org/2000/svg';
+const CX    = 600, CY = 360;
+
+/* ── colour palette per quadrant ── */
+const QC = {
+  self:   '#7b9acc',
+  work:   '#8fbf7f',
+  love:   '#c47d9e',
+  beyond: '#c9a84c'
+};
+
+/* ── quadrant centre positions ── */
+const QP = {
+  self:   {x:285, y:185},
+  work:   {x:915, y:185},
+  love:   {x:285, y:535},
+  beyond: {x:915, y:535}
+};
+
+/* ── branch positions (10, in order: self×3, work×2, love×2, beyond×3) ── */
+const BP = [
+  {x:105, y:295},   // Self: Mind as Prison
+  {x:168, y:78},    // Self: The Witness
+  {x:368, y:58},    // Self: Gateless Gate
+  {x:838, y:58},    // Work: Chop Wood
+  {x:1078,y:118},   // Work: Seeking Trap
+  {x:88,  y:510},   // Love: From Wholeness
+  {x:200, y:692},   // Love: Sword That Kills
+  {x:828, y:692},   // Beyond: This Moment Only
+  {x:1062,y:640},   // Beyond: Death as Teacher
+  {x:1098,y:470}    // Beyond: Cosmic Joke
+];
+
+/* ── leaf data store (populated during render, indexed by flat index) ── */
+const LEAVES = [];
+
+/* ── state ── */
+let activeBranch = null; // index of expanded branch
+
+/* ── SVG helpers ── */
+function svgEl(tag, attrs, parent){
+  const e = document.createElementNS(NS, tag);
+  for(const [k,v] of Object.entries(attrs)) e.setAttribute(k,v);
+  if(parent) parent.appendChild(e);
+  return e;
+}
+function svgText(str, attrs, parent){
+  const e = svgEl('text', attrs, parent);
+  e.textContent = str;
+  return e;
+}
+function softCurve(x1,y1,x2,y2){
+  const mx=(x1+x2)/2, my=(y1+y2)/2;
+  const dx=x2-x1, dy=y2-y1;
+  const cx1=x1+dx*0.35, cy1=y1+dy*0.05;
+  const cx2=x2-dx*0.35, cy2=y2-dy*0.05;
+  return `M${x1} ${y1} C${cx1} ${cy1} ${cx2} ${cy2} ${x2} ${y2}`;
+}
+
+/* leaf positions: fan out from branch away from center */
+function leafPos(bx, by){
+  const dx=bx-CX, dy=by-CY;
+  const len=Math.sqrt(dx*dx+dy*dy)||1;
+  const nx=dx/len, ny=dy/len;
+  const px=-ny, py=nx; // perpendicular
+  const d=88, s=30;
+  return [
+    {x:bx+nx*d+px*s*1.6, y:by+ny*d+py*s*1.6},
+    {x:bx+nx*d+px*s*0.5, y:by+ny*d+py*s*0.5},
+    {x:bx+nx*d-px*s*0.5, y:by+ny*d-py*s*0.5},
+    {x:bx+nx*d-px*s*1.6, y:by+ny*d-py*s*1.6}
+  ];
+}
+
+/* text anchor based on x position */
+function anchor(x){ return x<420?'end':x>780?'start':'middle'; }
+
+/* label offset away from center */
+function labelPos(nx,ny,bx,by,dist){
+  return {x:bx+nx*dist, y:by+ny*dist};
+}
+
+/* ── Render trunk lines (center → quadrant → branch) ── */
+const gTrunk = document.getElementById('g-trunk-lines');
+
+DATA.quadrants.forEach(q=>{
+  const qp=QP[q.id], c=QC[q.id];
+  svgEl('path',{d:softCurve(CX,CY,qp.x,qp.y),
+    stroke:c,'stroke-width':1.8,fill:'none',opacity:.28},gTrunk);
+});
+
+let bIdx=0;
+DATA.quadrants.forEach(q=>{
+  q.branches.forEach(b=>{
+    const bp=BP[bIdx], qp=QP[q.id], c=QC[q.id];
+    svgEl('path',{d:softCurve(qp.x,qp.y,bp.x,bp.y),
+      stroke:c,'stroke-width':1.2,fill:'none',opacity:.22},gTrunk);
+    bIdx++;
+  });
+});
+
+/* ── Render center node ── */
+const gCenter = document.getElementById('g-center');
+svgEl('circle',{cx:CX,cy:CY,r:38,fill:'#c9a84c',opacity:.05,filter:'url(#glow-lg)'},gCenter);
+svgEl('circle',{cx:CX,cy:CY,r:22,fill:'#c9a84c',opacity:.12,filter:'url(#glow-soft)'},gCenter);
+svgEl('circle',{cx:CX,cy:CY,r:18,fill:'#120f1e',stroke:'#c9a84c','stroke-width':1.4},gCenter);
+svgText('zen',{x:CX,y:CY+5,'text-anchor':'middle',fill:'#c9a84c',
+  'font-family':'Playfair Display,serif','font-size':11,'font-style':'italic',
+  'letter-spacing':2},gCenter);
+
+/* ── Render quadrant nodes ── */
+const gQ = document.getElementById('g-quadrant-nodes');
+DATA.quadrants.forEach(q=>{
+  const qp=QP[q.id], c=QC[q.id];
+  // glow halo
+  svgEl('circle',{cx:qp.x,cy:qp.y,r:36,fill:c,opacity:.05,filter:'url(#glow-soft)'},gQ);
+  // ring
+  svgEl('circle',{cx:qp.x,cy:qp.y,r:22,fill:'#0d0b1c',stroke:c,'stroke-width':1.4,opacity:.9},gQ);
+
+  // label inside (short)
+  const words = q.label.split(' & ');
+  if(words.length===2){
+    const t=svgEl('text',{x:qp.x,y:qp.y-4,'text-anchor':'middle',fill:c,
+      'font-family':'Playfair Display,serif','font-size':8.5,'font-style':'italic'},gQ);
+    const sp1=svgEl('tspan',{x:qp.x,dy:0},t); sp1.textContent=words[0];
+    const sp2=svgEl('tspan',{x:qp.x,dy:11},t); sp2.textContent='& '+words[1];
+  } else {
+    svgText(q.label,{x:qp.x,y:qp.y+4,'text-anchor':'middle',fill:c,
+      'font-family':'Playfair Display,serif','font-size':9,'font-style':'italic'},gQ);
+  }
+
+  // outer question label
+  const qdx = qp.x-CX, qdy = qp.y-CY;
+  const qlen = Math.sqrt(qdx*qdx+qdy*qdy)||1;
+  const qnx=qdx/qlen, qny=qdy/qlen;
+  const qLx=qp.x+qnx*32, qLy=qp.y+qny*32;
+  const shortDesc = q.desc.split('.')[0].replace('Who am I?','Who am I?').replace('How do I act?','How do I act?').replace('How do I connect?','How do I connect?').replace('What is deeper?','What is deeper?');
+  svgText(q.desc.split('?')[0]+'?',{x:qLx,y:qLy+4,
+    'text-anchor':anchor(qLx),fill:c,
+    'font-family':'Inter,sans-serif','font-size':9,
+    opacity:.4,'letter-spacing':.5},gQ);
+});
+
+/* ── Render branches + leaf connectors + leaf nodes ── */
+const gBranch = document.getElementById('g-branch-nodes');
+const gLeafConn = document.getElementById('g-leaf-conns');
+const gLeaf = document.getElementById('g-leaf-nodes');
+
+bIdx=0;
+DATA.quadrants.forEach(q=>{
+  q.branches.forEach(b=>{
+    const bi=bIdx, bp=BP[bi], c=QC[q.id];
+    const dx=bp.x-CX, dy=bp.y-CY;
+    const dlen=Math.sqrt(dx*dx+dy*dy)||1;
+    const nx=dx/dlen, ny=dy/dlen;
+
+    /* ── leaf connector lines (hidden until branch open) ── */
+    const lPos=leafPos(bp.x,bp.y);
+    const connEls=[];
+    lPos.forEach(lp=>{
+      const ln=svgEl('line',{x1:bp.x,y1:bp.y,x2:lp.x,y2:lp.y,
+        stroke:c,'stroke-width':.9,opacity:.55,'class':'leaf-conn'},gLeafConn);
+      connEls.push(ln);
+    });
+
+    /* ── leaf node group (hidden until branch open) ── */
+    const leafG = svgEl('g',{'class':'leaf-group','data-bi':bi},gLeaf);
+    const leafStartIdx = LEAVES.length;
+
+    b.leaves.forEach((leaf,j)=>{
+      const lp=lPos[j];
+      const li=LEAVES.length;
+      LEAVES.push({branch:b.name, quadrant:q.label, color:c,
+        title:leaf.title, text:leaf.text, source:leaf.source});
+
+      const lg=svgEl('g',{'class':'node-l','data-li':li},leafG);
+      // hit target
+      svgEl('circle',{cx:lp.x,cy:lp.y,r:16,fill:'transparent'},lg);
+      // outer ring
+      svgEl('circle',{cx:lp.x,cy:lp.y,r:6.5,fill:'none',
+        stroke:c,'stroke-width':1,opacity:.5},lg);
+      // dot
+      const dot=svgEl('circle',{cx:lp.x,cy:lp.y,r:4.5,fill:c,opacity:.82,'class':'l-dot'},lg);
+
+      /* text: positioned away from branch node */
+      const ldx=lp.x-bp.x, ldy=lp.y-bp.y;
+      const ll2=Math.sqrt(ldx*ldx+ldy*ldy)||1;
+      const lnx=ldx/ll2, lny=ldy/ll2;
+      const tx=lp.x+lnx*13, ty=lp.y+lny*13;
+      const ta=anchor(tx);
+
+      // split title into 2 lines if > 20 chars
+      const words=leaf.title.split(' ');
+      const half=Math.ceil(words.length/2);
+      const ln1=words.slice(0,half).join(' ');
+      const ln2=words.slice(half).join(' ');
+
+      if(ln2){
+        const t=svgEl('text',{x:tx,y:ty-3,'text-anchor':ta,fill:'#ddd4ba',
+          'font-family':'Inter,sans-serif','font-size':8.2,'font-weight':300,opacity:.88},leafG);
+        const s1=svgEl('tspan',{x:tx,dy:0},t); s1.textContent=ln1;
+        const s2=svgEl('tspan',{x:tx,dy:11},t); s2.textContent=ln2;
+      } else {
+        svgText(leaf.title,{x:tx,y:ty+4,'text-anchor':ta,fill:'#ddd4ba',
+          'font-family':'Inter,sans-serif','font-size':8.2,'font-weight':300,opacity:.88},leafG);
+      }
+    });
+
+    /* ── branch node (rendered last so it's on top) ── */
+    const bg=svgEl('g',{'class':'node-b','id':'branch-'+bi,'data-bi':bi},gBranch);
+    // glow halo
+    svgEl('circle',{cx:bp.x,cy:bp.y,r:22,fill:c,opacity:.06},bg);
+    // circle
+    svgEl('circle',{cx:bp.x,cy:bp.y,r:12,fill:'#120f1e',stroke:c,
+      'stroke-width':1.2,'stroke-opacity':.7,'class':'b-circle'},bg);
+    // inner dot
+    svgEl('circle',{cx:bp.x,cy:bp.y,r:3.5,fill:c,opacity:.75},bg);
+
+    /* branch label: outward from center */
+    const lp2=labelPos(nx,ny,bp.x,bp.y,20);
+    const la=anchor(lp2.x);
+    // wrap label into 2 lines
+    const bwords=b.name.split(' ');
+    const bmid=Math.ceil(bwords.length/2);
+    const bl1=bwords.slice(0,bmid).join(' ');
+    const bl2=bwords.slice(bmid).join(' ');
+
+    if(bl2){
+      const bt=svgEl('text',{x:lp2.x,y:lp2.y-4,'text-anchor':la,fill:c,
+        'font-family':'Inter,sans-serif','font-size':9,'font-style':'italic',opacity:.7},bg);
+      const bs1=svgEl('tspan',{x:lp2.x,dy:0},bt); bs1.textContent=bl1;
+      const bs2=svgEl('tspan',{x:lp2.x,dy:11},bt); bs2.textContent=bl2;
+    } else {
+      svgText(b.name,{x:lp2.x,y:lp2.y+4,'text-anchor':la,fill:c,
+        'font-family':'Inter,sans-serif','font-size':9,'font-style':'italic',opacity:.7},bg);
+    }
+
+    /* click → toggle leaves */
+    bg.addEventListener('click', ()=>{
+      const isOpen = activeBranch===bi;
+      // close previous
+      if(activeBranch!==null){
+        closeLeaves(activeBranch);
+      }
+      if(!isOpen){
+        openLeaves(bi, leafG, connEls, bg);
+        activeBranch=bi;
+        document.getElementById('hint').style.opacity='0';
+      } else {
+        activeBranch=null;
+      }
+    });
+
+    /* store refs on element for close */
+    bg._leafG=leafG;
+    bg._conns=connEls;
+
+    bIdx++;
+  });
+});
+
+function openLeaves(bi, leafG, conns, nodeEl){
+  leafG.classList.add('open');
+  conns.forEach(l=>l.classList.add('open'));
+  nodeEl.classList.add('active');
+}
+function closeLeaves(bi){
+  const nodeEl=document.getElementById('branch-'+bi);
+  if(!nodeEl) return;
+  nodeEl._leafG.classList.remove('open');
+  nodeEl._conns.forEach(l=>l.classList.remove('open'));
+  nodeEl.classList.remove('active');
+}
+
+/* ── Leaf click → overlay ── */
+document.getElementById('g-leaf-nodes').addEventListener('click', e=>{
+  const lg=e.target.closest('.node-l');
+  if(!lg) return;
+  const li=parseInt(lg.getAttribute('data-li'));
+  const d=LEAVES[li];
+  document.getElementById('ov-branch').textContent=d.branch;
+  document.getElementById('ov-title').textContent=d.title;
+  document.getElementById('ov-text').textContent=d.text;
+  document.getElementById('ov-source').textContent='— '+d.source;
+  document.getElementById('overlay').classList.add('open');
+});
+
+/* ── Overlay close ── */
+document.getElementById('ov-close').addEventListener('click', ()=>{
+  document.getElementById('overlay').classList.remove('open');
+});
+document.getElementById('overlay').addEventListener('click', e=>{
+  if(e.target===document.getElementById('overlay'))
+    document.getElementById('overlay').classList.remove('open');
+});
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') document.getElementById('overlay').classList.remove('open');
+});
+</script>
+</body>
+</html>
