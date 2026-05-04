@@ -22,6 +22,11 @@ import Nav from '../components/Nav';
 import HindiInput from '../components/HindiInput';
 import { useLocale } from '../lib/i18n';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
+import {
+  trackSearch, trackSearchEmpty, trackResultClick, trackDiscourseOpen,
+  trackModeChange, trackProxChange, trackLanguageFilter, trackSortChange,
+  trackPageView,
+} from '../lib/analytics';
 
 interface Hit {
   paragraph_id: number;
@@ -274,7 +279,17 @@ function SearchPageInner() {
           throw new Error((body && 'error' in body && body.error) || 'Archive unreachable.');
         }
         setSubmittedQuery(fts);
-        setResults(body as SearchResponse);
+        const sr = body as SearchResponse;
+        setResults(sr);
+        trackSearch({
+          query: rawQ,
+          mode: m,
+          language: langFilter || 'all',
+          proxDist: m === 'near' ? prox : undefined,
+          resultCount: sr.total ?? 0,
+          hitCount: sr.total_hits ?? 0,
+        });
+        if ((sr.total ?? 0) === 0) trackSearchEmpty(rawQ, m);
       } catch (err) {
         setResults(null);
         setError(err instanceof Error ? err.message : 'Archive unreachable.');
@@ -286,6 +301,7 @@ function SearchPageInner() {
   );
 
   useEffect(() => {
+    trackPageView(window.location.pathname + window.location.search);
     if (initialQuery) void runSearch(initialQuery, initialSort, initialMode, initialProx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -354,6 +370,7 @@ function SearchPageInner() {
 
   const handleSortChange = (next: Sort) => {
     if (next === sort) return;
+    trackSortChange(next);
     setSort(next);
     if (query.trim()) {
       syncUrl(query.trim(), next, selectedEventId, mode, proximity);
@@ -363,6 +380,7 @@ function SearchPageInner() {
 
   const handleModeChange = (next: Mode) => {
     if (next === mode) return;
+    trackModeChange(mode, next);
     setMode(next);
     if (query.trim() && results) {
       syncUrl(query.trim(), sort, '', next, proximity);
@@ -373,6 +391,7 @@ function SearchPageInner() {
 
   const handleProximityChange = (next: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(next || 0)));
+    trackProxChange(clamped, 'input');
     setProximity(clamped);
     if (mode === 'near' && query.trim() && results) {
       syncUrl(query.trim(), sort, '', mode, clamped);
@@ -382,6 +401,7 @@ function SearchPageInner() {
   };
 
   const handleLangFilterChange = (val: string) => {
+    trackLanguageFilter(val || 'all');
     setLangFilter(val);
   };
 
@@ -395,6 +415,16 @@ function SearchPageInner() {
   }, [langFilter]);
 
   const selectEvent = (eventId: string) => {
+    if (results) {
+      const ev = results.events.find(e => e.event_id === eventId);
+      if (ev) trackResultClick({
+        eventId,
+        title: ev.title ?? eventId,
+        rank: ev.rank,
+        query: submittedQuery,
+        mode,
+      });
+    }
     setSelectedEventId(eventId);
     syncUrl(query.trim(), sort, eventId, mode, proximity);
     setTimeout(() => {
@@ -565,7 +595,7 @@ function SearchPageInner() {
                     <button
                       key={v}
                       type="button"
-                      onClick={() => handleProximityChange(v)}
+                      onClick={() => { trackProxChange(v, 'preset'); handleProximityChange(v); }}
                       className={
                         proximity === v
                           ? 'text-gold font-bold'
@@ -800,6 +830,7 @@ function SearchPageInner() {
                       <Link
                         href={`/read?event_id=${encodeURIComponent(selectedEvent.event_id)}`}
                         className="text-[13px] tracking-[0.15em] uppercase text-gold/80 hover:text-gold inline-flex items-center gap-1 font-medium"
+                        onClick={() => trackDiscourseOpen(selectedEvent.event_id, selectedEvent.title ?? selectedEvent.event_id, 'search')}
                       >
                         <BookOpen size={14} /> {t('search.detail.full')}
                       </Link>

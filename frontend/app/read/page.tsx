@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
+import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
 
 interface Paragraph {
   sequence_number: number;
@@ -52,7 +53,11 @@ function ReaderInner() {
         return body as DiscourseResponse;
       })
       .then((body) => {
-        if (!cancelled) setData(body);
+        if (!cancelled) {
+          setData(body);
+          trackDiscourseOpen(body.event.id, body.event.title ?? body.event.id, 'direct');
+          trackPageView(window.location.pathname + window.location.search);
+        }
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message || 'The discourse could not be retrieved.');
