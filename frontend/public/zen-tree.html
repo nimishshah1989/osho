@@ -141,7 +141,7 @@ header p{
 </header>
 
 <div id="tree-wrap">
-  <svg id="tree-svg" viewBox="0 0 1800 980" preserveAspectRatio="xMidYMid meet">
+  <svg id="tree-svg" viewBox="0 0 1000 1400" preserveAspectRatio="xMidYMid meet">
     <defs>
       <filter id="glow-soft" x="-50%" y="-50%" width="200%" height="200%">
         <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
@@ -277,8 +277,9 @@ header p{
 const DATA = JSON.parse(document.getElementById('tree-data').textContent);
 const NS = 'http://www.w3.org/2000/svg';
 
-const VW0 = 1800, VH0 = 980;
-const TRUNK_X = 900, TRUNK_TOP = 60, TRUNK_BOT = 920;
+const VW0 = 1000, VH0 = 1400;
+const TRUNK_X = 500, TRUNK_TOP = 380, TRUNK_BOT = 1340;
+const TRUNK_W_TOP = 4, TRUNK_W_BOT = 22;
 
 // Earthy quadrant palette tuned for cream parchment background
 const QC = {
@@ -296,24 +297,29 @@ const QC_DARK = {
 
 const TRUNK_CLR  = '#5a3a20';
 const BRANCH_CLR = '#7a5a3c';
+const BRANCH_HI  = '#a78562';
 const TEXT_DARK  = '#2d2419';
 const TEXT_MUTED = '#6e5c47';
 const HUB_FILL   = '#fbf6e9';
 
-// Hub layout follows DATA.quadrants order: self, work, love, beyond
-const HUBS = [
-  {id:'self',   x:580,  y:280, side:'L'},
-  {id:'work',   x:1220, y:280, side:'R'},
-  {id:'love',   x:580,  y:700, side:'L'},
-  {id:'beyond', x:1220, y:700, side:'R'}
+// Order matches DATA.quadrants: self, work, love, beyond
+// Each limb anchors on the trunk and curves out to a hub. Lower limbs reach
+// further out, upper limbs reach less far but higher — like a real tree.
+const LIMBS = [
+  // self — upper-left
+  {id:'self',   anchor:{x:495, y:600}, hub:{x:285, y:240},
+    c1:{x:430, y:540}, c2:{x:340, y:340}, w1:7, w2:3},
+  // work — upper-right
+  {id:'work',   anchor:{x:505, y:600}, hub:{x:715, y:240},
+    c1:{x:570, y:540}, c2:{x:660, y:340}, w1:7, w2:3},
+  // love — mid-left, longer reach
+  {id:'love',   anchor:{x:493, y:930}, hub:{x:165, y:730},
+    c1:{x:360, y:930}, c2:{x:230, y:830}, w1:11, w2:3.5},
+  // beyond — mid-right, longer reach
+  {id:'beyond', anchor:{x:507, y:930}, hub:{x:835, y:730},
+    c1:{x:640, y:930}, c2:{x:770, y:830}, w1:11, w2:3.5}
 ];
-const HUB_R = 44;
-const TIP_OFFSETS  = [-160, 0, 160];
-const LEAF_OFFSETS = [-50, -17, 17, 50];
-
-const TIP_X_L = 360,  TIP_X_R = 1440;
-const LEAF_X_L = 240, LEAF_X_R = 1560;
-const LEAF_LABEL_X_L = 220, LEAF_LABEL_X_R = 1580;
+const HUB_R = 36;
 
 function el(tag, attrs, parent) {
   const e = document.createElementNS(NS, tag);
@@ -341,191 +347,75 @@ const gHubs   = document.getElementById('g-hubs');
 const gTips   = document.getElementById('g-tips');
 const gLeaves = document.getElementById('g-leaves');
 
-// ── Trunk: tapered organic shape, narrow at top, flared at the base ──
+// ── Helpers for tapered organic shapes ──
+// Build a tapered ribbon along a cubic Bezier from (x1,y1)→(x2,y2) with
+// thickness w1 at the start and w2 at the end. Returns a closed path string.
+function taperedBezier(x1, y1, c1x, c1y, c2x, c2y, x2, y2, w1, w2) {
+  const dxs = c1x - x1, dys = c1y - y1;
+  const lens = Math.hypot(dxs, dys) || 1;
+  const nxs = -dys / lens, nys = dxs / lens;
+  const dxe = x2 - c2x, dye = y2 - c2y;
+  const lene = Math.hypot(dxe, dye) || 1;
+  const nxe = -dye / lene, nye = dxe / lene;
+  const tx1 = x1 + nxs*w1/2, ty1 = y1 + nys*w1/2;
+  const tx2 = x2 + nxe*w2/2, ty2 = y2 + nye*w2/2;
+  const bx1 = x1 - nxs*w1/2, by1 = y1 - nys*w1/2;
+  const bx2 = x2 - nxe*w2/2, by2 = y2 - nye*w2/2;
+  const tc1x = c1x + nxs*w1/2, tc1y = c1y + nys*w1/2;
+  const tc2x = c2x + nxe*w2/2, tc2y = c2y + nye*w2/2;
+  const bc1x = c1x - nxs*w1/2, bc1y = c1y - nys*w1/2;
+  const bc2x = c2x - nxe*w2/2, bc2y = c2y - nye*w2/2;
+  return `M${tx1},${ty1} C${tc1x},${tc1y} ${tc2x},${tc2y} ${tx2},${ty2}
+          L${bx2},${by2} C${bc2x},${bc2y} ${bc1x},${bc1y} ${bx1},${by1} Z`;
+}
+
+// ── Trunk: tapered straight shape, narrow at top, flared at the base ──
 (function drawTrunk() {
-  const wT = 4, wB = 16, top = TRUNK_TOP, bot = TRUNK_BOT;
-  const d = `M${TRUNK_X-wT/2},${top}
-             C${TRUNK_X-wT/2-1},${top+260} ${TRUNK_X-wB/2+1},${bot-260} ${TRUNK_X-wB/2},${bot}
-             L${TRUNK_X+wB/2},${bot}
-             C${TRUNK_X+wB/2-1},${bot-260} ${TRUNK_X+wT/2+1},${top+260} ${TRUNK_X+wT/2},${top} Z`;
-  el('path', {d, fill: TRUNK_CLR, opacity: 0.92}, gTrunk);
-  // soft inner shadow line down the trunk
-  el('line', {x1: TRUNK_X+1, y1: top+4, x2: TRUNK_X+2, y2: bot-4,
-    stroke:'#3d2616', 'stroke-width':1, opacity:.35}, gTrunk);
+  const xc = TRUNK_X, top = TRUNK_TOP, bot = TRUNK_BOT;
+  const wT = TRUNK_W_TOP, wB = TRUNK_W_BOT;
+  // Slight S-curve mid-shaft for an organic feel
+  const d = `M${xc-wT/2},${top}
+             C${xc-wT/2-1.5},${top+330} ${xc-wB/2+2},${bot-330} ${xc-wB/2},${bot}
+             L${xc+wB/2},${bot}
+             C${xc+wB/2-2},${bot-330} ${xc+wT/2+1.5},${top+330} ${xc+wT/2},${top} Z`;
+  el('path', {d, fill: TRUNK_CLR, opacity: 0.93}, gTrunk);
 })();
 
-// Crown — small leaf cluster at the top of the trunk
-[
-  {dx:0,   dy:-14, ang:-90, sc:1.0,  clr:'#7e9a5c'},
-  {dx:-10, dy:-6,  ang:-150, sc:0.85, clr:'#8aa56a'},
-  {dx:10,  dy:-6,  ang:-30,  sc:0.85, clr:'#8aa56a'},
-  {dx:-4,  dy:-22, ang:-100, sc:0.7,  clr:'#92ad72'},
-  {dx:4,   dy:-22, ang:-80,  sc:0.7,  clr:'#92ad72'}
-].forEach(({dx, dy, ang, sc, clr}) => {
-  el('path', {
-    d: 'M0,0 Q9,-5 16,0 Q9,5 0,0 Z',
-    fill: clr, opacity: .82, stroke: '#5e7a44', 'stroke-width': 0.5,
-    transform: `translate(${TRUNK_X+dx} ${TRUNK_TOP+dy}) rotate(${ang}) scale(${sc})`
-  }, gTrunk);
-});
-
 // Decorative roots fanning out from the trunk's base
-const ROOTS = [
-  {d:'M900 920 C870 945 805 957 720 964', w:3.5},
-  {d:'M900 920 C930 945 995 957 1080 964', w:3.5},
-  {d:'M900 920 C885 950 825 965 760 972', w:2.4},
-  {d:'M900 920 C915 950 975 965 1040 972', w:2.4},
-  {d:'M900 920 C898 948 898 962 898 970', w:1.8}
-];
-ROOTS.forEach(({d, w}) => el('path', {d, stroke: TRUNK_CLR, 'stroke-width': w,
-  fill:'none', opacity:.7, 'stroke-linecap':'round'}, gTrunk));
+[
+  {d:`M${TRUNK_X-3} ${TRUNK_BOT-2} C${TRUNK_X-60} ${TRUNK_BOT+24} ${TRUNK_X-160} ${TRUNK_BOT+38} ${TRUNK_X-260} ${TRUNK_BOT+44}`, w:4},
+  {d:`M${TRUNK_X+3} ${TRUNK_BOT-2} C${TRUNK_X+60} ${TRUNK_BOT+24} ${TRUNK_X+160} ${TRUNK_BOT+38} ${TRUNK_X+260} ${TRUNK_BOT+44}`, w:4},
+  {d:`M${TRUNK_X-2} ${TRUNK_BOT-2} C${TRUNK_X-40} ${TRUNK_BOT+30} ${TRUNK_X-100} ${TRUNK_BOT+48} ${TRUNK_X-180} ${TRUNK_BOT+58}`, w:2.6},
+  {d:`M${TRUNK_X+2} ${TRUNK_BOT-2} C${TRUNK_X+40} ${TRUNK_BOT+30} ${TRUNK_X+100} ${TRUNK_BOT+48} ${TRUNK_X+180} ${TRUNK_BOT+58}`, w:2.6},
+  {d:`M${TRUNK_X} ${TRUNK_BOT-2} C${TRUNK_X-2} ${TRUNK_BOT+30} ${TRUNK_X-2} ${TRUNK_BOT+50} ${TRUNK_X-2} ${TRUNK_BOT+62}`, w:2}
+].forEach(({d, w}) => el('path', {d, stroke: TRUNK_CLR, 'stroke-width': w,
+  fill:'none', opacity:.78, 'stroke-linecap':'round'}, gTrunk));
+
+// Crown — narrow tapered tip extending above where the trunk ends, with a
+// tiny leaf flourish so the trunk doesn't look chopped.
+el('path', {
+  d:`M${TRUNK_X-TRUNK_W_TOP/2},${TRUNK_TOP} L${TRUNK_X-1},${TRUNK_TOP-22} L${TRUNK_X+1},${TRUNK_TOP-22} L${TRUNK_X+TRUNK_W_TOP/2},${TRUNK_TOP} Z`,
+  fill: TRUNK_CLR, opacity: 0.8
+}, gTrunk);
 
 const LEAVES = [];
 
-// ── Build quadrants: hub → 3 sub-branch tips → 4 leaves ──
-DATA.quadrants.forEach((q, qi) => {
-  const hub = HUBS[qi];
-  const c   = QC[q.id];
-  const cD  = QC_DARK[q.id];
-  const isLeft = hub.side === 'L';
-  const sgn         = isLeft ? -1 : 1;       // outward direction
-  const tipX        = isLeft ? TIP_X_L      : TIP_X_R;
-  const leafX       = isLeft ? LEAF_X_L     : LEAF_X_R;
-  const leafLabelX  = isLeft ? LEAF_LABEL_X_L : LEAF_LABEL_X_R;
-  const leafAnchor  = isLeft ? 'end'   : 'start';
-  const tipLabelX   = isLeft ? tipX + 16 : tipX - 16;
-  const tipAnchor   = isLeft ? 'start' : 'end';
-  const leafAngle   = isLeft ? 180 : 0;
-  const mainEndX    = hub.x - sgn * HUB_R;   // attach to disc edge facing trunk
-  const subStartX   = hub.x + sgn * HUB_R;   // sub-branches leave from outer edge
-
-  // Main branch: trunk → hub disc edge (thick brown)
-  el('path', {d: hCurve(TRUNK_X, hub.y, mainEndX, hub.y),
-    stroke: BRANCH_CLR, 'stroke-width': 6, fill:'none', opacity: .85,
-    'stroke-linecap':'round'}, gMain);
-  // subtle highlight
-  el('path', {d: hCurve(TRUNK_X, hub.y - 1, mainEndX, hub.y - 1),
-    stroke: '#a78562', 'stroke-width': 1.4, fill:'none', opacity: .35,
-    'stroke-linecap':'round'}, gMain);
-
-  q.branches.forEach((b, bi) => {
-    const tipY = hub.y + TIP_OFFSETS[bi];
-
-    // Sub-branch: hub edge → tip
-    el('path', {d: hCurve(subStartX, hub.y, tipX, tipY),
-      stroke: BRANCH_CLR, 'stroke-width': 3.2, fill:'none', opacity: .8,
-      'stroke-linecap':'round'}, gSub);
-
-    // Four leaves per tip
-    b.leaves.forEach((leaf, li) => {
-      const leafY = tipY + LEAF_OFFSETS[li];
-
-      // Leaf stem (thin twig)
-      el('path', {d: hCurve(tipX, tipY, leafX, leafY),
-        stroke: BRANCH_CLR, 'stroke-width': 1.4, fill:'none', opacity: .65,
-        'stroke-linecap':'round'}, gStems);
-
-      const lid = LEAVES.length;
-      LEAVES.push({
-        branch:    b.question,
-        situation: q.situation,
-        qid:       q.id,
-        color:     c,
-        title:     leaf.title,
-        context:   leaf.context || '',
-        text:      leaf.text,
-        source:    leaf.source
-      });
-
-      const lg = el('g', {'class':'node-l', 'data-li':lid}, gLeaves);
-      // Generous transparent hit target covering the leaf shape
-      el('rect', {x: leafX - (isLeft ? 22 : 4), y: leafY - 10,
-        width: 26, height: 20, fill:'transparent'}, lg);
-      // The leaf — almond shape pointing outward, with vein
-      const leafG = el('g', {
-        transform: `translate(${leafX} ${leafY}) rotate(${leafAngle})`,
-        'class':'l-leaf', opacity:.92
-      }, lg);
-      el('path', {
-        d: 'M0,0 Q9,-7 18,0 Q9,7 0,0 Z',
-        fill: c, stroke: cD, 'stroke-width': 0.8
-      }, leafG);
-      el('path', {
-        d: 'M0,0 L15,0',
-        stroke: cD, 'stroke-width': 0.6, fill:'none', opacity:.55
-      }, leafG);
-      // Title label, sits just past the leaf tip
-      txt(leaf.title, {
-        x: leafLabelX, y: leafY + 4,
-        'text-anchor': leafAnchor,
-        fill: TEXT_DARK,
-        'font-family': 'Inter,sans-serif',
-        'font-size': 12.5,
-        'font-weight': 400,
-        opacity: .92,
-        'class': 'l-label'
-      }, lg);
-    });
-
-    // Tip — small wood-knot dot
-    el('circle', {cx:tipX, cy:tipY, r:4.5, fill: TRUNK_CLR, opacity:.92}, gTips);
-    el('circle', {cx:tipX, cy:tipY, r:1.6, fill:'#a78562', opacity:.7}, gTips);
-
-    // Branch name + question on the inward side of the tip
-    txt(b.name, {
-      x: tipLabelX, y: tipY - 12,
-      'text-anchor': tipAnchor,
-      fill: cD,
-      'font-family': 'Inter,sans-serif',
-      'font-size': 12.5,
-      'font-weight': 600,
-      'letter-spacing': .25
-    }, gTips);
-    txt(b.question, {
-      x: tipLabelX, y: tipY + 1,
-      'text-anchor': tipAnchor,
-      fill: TEXT_MUTED,
-      'font-family': 'Inter,sans-serif',
-      'font-size': 10.5,
-      'font-style': 'italic'
-    }, gTips);
-  });
-
-  // Hub disc — cream paper disc with colored ring
-  el('circle', {cx:hub.x, cy:hub.y, r: HUB_R + 4, fill:'none',
-    stroke: c, 'stroke-width': 0.6, opacity: .35}, gHubs);
-  el('circle', {cx:hub.x, cy:hub.y, r: HUB_R, fill: HUB_FILL,
-    stroke: c, 'stroke-width': 2.2, opacity: 0.98}, gHubs);
-
-  // Hub label — quadrant name, Playfair italic
-  const labelWords = q.label.split(' & ');
-  if (labelWords.length === 2) {
-    const t = el('text', {x:hub.x, y:hub.y - 3,
-      'text-anchor':'middle', fill: cD,
-      'font-family':'Playfair Display,serif',
-      'font-size':14, 'font-style':'italic', 'font-weight':600}, gHubs);
-    el('tspan', {x:hub.x, dy:0},  t).textContent = labelWords[0];
-    el('tspan', {x:hub.x, dy:16}, t).textContent = '& ' + labelWords[1];
-  } else {
-    txt(q.label, {x:hub.x, y:hub.y + 5,
-      'text-anchor':'middle', fill: cD,
-      'font-family':'Playfair Display,serif',
-      'font-size':16, 'font-style':'italic', 'font-weight':600}, gHubs);
-  }
-
-  // Situation tagline outside the hub (above for lower hubs, below for upper)
-  const sitY = hub.y + (hub.y < VH0/2 ? HUB_R + 22 : -(HUB_R + 14));
-  txt(q.situation, {
-    x: hub.x, y: sitY,
-    'text-anchor':'middle',
-    fill: TEXT_MUTED,
-    'font-family':'Inter,sans-serif',
-    'font-size': 11.5,
-    'font-weight': 400,
-    'font-style':'italic',
-    'letter-spacing': .4
-  }, gHubs);
+// ── Step 1: draw four organic main limbs as tapered shapes ──
+LIMBS.forEach(L => {
+  el('path', {
+    d: taperedBezier(L.anchor.x, L.anchor.y, L.c1.x, L.c1.y,
+                     L.c2.x, L.c2.y, L.hub.x, L.hub.y, L.w1, L.w2),
+    fill: BRANCH_CLR, opacity: 0.9
+  }, gMain);
+  // Subtle highlight stroke along the inside of each limb for shading
+  el('path', {
+    d: `M${L.anchor.x},${L.anchor.y} C${L.c1.x},${L.c1.y} ${L.c2.x},${L.c2.y} ${L.hub.x},${L.hub.y}`,
+    stroke: BRANCH_HI, 'stroke-width': 0.9, fill: 'none', opacity: 0.6,
+    'stroke-linecap':'round'
+  }, gMain);
 });
+
+// (Sub-branches, leaves and labels added in subsequent passes.)
 
 // ── Leaf click → overlay ──
 gLeaves.addEventListener('click', e => {
