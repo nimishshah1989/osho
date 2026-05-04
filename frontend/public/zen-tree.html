@@ -458,7 +458,138 @@ LIMBS.forEach(L => {
   }, gMain);
 });
 
-// (Sub-branches, leaves and labels added in subsequent passes.)
+// ── Step 2: sub-branches, hubs, tip dots and tip labels ──
+// For each quadrant: 3 sub-branches fan out from the hub disc to a tip.
+// Each tip gets the sub-branch name + question. Leaves come in Step 3.
+//
+// Tip positions are hand-tuned per quadrant so the full tree silhouette
+// reads as a banyan with branches reaching in many directions.
+const SUB_DATA = [
+  // self  (upper-left)  hub at (275, 230)
+  [
+    {tip:{x:165, y:108}, bend:-14, lbl:{x: 0,   y:-30, a:'middle'}}, // up-left, label above
+    {tip:{x: 95, y:265}, bend:-10, lbl:{x:-12,  y: -3, a:'end'   }}, // direct left
+    {tip:{x:215, y:430}, bend: 12, lbl:{x: 0,   y: 28, a:'middle'}}  // down-left, label below
+  ],
+  // work  (upper-right) hub at (725, 230) — mirror
+  [
+    {tip:{x:835, y:108}, bend: 14, lbl:{x: 0,   y:-30, a:'middle'}},
+    {tip:{x:905, y:265}, bend: 10, lbl:{x: 12,  y: -3, a:'start' }},
+    {tip:{x:785, y:430}, bend:-12, lbl:{x: 0,   y: 28, a:'middle'}}
+  ],
+  // love  (mid-left)    hub at (160, 740)
+  [
+    {tip:{x: 70, y:570}, bend:-12, lbl:{x: 0,   y:-22, a:'middle'}}, // up-left
+    {tip:{x: 40, y:760}, bend: -6, lbl:{x: 0,   y:-22, a:'middle'}}, // direct left
+    {tip:{x: 95, y:940}, bend: 12, lbl:{x: 0,   y: 24, a:'middle'}}  // down-left
+  ],
+  // beyond (mid-right)  hub at (840, 740) — mirror
+  [
+    {tip:{x:930, y:570}, bend: 12, lbl:{x: 0,   y:-22, a:'middle'}},
+    {tip:{x:960, y:760}, bend:  6, lbl:{x: 0,   y:-22, a:'middle'}},
+    {tip:{x:905, y:940}, bend:-12, lbl:{x: 0,   y: 24, a:'middle'}}
+  ]
+];
+
+// Helper: point on the hub disc edge nearest a target
+function hubEdge(hubX, hubY, towardX, towardY) {
+  const dx = towardX - hubX, dy = towardY - hubY;
+  const len = Math.hypot(dx, dy) || 1;
+  return {x: hubX + dx/len*HUB_R, y: hubY + dy/len*HUB_R};
+}
+
+// Helper: build a sub-branch path that bends gently outward
+function subBranchPath(fromX, fromY, toX, toY, bend, w1, w2) {
+  const dx = toX - fromX, dy = toY - fromY;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy/len, py = dx/len;  // perpendicular
+  const c1x = fromX + dx*0.30 + px*bend;
+  const c1y = fromY + dy*0.30 + py*bend;
+  const c2x = fromX + dx*0.70 + px*bend*0.5;
+  const c2y = fromY + dy*0.70 + py*bend*0.5;
+  return taperedBezier(fromX, fromY, c1x, c1y, c2x, c2y, toX, toY, w1, w2);
+}
+
+DATA.quadrants.forEach((q, qi) => {
+  const L   = LIMBS[qi];
+  const hub = L.hub;
+  const c   = QC[q.id];
+  const cD  = QC_DARK[q.id];
+  const subs = SUB_DATA[qi];
+
+  q.branches.forEach((b, bi) => {
+    const sd = subs[bi];
+    const start = hubEdge(hub.x, hub.y, sd.tip.x, sd.tip.y);
+
+    // Sub-branch (tapered ribbon)
+    el('path', {
+      d: subBranchPath(start.x, start.y, sd.tip.x, sd.tip.y, sd.bend, 4.5, 1.8),
+      fill: BRANCH_CLR, opacity: .9
+    }, gSub);
+
+    // Tip wood-knot
+    el('circle', {cx: sd.tip.x, cy: sd.tip.y, r: 3.2,
+      fill: TRUNK_CLR, opacity: .92}, gTips);
+
+    // Branch name + question
+    const lx = sd.tip.x + sd.lbl.x, ly = sd.tip.y + sd.lbl.y;
+    txt(b.name, {
+      x: lx, y: ly,
+      'text-anchor': sd.lbl.a,
+      fill: cD,
+      'font-family': 'Inter,sans-serif',
+      'font-size': 13.5,
+      'font-weight': 600,
+      'letter-spacing': .2
+    }, gTips);
+    txt(b.question, {
+      x: lx, y: ly + 14,
+      'text-anchor': sd.lbl.a,
+      fill: TEXT_MUTED,
+      'font-family': 'Inter,sans-serif',
+      'font-size': 11,
+      'font-style': 'italic'
+    }, gTips);
+  });
+
+  // Hub disc — cream paper with quadrant-colored ring
+  el('circle', {cx: hub.x, cy: hub.y, r: HUB_R + 5, fill:'none',
+    stroke: c, 'stroke-width': 0.7, opacity: .32}, gHubs);
+  el('circle', {cx: hub.x, cy: hub.y, r: HUB_R, fill: HUB_FILL,
+    stroke: c, 'stroke-width': 2.4, opacity: .98}, gHubs);
+
+  // Hub label — the quadrant name in Playfair italic
+  const lw = q.label.split(' & ');
+  if (lw.length === 2) {
+    const t = el('text', {x: hub.x, y: hub.y - 3,
+      'text-anchor':'middle', fill: cD,
+      'font-family':'Playfair Display,serif',
+      'font-size':14, 'font-style':'italic', 'font-weight':600}, gHubs);
+    el('tspan', {x: hub.x, dy:0},  t).textContent = lw[0];
+    el('tspan', {x: hub.x, dy:16}, t).textContent = '& ' + lw[1];
+  } else {
+    txt(q.label, {x: hub.x, y: hub.y + 5,
+      'text-anchor':'middle', fill: cD,
+      'font-family':'Playfair Display,serif',
+      'font-size':16, 'font-style':'italic', 'font-weight':600}, gHubs);
+  }
+
+  // Situation tagline outside the hub disc
+  // Upper hubs (self/work) → tagline below; lower hubs (love/beyond) → above.
+  const sitDy = hub.y < 500 ? HUB_R + 22 : -(HUB_R + 14);
+  txt(q.situation, {
+    x: hub.x, y: hub.y + sitDy,
+    'text-anchor':'middle',
+    fill: TEXT_MUTED,
+    'font-family':'Inter,sans-serif',
+    'font-size': 11.5,
+    'font-weight': 400,
+    'font-style':'italic',
+    'letter-spacing': .4
+  }, gHubs);
+});
+
+// (Leaves and leaf labels are added in Step 3.)
 
 // ── Leaf click → overlay ──
 gLeaves.addEventListener('click', e => {
