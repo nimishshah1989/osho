@@ -67,7 +67,7 @@ interface DiscourseResponse {
 type Sort = 'rank' | 'title';
 type Mode = 'phrase' | 'all' | 'near';
 
-const DEFAULT_PROX = 10;
+const DEFAULT_PROX = 30;
 
 const HAS_DEVANAGARI = /[\u0900-\u097F]/;
 
@@ -168,7 +168,10 @@ function SearchPageInner() {
   const initialModeParam = searchParams?.get('mode');
   const initialMode: Mode =
     initialModeParam === 'phrase' || initialModeParam === 'near' ? initialModeParam : 'all';
-  const initialProxParam = Number(searchParams?.get('prox'));
+  // Number(null) === 0, which passes the >= 0 check and silently overrides
+  // DEFAULT_PROX. Parse as NaN when the param is absent so the fallback fires.
+  const proxStr = searchParams?.get('prox');
+  const initialProxParam = proxStr !== null ? Number(proxStr) : NaN;
   const initialProx =
     Number.isFinite(initialProxParam) && initialProxParam >= 0 && initialProxParam <= 100
       ? initialProxParam
@@ -558,7 +561,7 @@ function SearchPageInner() {
                     aria-label={t('search.mode.near')}
                   />
                   <span className="text-stone-400 dark:text-ivory/50">{t('search.prox.suffix')}</span>
-                  {[5, 10, 20, 50].map((v) => (
+                  {[5, 10, 30, 50].map((v) => (
                     <button
                       key={v}
                       type="button"

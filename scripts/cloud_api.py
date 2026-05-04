@@ -490,23 +490,31 @@ def search(
                     if ev_id not in events:
                         events[ev_id] = cev
 
-        # Count distinct events and hits
-        try:
-            count_row = conn.execute(
-                f"""
-                SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
-                FROM paragraphs_fts f
-                LEFT JOIN events e ON e.id = f.event_id
-                WHERE paragraphs_fts MATCH ?
-                {where_extra}
-                """,
-                ([fts_query] + filter_params),
-            ).fetchone()
-            total_events = count_row["ev_count"]
-            total_hits = count_row["hit_count"]
-        except sqlite3.OperationalError:
+        # Count distinct events and hits.
+        # For NEAR queries with cross-paragraph augmentation the SQL MATCH count
+        # only reflects same-paragraph FTS5 hits, not the augmented results, so
+        # the two numbers would disagree. Always derive counts from the events
+        # dict after augmentation so that "N discourses · M hits" matches the list.
+        if near_parsed and near_dist >= 30:
             total_events = len(events)
             total_hits = sum(e["hit_count"] for e in events.values())
+        else:
+            try:
+                count_row = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+                    FROM paragraphs_fts f
+                    LEFT JOIN events e ON e.id = f.event_id
+                    WHERE paragraphs_fts MATCH ?
+                    {where_extra}
+                    """,
+                    ([fts_query] + filter_params),
+                ).fetchone()
+                total_events = count_row["ev_count"]
+                total_hits = count_row["hit_count"]
+            except sqlite3.OperationalError:
+                total_events = len(events)
+                total_hits = sum(e["hit_count"] for e in events.values())
 
     # Compute combined rank: BM25 is negative (lower=better).
     for ev in events.values():
