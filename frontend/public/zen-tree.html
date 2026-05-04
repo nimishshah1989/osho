@@ -24,8 +24,13 @@ header p{
   margin-top:4px;text-transform:uppercase;
 }
 
-#tree-wrap{flex:1;min-height:0;position:relative}
+#tree-wrap{flex:1;min-height:0;position:relative;cursor:grab}
+#tree-wrap.panning{cursor:grabbing}
 #tree-svg{width:100%;height:100%;display:block}
+
+#zoom-ctrl{position:absolute;bottom:40px;right:16px;display:flex;flex-direction:column;gap:5px;z-index:10}
+.z-btn{width:30px;height:30px;background:rgba(12,11,29,.85);border:1px solid rgba(201,168,76,.22);color:rgba(201,168,76,.6);font-size:18px;line-height:30px;text-align:center;cursor:pointer;user-select:none;transition:border-color .15s,color .15s}
+.z-btn:hover{border-color:rgba(201,168,76,.55);color:#c9a84c}
 
 /* quadrant nodes */
 .node-q{cursor:default}
@@ -153,6 +158,11 @@ header p{
     <g id="g-l-nodes"></g>
     <g id="g-center"></g>
   </svg>
+  <div id="zoom-ctrl">
+    <div class="z-btn" id="z-in">+</div>
+    <div class="z-btn" id="z-out">−</div>
+    <div class="z-btn" id="z-fit" style="font-size:11px;line-height:30px">⊡</div>
+  </div>
   <div id="hint">select a life situation to begin</div>
 </div>
 
@@ -209,6 +219,12 @@ header p{
       {"id":"leaf-17","title":"The lover finds the beloved inside","text":"Truth needs guts and courage. It comes out of a loving search. The inquirer is a lover; he is trying to find the ultimate lover. Even the ordinary love affairs are stepping-stones. But love is in bondage. The society has sealed every love. Anything that becomes a law becomes dead. If love remains a freedom, step-by-step you will be able to reach your innermost being. It is saying that if you go deep in meditation a moment comes when the lover finds the beloved — not as a separate entity, but as one with himself. One is both: the lover and the loved. This non-duality takes you to the highest peak of consciousness.","source":"Kyozan A True Man of Zen ~ 03","context":"You are searching for someone who has been inside you all along"},
       {"id":"leaf-18","title":"Drop the search, drop the ego","text":"Chikanzenji burned all the scriptures. That was symbolic. Now he no longer remembered anything, now he had forgotten all search, now he no longer cared. Unconcerned he lived a very ordinary life. He had no pretensions any more, he had no ego goals any more. Remember, there are two kinds of ego goals: one, the worldly, and the other, the other-worldly. Some people are searching for money; some people are searching for power, prestige; some people are searching for God, moksha, nirvana, enlightenment — but the search continues. The moment you drop the search you drop the ego also. The moment there is no seeking, the seeker cannot exist.","source":"Zen The Path of Paradox Vol 1 ~ 04","context":"Dropping the search drops the ego with it"},
       {"id":"leaf-19","title":"Open — don’t focus","text":"Ordinarily people who don’t know what meditation is write that meditation is concentration. There are thousands of books in which you will find this statement, this utterly stupid statement — that meditation is concentration. Meditation is not concentration; it is the last thing that meditation can be. In concentration you are very tense, focused, looking for something. Yes, concentration is good if you are looking for tiny things. If you are searching for an ant, concentration is perfectly good — but not good for God. God is so vast, so tremendously vast. For God you have to be utterly open, unconcentrated, open from every side, not searching, not looking. An unfocused consciousness is what meditation is.","source":"Zen The Path of Paradox Vol 1 ~ 01","context":"Meditation is not focus or concentration — it is wide-open awareness"}
+    ]},
+    {"name":"Action Without Doer","question":"How do I act without burning out?","leaves":[
+      {"id":"leaf-40","title":"The actor spoils the act","text":"Tao says: act without acting, do without doing. This is the supreme teaching of Lao Tzu — wu wei. But most people miss it. They think it means to be lazy, to not act. No. It means: act, but let the actor disappear. When you are totally absorbed in work, the worker vanishes. The painter disappears into the painting, the musician vanishes into the music. That is the state. The moment you stand apart and say ‘I am doing this,’ the doing becomes clumsy. The ‘I’ always gets in the way. Become the action, drop the actor — and you will see that everything flows with a grace you never had when you were trying.","source":"Tao: The Three Treasures Vol 1 ~ 03","context":"When the doer disappears, the doing becomes perfect"},
+      {"id":"leaf-41","title":"Do the work, then let go","text":"Krishna’s whole teaching in the Gita can be condensed into one sentence: do the action, don’t hanker for the fruit. This looks like a paradox — if you don’t want the fruit, why act at all? But Krishna is not saying be indifferent. He is saying: be so totally present in the doing that the fruit becomes irrelevant. The fruit is the future; the doing is the present. Bring your whole being to what is in front of you now. Then when it is done — let it go, as a flower releases its fragrance. The flower does not hold the fragrance. The river does not keep the water it has already run. Do, and release.","source":"Yoga: The Alpha and the Omega Vol 8 ~ 06","context":"Do everything as if it matters utterly, then release it completely"},
+      {"id":"leaf-42","title":"Why work exhausts you","text":"You are tired not because you have done too much, but because you have been doing it with half a heart. Division is exhausting. When you wish you were somewhere else while doing what you are doing, you spend twice the energy — once for the task, and once fighting the doing. Meditation brings a simple remedy: be where you are. When you wash dishes, wash dishes — not tomorrow’s plans while washing dishes. The mind that is divided is always tired. The mind that is undivided, even after great labor, feels refreshed. The Zen monks cleaned the monastery, cooked for hundreds, and remained bright as mirrors — because they brought their whole self to each small act.","source":"The Path of Love ~ 02","context":"Work does not tire you — your resistance to being here does"},
+      {"id":"leaf-43","title":"Work as worship","text":"What is the difference between cooking as a chore and cooking as meditation? Not the cooking — the quality of attention you bring. When you cook with your whole presence, tasting, smelling, feeling the heat, noticing the color change in the vegetables, that act becomes worship. Not worship of a god outside, but the deepest honoring of this moment, this life. The Zen saying puts it perfectly: before enlightenment, chop wood, carry water. After enlightenment, chop wood, carry water. The difference is invisible to an observer. The difference is everything to the one who does it.","source":"The Dhammapada Vol 01 ~ 07","context":"When attention is total, any ordinary act becomes sacred"}
     ]}
   ]},
   {"id":"love","label":"Love & Pain","situation":"When love becomes suffering","branches":[
@@ -223,6 +239,12 @@ header p{
       {"id":"leaf-25","title":"Drop all armor, completely","text":"The disciple starts melting into the master. The disciple destroys all distance between himself and the master; the disciple yields, the disciple surrenders, the disciple effaces himself. He becomes a nonentity, he becomes a nothingness. And in that nothingness his heart opens. In that absence his ego has disappeared and the master can penetrate into his being. The disciple is receptive, vulnerable, unguarded; he drops all armor. He drops all defense measures. He is ready to die. The master is his soul, his very being; his devotion is unconditional and absolute. And to know absolute devotion is to know God.","source":"The Dhammapada Vol 03 ~ 08","context":"Love means dropping all armor, completely, with no guarantee"},
       {"id":"leaf-26","title":"Truth cannot be borrowed","text":"A disciple is the rarest flowering of human consciousness, because beyond the disciple there is only one peak more — the master. And one who has been totally a disciple one day becomes a master. Disciplehood is a process of becoming a master. But one should not start with the idea of becoming a master; otherwise one is going to miss, because then it is again an ego trip. One should come simply to evaporate. The word ‘disciple’ also means one who is ready to learn. Who can be ready to learn? Only one who is ready to drop all his prejudices. If you come as a Christian or a Hindu or a Mohammedan, you can’t be a disciple. If you simply come as a human being…","source":"The Dhammapada Vol 03 ~ 08","context":"You cannot accumulate your way to truth — you must dissolve into it"},
       {"id":"leaf-27","title":"The body has its own knowing","text":"For centuries this nonsense has been taught to people. And the result is that everybody is divided, everybody is against his body. And if you are against your body, you are bound for trouble. The body is the visible soul, and the soul is the invisible body. The body and soul are not divided anywhere; they are parts of one whole. You have to accept the body, you have to love the body, you have to respect the body, you have to be grateful to your body. Only then will you attain to a certain kind of integrity. The body is spontaneous and natural. All faults and all disturbances are in the mind. The body’s signals — hunger, fullness, tiredness — are clear and honest. The mind overrides these natural messages through conditioning and arbitrary rules.","source":"The Dhammapada Vol 02 ~ 01","context":"The body is not the obstacle to awakening — it is one of its most direct doorways"}
+    ]},
+    {"name":"Compassion Not Pity","question":"What is real compassion?","leaves":[
+      {"id":"leaf-44","title":"Compassion is not pity","text":"Pity and compassion look similar from outside, but they arise from completely different places inside. Pity arises from a sense of superiority: ‘Poor you, I am glad I am not in your position.’ It is a way of feeling better about yourself by feeling sorry for another. Compassion arises from the recognition of shared humanity: I understand, I have been there, we are not so different. Pity keeps a distance and maintains the gap. Compassion crosses the gap. The Buddha’s word was karuna — which does not mean sorrow over another’s pain, but the ability to feel with them, to tremble with them. That is a very different quality altogether.","source":"The Dhammapada Vol 07 ~ 05","context":"Pity looks down; compassion looks across as an equal"},
+      {"id":"leaf-45","title":"Fill your own cup first","text":"All the masters have said it in different ways, but the message is the same: before you can love another, you must know love in yourself. This is not selfishness — this is simple understanding. An empty well cannot give water. A lamp that has gone out cannot light a room. A person who has never known silence cannot transmit silence. The great misunderstanding is that serving others means neglecting yourself. No — it means first becoming a source. Then service is not sacrifice, it is overflow. You are so full that you cannot help but give. That kind of giving has no resentment in it, no expectation — it is simply the nature of fullness to overflow.","source":"The Path of Love ~ 04","context":"You cannot give what you do not have — be full first"},
+      {"id":"leaf-46","title":"Help without hierarchy","text":"The moment you help someone from a position of superiority, you have harmed them more than helped. You have reinforced their smallness. True help is help that restores the other person’s confidence in themselves. A gardener does not replace the plant — the gardener creates conditions for the plant to grow by itself. A teacher does not fill the student — the teacher helps the student discover their own capacity. The greatest help, therefore, is almost invisible. The greatest teacher is the one who makes the student forget they were ever taught. Love serves, but it serves in a way that sets free.","source":"Come Follow to You Vol 4 ~ 08","context":"The greatest help makes itself unnecessary"},
+      {"id":"leaf-47","title":"Compassion flows, it does not deplete","text":"The candle does not worry that lighting another candle will diminish it. This is the paradox of love — it does not follow the economics of scarcity. Money shared is halved. Love shared is multiplied. The mystics have always known this, and ordinary people discover it in their best moments: after a great act of love, after real giving, after true compassion, you do not feel depleted — you feel more alive. As if the act of giving opened something in you. This is the sign that real compassion was present: it circulates. It is the nature of the sun to radiate — not to conserve. Be like the sun.","source":"The Dhammapada Vol 08 ~ 03","context":"When compassion is real, giving increases the giver"}
     ]}
   ]},
   {"id":"beyond","label":"Life & Death","situation":"When existence feels heavy","branches":[
@@ -264,30 +286,34 @@ const QP = {
 
 // Branch positions — spread around the perimeter
 const BP = [
-  {x:58,   y:340},  // self-0
-  {x:148,  y:62},   // self-1
-  {x:408,  y:34},   // self-2
-  {x:992,  y:34},   // work-0
-  {x:1318, y:110},  // work-1
-  {x:55,   y:488},  // love-0
-  {x:178,  y:758},  // love-1
-  {x:992,  y:768},  // beyond-0
-  {x:1298, y:692},  // beyond-1
-  {x:1346, y:466}   // beyond-2
+  {x:155,  y:362},  // B0  self-0   left
+  {x:202,  y:100},  // B1  self-1   top-left
+  {x:432,  y:84},   // B2  self-2   top-center-left
+  {x:890,  y:84},   // B3  work-0   top-center-right
+  {x:1192, y:100},  // B4  work-1   top-right
+  {x:1258, y:240},  // B5  work-2   right-upper (new)
+  {x:155,  y:456},  // B6  love-0   left-lower
+  {x:222,  y:720},  // B7  love-1   bottom-left
+  {x:555,  y:720},  // B8  love-2   bottom-center-left (new)
+  {x:978,  y:720},  // B9  beyond-0 bottom-center-right
+  {x:1260, y:718},  // B10 beyond-1 bottom-right
+  {x:1258, y:418}   // B11 beyond-2 right-middle
 ];
 
 // Hardcoded label anchor positions for each branch question
 const BLP = [
-  {x:100,  y:332, a:'start'},   // B0 — label right of circle
-  {x:196,  y:104, a:'start'},   // B1 — label below-right
-  {x:408,  y:76,  a:'middle'},  // B2 — label below
-  {x:992,  y:76,  a:'middle'},  // B3 — label below
-  {x:1278, y:152, a:'end'},     // B4 — label below-left
-  {x:100,  y:482, a:'start'},   // B5 — label right of circle
-  {x:178,  y:716, a:'middle'},  // B6 — label above
-  {x:992,  y:726, a:'middle'},  // B7 — label above
-  {x:1258, y:654, a:'end'},     // B8 — label above-left
-  {x:1304, y:460, a:'end'}      // B9 — label left of circle
+  {x:200,  y:354, a:'start'},   // B0  right
+  {x:202,  y:136, a:'middle'},  // B1  below
+  {x:432,  y:120, a:'middle'},  // B2  below
+  {x:890,  y:120, a:'middle'},  // B3  below
+  {x:1192, y:136, a:'middle'},  // B4  below
+  {x:1218, y:232, a:'end'},     // B5  left (new)
+  {x:200,  y:448, a:'start'},   // B6  right
+  {x:222,  y:686, a:'middle'},  // B7  above
+  {x:555,  y:686, a:'middle'},  // B8  above (new)
+  {x:978,  y:686, a:'middle'},  // B9  above
+  {x:1260, y:684, a:'middle'},  // B10 above
+  {x:1218, y:410, a:'end'}      // B11 left
 ];
 
 const LEAVES = [];
@@ -340,20 +366,20 @@ DATA.quadrants.forEach(q => {
 
 // ── Center node ──
 const gC = document.getElementById('g-center');
-el('circle', {cx:CX, cy:CY, r:52, fill:'#c9a84c', opacity:.04, filter:'url(#glow-lg)'}, gC);
-el('circle', {cx:CX, cy:CY, r:26, fill:'#120f1e', stroke:'#c9a84c', 'stroke-width':1.5}, gC);
-el('circle', {cx:CX, cy:CY, r:6,  fill:'#c9a84c', opacity:.55}, gC);
-txt('osho', {x:CX, y:CY+5, 'text-anchor':'middle', fill:'#c9a84c',
-  'font-family':'Playfair Display,serif', 'font-size':11, 'font-style':'italic',
-  'letter-spacing':2}, gC);
+el('circle', {cx:CX, cy:CY, r:88, fill:'#c9a84c', opacity:.04, filter:'url(#glow-lg)'}, gC);
+el('circle', {cx:CX, cy:CY, r:44, fill:'#120f1e', stroke:'#c9a84c', 'stroke-width':2}, gC);
+el('circle', {cx:CX, cy:CY, r:7,  fill:'#c9a84c', opacity:.6}, gC);
+txt('OSHO', {x:CX, y:CY+5, 'text-anchor':'middle', fill:'#c9a84c',
+  'font-family':'Playfair Display,serif', 'font-size':13, 'font-style':'italic',
+  'letter-spacing':3}, gC);
 
 // ── Quadrant nodes ──
 const gQ = document.getElementById('g-q-nodes');
 DATA.quadrants.forEach(q => {
   const qp = QP[q.id], c = QC[q.id];
-  el('circle', {cx:qp.x, cy:qp.y, r:52, fill:c, opacity:.05, filter:'url(#glow-soft)'}, gQ);
-  el('circle', {cx:qp.x, cy:qp.y, r:32, fill:'#0d0b1c', stroke:c,
-    'stroke-width':1.6, opacity:.9}, gQ);
+  el('circle', {cx:qp.x, cy:qp.y, r:68, fill:c, opacity:.05, filter:'url(#glow-soft)'}, gQ);
+  el('circle', {cx:qp.x, cy:qp.y, r:40, fill:'#0d0b1c', stroke:c,
+    'stroke-width':1.8, opacity:.9}, gQ);
   // Label inside circle (short)
   const words = q.label.split(' & ');
   if (words.length === 2) {
@@ -375,11 +401,11 @@ DATA.quadrants.forEach(q => {
   }
   // Situation label outside circle
   const qdx = qp.x - CX, qdy = qp.y - CY, ql = Math.sqrt(qdx*qdx+qdy*qdy)||1;
-  const sx = qp.x + (qdx/ql)*42, sy = qp.y + (qdy/ql)*42;
+  const sx = qp.x + (qdx/ql)*52, sy = qp.y + (qdy/ql)*52;
   const sw = q.situation.split(' '), smid = Math.ceil(sw.length/2);
-  const st = el('text', {x:sx, y:sy-6, 'text-anchor':anc(sx), fill:c,
+  const st = el('text', {x:sx, y:sy-5, 'text-anchor':anc(sx), fill:c,
     'font-family':'Inter,sans-serif', 'font-size':11, 'font-weight':400,
-    opacity:.52, 'letter-spacing':.3}, gQ);
+    opacity:.65, 'letter-spacing':.3}, gQ);
   el('tspan', {x:sx, dy:0},  st).textContent = sw.slice(0,smid).join(' ');
   el('tspan', {x:sx, dy:15}, st).textContent = sw.slice(smid).join(' ');
 });
@@ -462,6 +488,7 @@ DATA.quadrants.forEach(q => {
     el('tspan', {x:blp.x, dy:17}, qt).textContent = ql2;
 
     bg.addEventListener('click', () => {
+      if (didDrag) return;
       toggleBranch(bi, leafG, connEls, bg);
       if (window.gtag) window.gtag('event', 'zen_branch_click', {question: b.question, situation: q.situation});
     });
@@ -493,6 +520,7 @@ function toggleBranch(idx, leafG, conns, nodeEl) {
 
 // ── Leaf click → overlay ──
 document.getElementById('g-l-nodes').addEventListener('click', e => {
+  if (didDrag) return;
   const lg = e.target.closest('.node-l');
   if (!lg) return;
   const d = LEAVES[parseInt(lg.getAttribute('data-li'))];
@@ -517,6 +545,55 @@ document.getElementById('overlay').addEventListener('click', e => {
   if (e.target === document.getElementById('overlay')) closeOv();
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeOv(); });
+
+// ── Zoom / Pan ──
+const svg = document.getElementById('tree-svg');
+const wrap = document.getElementById('tree-wrap');
+const VW0 = 1400, VH0 = 820;
+let vx = 0, vy = 0, vw = VW0, vh = VH0;
+
+function applyView() {
+  svg.setAttribute('viewBox', `${vx} ${vy} ${vw} ${vh}`);
+}
+function zoomAt(cx, cy, factor) {
+  const rect = svg.getBoundingClientRect();
+  const sx = vx + (cx - rect.left) / rect.width * vw;
+  const sy = vy + (cy - rect.top) / rect.height * vh;
+  const nw = Math.max(500, Math.min(2800, vw * factor));
+  const nh = nw * VH0 / VW0;
+  vx = sx - (cx - rect.left) / rect.width * nw;
+  vy = sy - (cy - rect.top) / rect.height * nh;
+  vw = nw; vh = nh;
+  applyView();
+}
+
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  zoomAt(e.clientX, e.clientY, e.deltaY > 0 ? 1.12 : 0.89);
+}, {passive: false});
+
+let didDrag = false, dragOrigin = null;
+svg.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  dragOrigin = {x: e.clientX, y: e.clientY, vx, vy};
+  didDrag = false;
+  wrap.classList.add('panning');
+});
+window.addEventListener('mousemove', e => {
+  if (!dragOrigin) return;
+  const dx = e.clientX - dragOrigin.x, dy = e.clientY - dragOrigin.y;
+  if (Math.abs(dx) + Math.abs(dy) > 4) didDrag = true;
+  if (!didDrag) return;
+  const rect = svg.getBoundingClientRect();
+  vx = dragOrigin.vx - dx / rect.width * vw;
+  vy = dragOrigin.vy - dy / rect.height * vh;
+  applyView();
+});
+window.addEventListener('mouseup', () => { dragOrigin = null; wrap.classList.remove('panning'); });
+
+document.getElementById('z-in').addEventListener('click',  () => zoomAt(VW0/2, VH0/2, 0.75));
+document.getElementById('z-out').addEventListener('click', () => zoomAt(VW0/2, VH0/2, 1.33));
+document.getElementById('z-fit').addEventListener('click', () => { vx=0; vy=0; vw=VW0; vh=VH0; applyView(); });
 </script>
 </body>
 </html>
