@@ -549,12 +549,14 @@ def search(
                     "hl": hl,
                 })
 
-        # Augment with cross-paragraph NEAR matches when N is large enough
-        # (FTS5 NEAR only matches within a single paragraph row)
+        # Augment with cross-paragraph NEAR matches only for large distances.
+        # FTS5 NEAR is exact within a single paragraph row, so for distance < 100
+        # same-paragraph matching is sufficient and correct.
+        # For distance ≥ 100, words may genuinely span paragraphs, so we also
+        # search across adjacent paragraphs (para_span = distance // 30).
         if near_parsed:
             near_words, near_dist = near_parsed
-            # Only augment for N≥30; N<30 is tight enough that same-para is correct
-            if near_dist >= 30:
+            if near_dist >= 100:
                 para_span = max(1, near_dist // 30)
                 cross = _augment_near_cross_paragraph(
                     conn, near_words, para_span, where_extra, filter_params
