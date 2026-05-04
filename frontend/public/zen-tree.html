@@ -24,7 +24,7 @@ header p{
   margin-top:4px;text-transform:uppercase;
 }
 
-#tree-wrap{flex:1;min-height:0;position:relative;cursor:grab}
+#tree-wrap{flex:1;min-height:0;position:relative;cursor:grab;touch-action:none;overflow:hidden}
 #tree-wrap.panning{cursor:grabbing}
 #tree-svg{width:100%;height:100%;display:block}
 
@@ -32,31 +32,14 @@ header p{
 .z-btn{width:30px;height:30px;background:rgba(12,11,29,.85);border:1px solid rgba(201,168,76,.22);color:rgba(201,168,76,.6);font-size:18px;line-height:30px;text-align:center;cursor:pointer;user-select:none;transition:border-color .15s,color .15s}
 .z-btn:hover{border-color:rgba(201,168,76,.55);color:#c9a84c}
 
-/* quadrant nodes */
-.node-q{cursor:default}
-
-/* branch nodes */
-.node-b{cursor:pointer}
-.node-b .b-ring{transition:stroke-opacity .2s,stroke-width .2s}
-.node-b:hover .b-ring{stroke-opacity:1;stroke-width:2px}
-.node-b.active .b-ring{stroke-opacity:1;stroke-width:2.2px}
-.node-b .b-label{transition:opacity .2s}
-.node-b:hover .b-label{opacity:1 !important}
-
-/* leaf groups */
-.leaf-group{opacity:0;pointer-events:none;transition:opacity .38s ease}
-.leaf-group.open{opacity:1;pointer-events:all}
-.leaf-conn{opacity:0;transition:opacity .38s ease;stroke-dasharray:4 6}
-.leaf-conn.open{opacity:1}
-
-@keyframes pulse{0%,100%{opacity:.7}50%{opacity:1}}
-.leaf-group.open .l-dot{animation:pulse 2.4s ease-in-out infinite}
+/* All SVG text gets a dark stroke halo so it stays readable over branch lines */
+#tree-svg text{paint-order:stroke fill;stroke:#07070f;stroke-width:3px;stroke-linejoin:round;stroke-linecap:round}
 
 .node-l{cursor:pointer}
-.node-l .l-dot{transition:r .15s}
-.node-l:hover .l-dot{r:8}
-.node-l .l-label{transition:opacity .15s}
-.node-l:hover .l-label{opacity:1 !important}
+.node-l .l-dot{transition:r .15s,opacity .15s}
+.node-l:hover .l-dot{r:6.5;opacity:1}
+.node-l .l-label{transition:opacity .15s,fill .15s}
+.node-l:hover .l-label{opacity:1}
 
 /* overlay */
 #overlay{
@@ -140,30 +123,31 @@ header p{
 </header>
 
 <div id="tree-wrap">
-  <svg id="tree-svg" viewBox="0 0 1400 820" preserveAspectRatio="xMidYMid meet">
+  <svg id="tree-svg" viewBox="0 0 3600 1700" preserveAspectRatio="xMidYMid meet">
     <defs>
       <filter id="glow-soft" x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b"/>
+        <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
         <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
       <filter id="glow-lg" x="-100%" y="-100%" width="300%" height="300%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="b"/>
+        <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="b"/>
         <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
       </filter>
     </defs>
     <g id="g-trunk"></g>
-    <g id="g-leaf-conn"></g>
-    <g id="g-q-nodes"></g>
-    <g id="g-b-nodes"></g>
-    <g id="g-l-nodes"></g>
-    <g id="g-center"></g>
+    <g id="g-main"></g>
+    <g id="g-sub"></g>
+    <g id="g-stems"></g>
+    <g id="g-hubs"></g>
+    <g id="g-tips"></g>
+    <g id="g-leaves"></g>
   </svg>
   <div id="zoom-ctrl">
     <div class="z-btn" id="z-in">+</div>
     <div class="z-btn" id="z-out">−</div>
     <div class="z-btn" id="z-fit" style="font-size:11px;line-height:30px">⊡</div>
   </div>
-  <div id="hint">select a life situation to begin</div>
+  <div id="hint">tap any leaf · scroll to zoom · drag to pan</div>
 </div>
 
 <div id="overlay">
@@ -274,50 +258,25 @@ header p{
 'use strict';
 const DATA = JSON.parse(document.getElementById('tree-data').textContent);
 const NS = 'http://www.w3.org/2000/svg';
-const CX = 700, CY = 410;
+
+const VW0 = 3600, VH0 = 1700;
+const TRUNK_X = 1800, TRUNK_TOP = 100, TRUNK_BOT = 1620;
 
 const QC = {self:'#7b9acc', work:'#8fbf7f', love:'#c47d9e', beyond:'#c9a84c'};
-const QP = {
-  self:   {x:245,  y:180},
-  work:   {x:1155, y:180},
-  love:   {x:245,  y:640},
-  beyond: {x:1155, y:640}
-};
 
-// Branch positions — spread around the perimeter
-const BP = [
-  {x:155,  y:362},  // B0  self-0   left
-  {x:202,  y:130},  // B1  self-1   top-left
-  {x:432,  y:130},  // B2  self-2   top-center
-  {x:890,  y:130},  // B3  work-0   top-center
-  {x:1170, y:150},  // B4  work-1   top-right
-  {x:1258, y:270},  // B5  work-2   right-upper
-  {x:155,  y:456},  // B6  love-0   left-lower
-  {x:222,  y:700},  // B7  love-1   bottom-left
-  {x:555,  y:700},  // B8  love-2   bottom-center
-  {x:978,  y:700},  // B9  beyond-0 bottom-center
-  {x:1260, y:700},  // B10 beyond-1 bottom-right
-  {x:1258, y:418}   // B11 beyond-2 right-middle
+// Hub layout follows DATA.quadrants order: self, work, love, beyond
+const HUBS = [
+  {id:'self',   x:880,  y:420,  side:'L'},
+  {id:'work',   x:2720, y:420,  side:'R'},
+  {id:'love',   x:880,  y:1280, side:'L'},
+  {id:'beyond', x:2720, y:1280, side:'R'}
 ];
+const TIP_OFFSETS  = [-240, 0, 240];
+const LEAF_OFFSETS = [-75, -25, 25, 75];
 
-// Hardcoded label anchor positions for each branch question
-const BLP = [
-  {x:200,  y:354, a:'start'},   // B0  right
-  {x:202,  y:166, a:'middle'},  // B1  below
-  {x:432,  y:166, a:'middle'},  // B2  below
-  {x:890,  y:166, a:'middle'},  // B3  below
-  {x:1170, y:186, a:'middle'},  // B4  below
-  {x:1218, y:262, a:'end'},     // B5  left
-  {x:200,  y:448, a:'start'},   // B6  right
-  {x:222,  y:666, a:'middle'},  // B7  above
-  {x:555,  y:666, a:'middle'},  // B8  above
-  {x:978,  y:666, a:'middle'},  // B9  above
-  {x:1260, y:666, a:'middle'},  // B10 above
-  {x:1218, y:410, a:'end'}      // B11 left
-];
-
-const LEAVES = [];
-let activeBranch = null;
+const TIP_X_L = 480,  TIP_X_R = 3120;
+const LEAF_X_L = 260, LEAF_X_R = 3340;
+const LEAF_LABEL_X_L = 248, LEAF_LABEL_X_R = 3352;
 
 function el(tag, attrs, parent) {
   const e = document.createElementNS(NS, tag);
@@ -330,200 +289,173 @@ function txt(s, attrs, parent) {
   e.textContent = s;
   return e;
 }
-function curve(x1, y1, x2, y2) {
-  const dx = x2 - x1, dy = y2 - y1;
-  return `M${x1} ${y1} C${x1+dx*.4} ${y1+dy*.04} ${x2-dx*.4} ${y2-dy*.04} ${x2} ${y2}`;
+// Smooth horizontal S-curve from (x1,y1) to (x2,y2)
+function hCurve(x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2;
+  return `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}`;
 }
-function leafPos(bx, by) {
-  const dx = bx - CX, dy = by - CY, len = Math.sqrt(dx*dx + dy*dy) || 1;
-  const nx = dx/len, ny = dy/len, px = -ny, py = nx;
-  const d = 112, s = 44;
-  return [
-    {x: bx+nx*d+px*s*1.6,  y: by+ny*d+py*s*1.6},
-    {x: bx+nx*d+px*s*.52,  y: by+ny*d+py*s*.52},
-    {x: bx+nx*d-px*s*.52,  y: by+ny*d-py*s*.52},
-    {x: bx+nx*d-px*s*1.6,  y: by+ny*d-py*s*1.6}
-  ];
-}
-function anc(x) { return x < 420 ? 'end' : x > 980 ? 'start' : 'middle'; }
 
-// ── Trunk lines ──
-const gTrunk = document.getElementById('g-trunk');
-DATA.quadrants.forEach(q => {
-  const qp = QP[q.id];
-  el('path', {d: curve(CX,CY,qp.x,qp.y), stroke: QC[q.id],
-    'stroke-width': 2, fill: 'none', opacity: .25}, gTrunk);
-});
-let bi2 = 0;
-DATA.quadrants.forEach(q => {
-  q.branches.forEach(() => {
-    const bp = BP[bi2], qp = QP[q.id];
-    el('path', {d: curve(qp.x,qp.y,bp.x,bp.y), stroke: QC[q.id],
-      'stroke-width': 1.4, fill: 'none', opacity: .2}, gTrunk);
-    bi2++;
-  });
-});
+const svg     = document.getElementById('tree-svg');
+const gTrunk  = document.getElementById('g-trunk');
+const gMain   = document.getElementById('g-main');
+const gSub    = document.getElementById('g-sub');
+const gStems  = document.getElementById('g-stems');
+const gHubs   = document.getElementById('g-hubs');
+const gTips   = document.getElementById('g-tips');
+const gLeaves = document.getElementById('g-leaves');
 
-// ── Center node ──
-const gC = document.getElementById('g-center');
-el('circle', {cx:CX, cy:CY, r:88, fill:'#c9a84c', opacity:.04, filter:'url(#glow-lg)'}, gC);
-el('circle', {cx:CX, cy:CY, r:44, fill:'#120f1e', stroke:'#c9a84c', 'stroke-width':2}, gC);
-el('circle', {cx:CX, cy:CY, r:7,  fill:'#c9a84c', opacity:.6}, gC);
-txt('OSHO', {x:CX, y:CY+5, 'text-anchor':'middle', fill:'#c9a84c',
-  'font-family':'Playfair Display,serif', 'font-size':13, 'font-style':'italic',
-  'letter-spacing':3}, gC);
+// ── Trunk ──
+el('line', {x1:TRUNK_X, y1:TRUNK_TOP, x2:TRUNK_X, y2:TRUNK_BOT,
+  stroke:'#c9a84c', 'stroke-width':3, opacity:.35, 'stroke-linecap':'round'}, gTrunk);
 
-// ── Quadrant nodes ──
-const gQ = document.getElementById('g-q-nodes');
-DATA.quadrants.forEach(q => {
-  const qp = QP[q.id], c = QC[q.id];
-  el('circle', {cx:qp.x, cy:qp.y, r:68, fill:c, opacity:.05, filter:'url(#glow-soft)'}, gQ);
-  el('circle', {cx:qp.x, cy:qp.y, r:40, fill:'#0d0b1c', stroke:c,
-    'stroke-width':1.8, opacity:.9}, gQ);
-  // Label inside circle (short)
-  const words = q.label.split(' & ');
-  if (words.length === 2) {
-    const t = el('text', {x:qp.x, y:qp.y-5, 'text-anchor':'middle', fill:c,
-      'font-family':'Playfair Display,serif', 'font-size':9.5, 'font-style':'italic'}, gQ);
-    el('tspan', {x:qp.x, dy:0},  t).textContent = words[0];
-    el('tspan', {x:qp.x, dy:13}, t).textContent = '& '+words[1];
-  } else {
-    const parts = q.label.split(' ');
-    if (parts.length >= 2) {
-      const t = el('text', {x:qp.x, y:qp.y-4, 'text-anchor':'middle', fill:c,
-        'font-family':'Playfair Display,serif', 'font-size':10, 'font-style':'italic'}, gQ);
-      el('tspan', {x:qp.x, dy:0},  t).textContent = parts.slice(0, Math.ceil(parts.length/2)).join(' ');
-      el('tspan', {x:qp.x, dy:13}, t).textContent = parts.slice(Math.ceil(parts.length/2)).join(' ');
-    } else {
-      txt(q.label, {x:qp.x, y:qp.y+4, 'text-anchor':'middle', fill:c,
-        'font-family':'Playfair Display,serif', 'font-size':10, 'font-style':'italic'}, gQ);
-    }
-  }
-  // Situation label — placed in the empty diagonal zone of each quadrant,
-  // 60-70px away from quadrant centre, in directions verified to be branch-free.
-  let sx, sy, sa;
-  if      (q.id === 'self')   { sx = qp.x + 36; sy = qp.y + 70; sa = 'start'; }
-  else if (q.id === 'work')   { sx = qp.x - 36; sy = qp.y + 70; sa = 'end';   }
-  else if (q.id === 'love')   { sx = qp.x + 36; sy = qp.y - 70; sa = 'start'; }
-  else                        { sx = qp.x - 36; sy = qp.y - 70; sa = 'end';   }
-  const sw = q.situation.split(' '), smid = Math.ceil(sw.length/2);
-  const st = el('text', {x:sx, y:sy, 'text-anchor':sa, fill:c,
-    'font-family':'Inter,sans-serif', 'font-size':10.5, 'font-weight':400,
-    opacity:.6, 'letter-spacing':.4}, gQ);
-  el('tspan', {x:sx, dy:0},  st).textContent = sw.slice(0,smid).join(' ');
-  el('tspan', {x:sx, dy:14}, st).textContent = sw.slice(smid).join(' ');
-});
+// Crown — soft halo + ring + dot at top of trunk
+el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:60, fill:'#c9a84c',
+  opacity:.05, filter:'url(#glow-lg)'}, gTrunk);
+el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:22, fill:'none',
+  stroke:'#c9a84c', 'stroke-width':1.4, opacity:.45}, gTrunk);
+el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:8, fill:'#c9a84c', opacity:.55}, gTrunk);
 
-// ── Branch & leaf nodes ──
-const gLC = document.getElementById('g-leaf-conn');
-const gBN = document.getElementById('g-b-nodes');
-const gLN = document.getElementById('g-l-nodes');
+// Decorative roots fanning out from the trunk's base
+const ROOTS = [
+  'M1800 1620 C1740 1655 1620 1670 1440 1685',
+  'M1800 1620 C1860 1655 1980 1670 2160 1685',
+  'M1800 1620 C1780 1665 1690 1685 1560 1695',
+  'M1800 1620 C1820 1665 1910 1685 2040 1695',
+  'M1800 1620 C1800 1660 1800 1680 1800 1690'
+];
+ROOTS.forEach(d => el('path', {d, stroke:'#c9a84c', 'stroke-width':1.4,
+  fill:'none', opacity:.3, 'stroke-linecap':'round'}, gTrunk));
 
-let bIdx = 0;
-DATA.quadrants.forEach(q => {
-  q.branches.forEach(b => {
-    const bi = bIdx, bp = BP[bi], c = QC[q.id];
-    const lPos = leafPos(bp.x, bp.y);
+const LEAVES = [];
 
-    // Leaf connector lines
-    const connEls = lPos.map(lp =>
-      el('line', {x1:bp.x, y1:bp.y, x2:lp.x, y2:lp.y,
-        stroke:c, 'stroke-width':1, opacity:.45, 'class':'leaf-conn'}, gLC)
-    );
+// ── Build quadrants: hub → 3 sub-branch tips → 4 leaves ──
+DATA.quadrants.forEach((q, qi) => {
+  const hub = HUBS[qi];
+  const c   = QC[q.id];
+  const isLeft = hub.side === 'L';
+  const tipX        = isLeft ? TIP_X_L      : TIP_X_R;
+  const leafX       = isLeft ? LEAF_X_L     : LEAF_X_R;
+  const leafLabelX  = isLeft ? LEAF_LABEL_X_L : LEAF_LABEL_X_R;
+  const leafAnchor  = isLeft ? 'end'   : 'start';
+  const tipLabelX   = isLeft ? tipX + 22 : tipX - 22;
+  const tipAnchor   = isLeft ? 'start' : 'end';
 
-    // Leaf group
-    const leafG = el('g', {'class':'leaf-group', 'data-bi':bi}, gLN);
+  // Main branch: trunk → hub
+  el('path', {d: hCurve(TRUNK_X, hub.y, hub.x, hub.y),
+    stroke:c, 'stroke-width':2.5, fill:'none', opacity:.5}, gMain);
 
-    b.leaves.forEach((leaf, j) => {
-      const lp = lPos[j];
-      const li = LEAVES.length;
+  q.branches.forEach((b, bi) => {
+    const tipY = hub.y + TIP_OFFSETS[bi];
+
+    // Sub-branch: hub → tip
+    el('path', {d: hCurve(hub.x, hub.y, tipX, tipY),
+      stroke:c, 'stroke-width':1.8, fill:'none', opacity:.45}, gSub);
+
+    // Four leaves per tip
+    b.leaves.forEach((leaf, li) => {
+      const leafY = tipY + LEAF_OFFSETS[li];
+
+      // Leaf stem
+      el('path', {d: hCurve(tipX, tipY, leafX, leafY),
+        stroke:c, 'stroke-width':1, fill:'none', opacity:.35}, gStems);
+
+      const lid = LEAVES.length;
       LEAVES.push({
-        branch: b.question,
+        branch:    b.question,
         situation: q.situation,
-        qid: q.id, color: c,
-        title: leaf.title, context: leaf.context || '',
-        text: leaf.text, source: leaf.source
+        qid:       q.id,
+        color:     c,
+        title:     leaf.title,
+        context:   leaf.context || '',
+        text:      leaf.text,
+        source:    leaf.source
       });
-      const lg = el('g', {'class':'node-l', 'data-li':li}, leafG);
-      // Bigger hit target
-      el('circle', {cx:lp.x, cy:lp.y, r:22, fill:'transparent'}, lg);
-      // Ring
-      el('circle', {cx:lp.x, cy:lp.y, r:9, fill:'none', stroke:c,
-        'stroke-width':1.2, opacity:.4}, lg);
-      // Dot
-      el('circle', {cx:lp.x, cy:lp.y, r:5.5, fill:c, opacity:.8,
+
+      const lg = el('g', {'class':'node-l', 'data-li':lid}, gLeaves);
+      // Generous transparent hit target
+      el('circle', {cx:leafX, cy:leafY, r:18, fill:'transparent'}, lg);
+      // Soft halo
+      el('circle', {cx:leafX, cy:leafY, r:9, fill:c, opacity:.12}, lg);
+      // Leaf dot
+      el('circle', {cx:leafX, cy:leafY, r:4, fill:c, opacity:.9,
         'class':'l-dot'}, lg);
-      // Label — positioned outward from branch
-      const ldx = lp.x - bp.x, ldy = lp.y - bp.y;
-      const ll = Math.sqrt(ldx*ldx + ldy*ldy) || 1;
-      const tx = lp.x + (ldx/ll)*16, ty = lp.y + (ldy/ll)*16;
-      const ws = leaf.title.split(' ');
-      const mid = Math.ceil(ws.length/2);
-      const l1 = ws.slice(0,mid).join(' '), l2 = ws.slice(mid).join(' ');
-      if (l2) {
-        const t = el('text', {x:tx, y:ty-5, 'text-anchor':anc(tx), fill:'#ddd4ba',
-          'font-family':'Inter,sans-serif', 'font-size':12, 'font-weight':300,
-          opacity:.9, 'class':'l-label'}, leafG);
-        el('tspan', {x:tx, dy:0},  t).textContent = l1;
-        el('tspan', {x:tx, dy:15}, t).textContent = l2;
-      } else {
-        const t = txt(leaf.title, {x:tx, y:ty+5, 'text-anchor':anc(tx), fill:'#ddd4ba',
-          'font-family':'Inter,sans-serif', 'font-size':12, 'font-weight':300,
-          opacity:.9, 'class':'l-label'}, leafG);
-      }
+      // Title label, single line, on the outer edge
+      txt(leaf.title, {
+        x: leafLabelX, y: leafY + 3.5,
+        'text-anchor': leafAnchor,
+        fill: '#ddd4ba',
+        'font-family': 'Inter,sans-serif',
+        'font-size': 12,
+        'font-weight': 300,
+        opacity: .85,
+        'class': 'l-label'
+      }, lg);
     });
 
-    // Branch circle
-    const bg = el('g', {'class':'node-b', 'id':'bn-'+bi, 'data-bi':bi}, gBN);
-    el('circle', {cx:bp.x, cy:bp.y, r:28, fill:c, opacity:.07}, bg);
-    el('circle', {cx:bp.x, cy:bp.y, r:16, fill:'#120f1e', stroke:c,
-      'stroke-width':1.5, 'stroke-opacity':.6, 'class':'b-ring'}, bg);
-    el('circle', {cx:bp.x, cy:bp.y, r:4.5, fill:c, opacity:.72}, bg);
+    // Tip node (above the leaf stems so it sits cleanly on top)
+    el('circle', {cx:tipX, cy:tipY, r:9, fill:'#0d0b1c',
+      stroke:c, 'stroke-width':1.6, opacity:.95}, gTips);
+    el('circle', {cx:tipX, cy:tipY, r:3.2, fill:c, opacity:.95}, gTips);
 
-    // Branch question label
-    const blp = BLP[bi];
-    const qw = b.question.split(' ');
-    const qmid = Math.ceil(qw.length/2);
-    const ql1 = qw.slice(0,qmid).join(' '), ql2 = qw.slice(qmid).join(' ');
-    const qt = el('text', {x:blp.x, y:blp.y, 'text-anchor':blp.a, fill:c,
-      'font-family':'Inter,sans-serif', 'font-size':13, 'font-style':'italic',
-      opacity:.78, 'class':'b-label'}, bg);
-    el('tspan', {x:blp.x, dy:0},  qt).textContent = ql1;
-    el('tspan', {x:blp.x, dy:17}, qt).textContent = ql2;
-
-    bg.addEventListener('click', () => {
-      if (didDrag) return;
-      toggleBranch(bi, leafG, connEls, bg);
-      if (window.gtag) window.gtag('event', 'zen_branch_click', {question: b.question, situation: q.situation});
-    });
-    bg._leafG = leafG; bg._conns = connEls;
-    bIdx++;
+    // Branch name + question on the inward side of the tip
+    txt(b.name, {
+      x: tipLabelX, y: tipY - 14,
+      'text-anchor': tipAnchor,
+      fill: c,
+      'font-family': 'Inter,sans-serif',
+      'font-size': 12,
+      'font-weight': 500,
+      'letter-spacing': .3
+    }, gTips);
+    txt(b.question, {
+      x: tipLabelX, y: tipY - 2,
+      'text-anchor': tipAnchor,
+      fill: c,
+      'font-family': 'Inter,sans-serif',
+      'font-size': 9.5,
+      'font-style': 'italic',
+      opacity: .72
+    }, gTips);
   });
-});
 
-function toggleBranch(idx, leafG, conns, nodeEl) {
-  const wasActive = (activeBranch === idx);
-  if (activeBranch !== null) {
-    const prev = document.getElementById('bn-'+activeBranch);
-    if (prev) {
-      prev._leafG.classList.remove('open');
-      prev._conns.forEach(l => l.classList.remove('open'));
-      prev.classList.remove('active');
-    }
-  }
-  if (!wasActive) {
-    leafG.classList.add('open');
-    conns.forEach(l => l.classList.add('open'));
-    nodeEl.classList.add('active');
-    activeBranch = idx;
-    document.getElementById('hint').style.opacity = '0';
+  // Hub circle (drawn last so it sits on top of incoming branches)
+  el('circle', {cx:hub.x, cy:hub.y, r:78, fill:c, opacity:.05,
+    filter:'url(#glow-soft)'}, gHubs);
+  el('circle', {cx:hub.x, cy:hub.y, r:52, fill:'#0d0b1c',
+    stroke:c, 'stroke-width':1.8, opacity:.95}, gHubs);
+
+  // Hub label inside the circle: quadrant name
+  const labelWords = q.label.split(' & ');
+  if (labelWords.length === 2) {
+    const t = el('text', {x:hub.x, y:hub.y - 4,
+      'text-anchor':'middle', fill:c,
+      'font-family':'Playfair Display,serif',
+      'font-size':12, 'font-style':'italic'}, gHubs);
+    el('tspan', {x:hub.x, dy:0},  t).textContent = labelWords[0];
+    el('tspan', {x:hub.x, dy:14}, t).textContent = '& ' + labelWords[1];
   } else {
-    activeBranch = null;
+    txt(q.label, {x:hub.x, y:hub.y + 4,
+      'text-anchor':'middle', fill:c,
+      'font-family':'Playfair Display,serif',
+      'font-size':12, 'font-style':'italic'}, gHubs);
   }
-}
+
+  // Situation tagline below the hub circle
+  const sitY = hub.y + 76;
+  txt(q.situation, {
+    x: hub.x, y: sitY,
+    'text-anchor': 'middle',
+    fill: c,
+    'font-family': 'Inter,sans-serif',
+    'font-size': 10.5,
+    'font-weight': 400,
+    opacity: .7,
+    'letter-spacing': .6
+  }, gHubs);
+});
 
 // ── Leaf click → overlay ──
-document.getElementById('g-l-nodes').addEventListener('click', e => {
+gLeaves.addEventListener('click', e => {
   if (didDrag) return;
   const lg = e.target.closest('.node-l');
   if (!lg) return;
@@ -539,7 +471,9 @@ document.getElementById('g-l-nodes').addEventListener('click', e => {
   document.getElementById('ov-text').textContent      = d.text;
   document.getElementById('ov-source').textContent    = '— ' + d.source;
   document.getElementById('overlay').classList.add('open');
-  if (window.gtag) window.gtag('event', 'zen_leaf_open', {title: d.title, branch: d.branch, situation: d.situation});
+  document.getElementById('hint').style.opacity = '0';
+  if (window.gtag) window.gtag('event', 'zen_leaf_open',
+    {title: d.title, branch: d.branch, situation: d.situation});
 });
 
 // ── Close overlay ──
@@ -551,9 +485,7 @@ document.getElementById('overlay').addEventListener('click', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeOv(); });
 
 // ── Zoom / Pan ──
-const svg = document.getElementById('tree-svg');
 const wrap = document.getElementById('tree-wrap');
-const VW0 = 1400, VH0 = 820;
 let vx = 0, vy = 0, vw = VW0, vh = VH0;
 
 function applyView() {
@@ -563,7 +495,7 @@ function zoomAt(cx, cy, factor) {
   const rect = svg.getBoundingClientRect();
   const sx = vx + (cx - rect.left) / rect.width * vw;
   const sy = vy + (cy - rect.top) / rect.height * vh;
-  const nw = Math.max(500, Math.min(2800, vw * factor));
+  const nw = Math.max(900, Math.min(VW0 * 2.4, vw * factor));
   const nh = nw * VH0 / VW0;
   vx = sx - (cx - rect.left) / rect.width * nw;
   vy = sy - (cy - rect.top) / rect.height * nh;
@@ -595,9 +527,59 @@ window.addEventListener('mousemove', e => {
 });
 window.addEventListener('mouseup', () => { dragOrigin = null; wrap.classList.remove('panning'); });
 
-document.getElementById('z-in').addEventListener('click',  () => zoomAt(VW0/2, VH0/2, 0.75));
-document.getElementById('z-out').addEventListener('click', () => zoomAt(VW0/2, VH0/2, 1.33));
+// ── Touch: single-finger pan + two-finger pinch ──
+let touchState = null;
+function tDist(t) { const dx = t[0].clientX - t[1].clientX, dy = t[0].clientY - t[1].clientY; return Math.hypot(dx, dy); }
+function tMid(t)  { return {x: (t[0].clientX + t[1].clientX)/2, y: (t[0].clientY + t[1].clientY)/2}; }
+
+svg.addEventListener('touchstart', e => {
+  if (e.touches.length === 1) {
+    touchState = {mode:'pan', x:e.touches[0].clientX, y:e.touches[0].clientY, vx, vy};
+    didDrag = false;
+  } else if (e.touches.length === 2) {
+    touchState = {mode:'pinch', d:tDist(e.touches), m:tMid(e.touches),
+      vx, vy, vw, vh};
+    didDrag = true;
+  }
+}, {passive:true});
+
+svg.addEventListener('touchmove', e => {
+  if (!touchState) return;
+  if (touchState.mode === 'pan' && e.touches.length === 1) {
+    const dx = e.touches[0].clientX - touchState.x;
+    const dy = e.touches[0].clientY - touchState.y;
+    if (Math.abs(dx) + Math.abs(dy) > 6) didDrag = true;
+    if (!didDrag) return;
+    e.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    vx = touchState.vx - dx / rect.width * vw;
+    vy = touchState.vy - dy / rect.height * vh;
+    applyView();
+  } else if (touchState.mode === 'pinch' && e.touches.length === 2) {
+    e.preventDefault();
+    const nd = tDist(e.touches);
+    const factor = touchState.d / nd;
+    const m = tMid(e.touches);
+    const rect = svg.getBoundingClientRect();
+    const nw = Math.max(900, Math.min(VW0 * 2.4, touchState.vw * factor));
+    const nh = nw * VH0 / VW0;
+    const sx = touchState.vx + (m.x - rect.left) / rect.width * touchState.vw;
+    const sy = touchState.vy + (m.y - rect.top)  / rect.height * touchState.vh;
+    vx = sx - (m.x - rect.left) / rect.width * nw;
+    vy = sy - (m.y - rect.top)  / rect.height * nh;
+    vw = nw; vh = nh;
+    applyView();
+  }
+}, {passive:false});
+
+svg.addEventListener('touchend', () => { touchState = null; });
+svg.addEventListener('touchcancel', () => { touchState = null; });
+
+document.getElementById('z-in').addEventListener('click',  () => zoomAt(svg.getBoundingClientRect().left + svg.clientWidth/2, svg.getBoundingClientRect().top + svg.clientHeight/2, 0.78));
+document.getElementById('z-out').addEventListener('click', () => zoomAt(svg.getBoundingClientRect().left + svg.clientWidth/2, svg.getBoundingClientRect().top + svg.clientHeight/2, 1.28));
 document.getElementById('z-fit').addEventListener('click', () => { vx=0; vy=0; vw=VW0; vh=VH0; applyView(); });
+
+applyView();
 </script>
 </body>
 </html>
