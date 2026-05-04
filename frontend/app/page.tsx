@@ -173,7 +173,7 @@ function SearchPageInner() {
   const initialModeParam = searchParams?.get('mode');
   const initialMode: Mode =
     initialModeParam === 'phrase' || initialModeParam === 'near' ? initialModeParam : 'all';
-  // Number(null) === 0, which passes the >= 0 check and silently overrides
+  // Number(null) === 0, which passes the >= 0 guard and silently overrides
   // DEFAULT_PROX. Parse as NaN when the param is absent so the fallback fires.
   const proxStr = searchParams?.get('prox');
   const initialProxParam = proxStr !== null ? Number(proxStr) : NaN;

@@ -22,7 +22,7 @@ export default function Nav() {
     }`;
 
   return (
-    <nav className="fixed top-0 inset-x-0 z-50 px-4 md:px-8 py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
+    <nav className="fixed top-0 inset-x-0 z-50 px-3 md:px-8 py-3 md:py-4 flex justify-between items-center backdrop-blur-md bg-[rgb(var(--bg))]/80 border-b border-gold/20 dark:border-gold/8">
 
       {/* Left cluster: Search · Lang · Theme */}
       <div className="flex items-center gap-3 md:gap-6">
@@ -35,7 +35,7 @@ export default function Nav() {
         <div
           role="group"
           aria-label="Language"
-          className="flex items-center gap-1 text-[11px] md:text-[13px] tracking-[0.1em] pl-3 border-l border-gold/20 dark:border-gold/15"
+          className="flex items-center gap-1 text-[11px] md:text-[13px] tracking-[0.1em] pl-2 md:pl-3 border-l border-gold/20 dark:border-gold/15"
         >
           <button
             type="button"
@@ -76,7 +76,7 @@ export default function Nav() {
       </div>
 
       {/* Right cluster: Archive · Constellation · Help */}
-      <div className="flex items-center gap-4 md:gap-8">
+      <div className="flex items-center gap-3 md:gap-8">
         <Link href="/archive" aria-current={isActive('/archive') ? 'page' : undefined} className={linkClass('/archive')}>
           <Library size={14} />
           <span className="hidden sm:inline">{t('nav.archive')}</span>

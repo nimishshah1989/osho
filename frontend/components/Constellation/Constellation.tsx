@@ -185,14 +185,14 @@ const THEMES: { name: string; color: string; bg: string; keys: string[] }[] = [
 
 // Osho's first recorded talks were at meditation camps from the mid-1950s,
 // while he was a professor in Jabalpur. The full arc of his teaching life:
-//   Early period  1955–1968  camps, Jabalpur, all-India wandering
+//   Early period  1942–1968  Gadarwara, Jabalpur, all-India camps
 //   Bombay        1969–1973  moved to Bombay, early ashram followers
 //   Poona I       1974–1981  Shree Rajneesh Ashram
 //   Oregon        1981–1985  Rajneeshpuram commune
 //   World Tour    1985–1986  Uruguay, Greece, Portugal, UK, etc.
 //   Poona II      1987–1990  return to Pune as Osho
 const ERAS: { name: string; label: string; from: number; to: number; color: string }[] = [
-  { name: 'Early',    label: 'Early  1955–1968',      from: 1950, to: 1968, color: '#a3a3a3' },
+  { name: 'Early',    label: 'Early  1942–1968',      from: 1900, to: 1968, color: '#a3a3a3' },
   { name: 'Bombay',   label: 'Bombay  1969–1973',     from: 1969, to: 1973, color: '#60a5fa' },
   { name: 'Poona I',  label: 'Poona I  1974–1981',    from: 1974, to: 1980, color: '#d4af37' },
   { name: 'Oregon',   label: 'Oregon  1981–1985',     from: 1981, to: 1985, color: '#ef4444' },
@@ -445,7 +445,7 @@ function SeriesCard({
         className="w-full text-left px-4 py-3.5"
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="text-[15px] font-medium leading-snug text-[rgb(var(--fg))] truncate flex-1">
+          <div className="text-[15px] font-medium leading-snug text-[rgb(var(--fg))] line-clamp-2 flex-1">
             {s.name}
           </div>
           <span className="text-gold/50 flex-shrink-0 text-[18px] leading-none mt-0.5">
@@ -541,6 +541,12 @@ export default function Constellation() {
 
   const allSeries = useMemo(() => buildSeries(events), [events]);
 
+  // Year range across all talks
+  const [yearMin, yearMax] = useMemo(() => {
+    const years = events.map((e) => yearOf(e.date)).filter((y): y is number => y !== null);
+    return years.length ? [Math.min(...years), Math.max(...years)] : [null, null];
+  }, [events]);
+
   // All available topic tags across all series (sorted by frequency)
   const allTags = useMemo(() => {
     const freq: Record<string, number> = {};
@@ -607,14 +613,14 @@ export default function Constellation() {
   }
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8">
+    <main className="max-w-5xl mx-auto px-4 pt-20 md:pt-24 pb-12">
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-medium text-gold tracking-wide mb-1">
           The Complete Library
         </h1>
         <p className="text-[13px] text-stone-500 dark:text-ivory/55">
-          {allSeries.length} discourse series · {events.length.toLocaleString()} total talks · 1955–1990
+          {allSeries.length} discourse series · {events.length.toLocaleString()} total talks · {yearMin}–{yearMax}
         </p>
       </div>
 
