@@ -461,7 +461,10 @@ DATA.quadrants.forEach(q => {
     el('tspan', {x:blp.x, dy:0},  qt).textContent = ql1;
     el('tspan', {x:blp.x, dy:17}, qt).textContent = ql2;
 
-    bg.addEventListener('click', () => toggleBranch(bi, leafG, connEls, bg));
+    bg.addEventListener('click', () => {
+      toggleBranch(bi, leafG, connEls, bg);
+      if (window.gtag) window.gtag('event', 'zen_branch_click', {question: b.question, situation: q.situation});
+    });
     bg._leafG = leafG; bg._conns = connEls;
     bIdx++;
   });
@@ -504,6 +507,7 @@ document.getElementById('g-l-nodes').addEventListener('click', e => {
   document.getElementById('ov-text').textContent      = d.text;
   document.getElementById('ov-source').textContent    = '— ' + d.source;
   document.getElementById('overlay').classList.add('open');
+  if (window.gtag) window.gtag('event', 'zen_leaf_open', {title: d.title, branch: d.branch, situation: d.situation});
 });
 
 // ── Close overlay ──
