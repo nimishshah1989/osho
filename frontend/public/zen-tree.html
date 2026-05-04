@@ -279,7 +279,7 @@ const NS = 'http://www.w3.org/2000/svg';
 
 const VW0 = 1000, VH0 = 1400;
 const TRUNK_X = 500, TRUNK_TOP = 380, TRUNK_BOT = 1340;
-const TRUNK_W_TOP = 4, TRUNK_W_BOT = 22;
+const TRUNK_W_TOP = 10, TRUNK_W_BOT = 38;
 
 // Earthy quadrant palette tuned for cream parchment background
 const QC = {
@@ -306,18 +306,18 @@ const HUB_FILL   = '#fbf6e9';
 // Each limb anchors on the trunk and curves out to a hub. Lower limbs reach
 // further out, upper limbs reach less far but higher — like a real tree.
 const LIMBS = [
-  // self — upper-left
-  {id:'self',   anchor:{x:495, y:600}, hub:{x:285, y:240},
-    c1:{x:430, y:540}, c2:{x:340, y:340}, w1:7, w2:3},
-  // work — upper-right
-  {id:'work',   anchor:{x:505, y:600}, hub:{x:715, y:240},
-    c1:{x:570, y:540}, c2:{x:660, y:340}, w1:7, w2:3},
-  // love — mid-left, longer reach
-  {id:'love',   anchor:{x:493, y:930}, hub:{x:165, y:730},
-    c1:{x:360, y:930}, c2:{x:230, y:830}, w1:11, w2:3.5},
-  // beyond — mid-right, longer reach
-  {id:'beyond', anchor:{x:507, y:930}, hub:{x:835, y:730},
-    c1:{x:640, y:930}, c2:{x:770, y:830}, w1:11, w2:3.5}
+  // self — upper-left, lifts up into the canopy
+  {id:'self',   anchor:{x:495, y:580}, hub:{x:275, y:230},
+    c1:{x:455, y:480}, c2:{x:330, y:320}, w1:14, w2:4.5},
+  // work — upper-right (mirror of self)
+  {id:'work',   anchor:{x:505, y:580}, hub:{x:725, y:230},
+    c1:{x:545, y:480}, c2:{x:670, y:320}, w1:14, w2:4.5},
+  // love — mid-left, long horizontal reach
+  {id:'love',   anchor:{x:492, y:940}, hub:{x:160, y:740},
+    c1:{x:350, y:960}, c2:{x:220, y:840}, w1:18, w2:5},
+  // beyond — mid-right, long horizontal reach
+  {id:'beyond', anchor:{x:508, y:940}, hub:{x:840, y:740},
+    c1:{x:650, y:960}, c2:{x:780, y:840}, w1:18, w2:5}
 ];
 const HUB_R = 36;
 
@@ -369,34 +369,77 @@ function taperedBezier(x1, y1, c1x, c1y, c2x, c2y, x2, y2, w1, w2) {
           L${bx2},${by2} C${bc2x},${bc2y} ${bc1x},${bc1y} ${bx1},${by1} Z`;
 }
 
-// ── Trunk: tapered straight shape, narrow at top, flared at the base ──
-(function drawTrunk() {
-  const xc = TRUNK_X, top = TRUNK_TOP, bot = TRUNK_BOT;
+// ── Banyan trunk: thick gnarled main shaft + splayed buttress roots ──
+
+// Buttress roots fan out under the main trunk (drawn first so the trunk
+// overlaps and visually fuses with them).
+[
+  // Outermost left buttress
+  {x1:TRUNK_X-12, y1:TRUNK_BOT-140, c1x:TRUNK_X-30, c1y:TRUNK_BOT-90,
+   c2x:TRUNK_X-110, c2y:TRUNK_BOT-30, x2:TRUNK_X-185, y2:TRUNK_BOT+8, w1:22, w2:9},
+  // Outermost right buttress
+  {x1:TRUNK_X+12, y1:TRUNK_BOT-140, c1x:TRUNK_X+30, c1y:TRUNK_BOT-90,
+   c2x:TRUNK_X+110, c2y:TRUNK_BOT-30, x2:TRUNK_X+185, y2:TRUNK_BOT+8, w1:22, w2:9},
+  // Mid left
+  {x1:TRUNK_X-8, y1:TRUNK_BOT-160, c1x:TRUNK_X-20, c1y:TRUNK_BOT-100,
+   c2x:TRUNK_X-65, c2y:TRUNK_BOT-30, x2:TRUNK_X-105, y2:TRUNK_BOT+4, w1:18, w2:7},
+  // Mid right
+  {x1:TRUNK_X+8, y1:TRUNK_BOT-160, c1x:TRUNK_X+20, c1y:TRUNK_BOT-100,
+   c2x:TRUNK_X+65, c2y:TRUNK_BOT-30, x2:TRUNK_X+105, y2:TRUNK_BOT+4, w1:18, w2:7},
+  // Front-left small
+  {x1:TRUNK_X-4, y1:TRUNK_BOT-180, c1x:TRUNK_X-12, c1y:TRUNK_BOT-120,
+   c2x:TRUNK_X-30, c2y:TRUNK_BOT-40, x2:TRUNK_X-50, y2:TRUNK_BOT+2, w1:15, w2:5},
+  // Front-right small
+  {x1:TRUNK_X+4, y1:TRUNK_BOT-180, c1x:TRUNK_X+12, c1y:TRUNK_BOT-120,
+   c2x:TRUNK_X+30, c2y:TRUNK_BOT-40, x2:TRUNK_X+50, y2:TRUNK_BOT+2, w1:15, w2:5}
+].forEach(b => {
+  const d = taperedBezier(b.x1, b.y1, b.c1x, b.c1y, b.c2x, b.c2y, b.x2, b.y2, b.w1, b.w2);
+  el('path', {d, fill: TRUNK_CLR, opacity: 0.92}, gTrunk);
+});
+
+// Main trunk shaft — wide, slightly gnarled S-curve
+(function drawMainTrunk() {
+  const xc = TRUNK_X, top = TRUNK_TOP, bot = TRUNK_BOT - 20;
   const wT = TRUNK_W_TOP, wB = TRUNK_W_BOT;
-  // Slight S-curve mid-shaft for an organic feel
+  // Asymmetric control points produce a slight gnarl
   const d = `M${xc-wT/2},${top}
-             C${xc-wT/2-1.5},${top+330} ${xc-wB/2+2},${bot-330} ${xc-wB/2},${bot}
+             C${xc-wT/2-3},${top+200} ${xc-wB/2+5},${bot-360} ${xc-wB/2-2},${bot-180}
+             C${xc-wB/2-4},${bot-90} ${xc-wB/2-2},${bot-30} ${xc-wB/2},${bot}
              L${xc+wB/2},${bot}
-             C${xc+wB/2-2},${bot-330} ${xc+wT/2+1.5},${top+330} ${xc+wT/2},${top} Z`;
-  el('path', {d, fill: TRUNK_CLR, opacity: 0.93}, gTrunk);
+             C${xc+wB/2+2},${bot-30} ${xc+wB/2+4},${bot-90} ${xc+wB/2+2},${bot-180}
+             C${xc+wB/2-5},${bot-360} ${xc+wT/2+3},${top+200} ${xc+wT/2},${top} Z`;
+  el('path', {d, fill: TRUNK_CLR, opacity: 0.95}, gTrunk);
 })();
 
-// Decorative roots fanning out from the trunk's base
+// Bark texture — irregular vertical streaks down the trunk
 [
-  {d:`M${TRUNK_X-3} ${TRUNK_BOT-2} C${TRUNK_X-60} ${TRUNK_BOT+24} ${TRUNK_X-160} ${TRUNK_BOT+38} ${TRUNK_X-260} ${TRUNK_BOT+44}`, w:4},
-  {d:`M${TRUNK_X+3} ${TRUNK_BOT-2} C${TRUNK_X+60} ${TRUNK_BOT+24} ${TRUNK_X+160} ${TRUNK_BOT+38} ${TRUNK_X+260} ${TRUNK_BOT+44}`, w:4},
-  {d:`M${TRUNK_X-2} ${TRUNK_BOT-2} C${TRUNK_X-40} ${TRUNK_BOT+30} ${TRUNK_X-100} ${TRUNK_BOT+48} ${TRUNK_X-180} ${TRUNK_BOT+58}`, w:2.6},
-  {d:`M${TRUNK_X+2} ${TRUNK_BOT-2} C${TRUNK_X+40} ${TRUNK_BOT+30} ${TRUNK_X+100} ${TRUNK_BOT+48} ${TRUNK_X+180} ${TRUNK_BOT+58}`, w:2.6},
-  {d:`M${TRUNK_X} ${TRUNK_BOT-2} C${TRUNK_X-2} ${TRUNK_BOT+30} ${TRUNK_X-2} ${TRUNK_BOT+50} ${TRUNK_X-2} ${TRUNK_BOT+62}`, w:2}
-].forEach(({d, w}) => el('path', {d, stroke: TRUNK_CLR, 'stroke-width': w,
-  fill:'none', opacity:.78, 'stroke-linecap':'round'}, gTrunk));
+  {x:-9, y1:60, y2:780, w:0.7, op:.32},
+  {x:-4, y1:30, y2:880, w:0.6, op:.28},
+  {x: 0, y1:80, y2:820, w:0.4, op:.22},
+  {x: 4, y1:50, y2:860, w:0.6, op:.28},
+  {x: 9, y1:90, y2:780, w:0.7, op:.32},
+  {x:-13, y1:200, y2:760, w:0.5, op:.22},
+  {x: 13, y1:180, y2:780, w:0.5, op:.22}
+].forEach(s => {
+  el('line', {
+    x1: TRUNK_X+s.x, y1: TRUNK_TOP+s.y1, x2: TRUNK_X+s.x+0.4, y2: TRUNK_TOP+s.y2,
+    stroke: '#3a2418', 'stroke-width': s.w, opacity: s.op,
+    'stroke-linecap': 'round'
+  }, gTrunk);
+});
 
-// Crown — narrow tapered tip extending above where the trunk ends, with a
-// tiny leaf flourish so the trunk doesn't look chopped.
-el('path', {
-  d:`M${TRUNK_X-TRUNK_W_TOP/2},${TRUNK_TOP} L${TRUNK_X-1},${TRUNK_TOP-22} L${TRUNK_X+1},${TRUNK_TOP-22} L${TRUNK_X+TRUNK_W_TOP/2},${TRUNK_TOP} Z`,
-  fill: TRUNK_CLR, opacity: 0.8
-}, gTrunk);
+// A few horizontal bark cracks for character
+[
+  {y: 220, x1:-11, x2: 9, w:.4, op:.3},
+  {y: 480, x1: -7, x2: 12, w:.4, op:.28},
+  {y: 750, x1:-14, x2: 6, w:.5, op:.32}
+].forEach(c => {
+  el('line', {
+    x1: TRUNK_X+c.x1, y1: TRUNK_TOP+c.y, x2: TRUNK_X+c.x2, y2: TRUNK_TOP+c.y+1,
+    stroke: '#3a2418', 'stroke-width': c.w, opacity: c.op,
+    'stroke-linecap':'round'
+  }, gTrunk);
+});
 
 const LEAVES = [];
 
