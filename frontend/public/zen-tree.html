@@ -8,52 +8,70 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{height:100%;overflow:hidden}
-body{background:#07070f;font-family:'Inter',sans-serif;display:flex;flex-direction:column;height:100dvh}
+body{background:#f4ede1;font-family:'Inter',sans-serif;display:flex;flex-direction:column;height:100dvh;color:#2d2419}
 
 header{
   text-align:center;padding:14px 20px 10px;
-  border-bottom:1px solid rgba(201,168,76,.1);flex-shrink:0;position:relative;
+  border-bottom:1px solid rgba(90,58,32,.16);flex-shrink:0;position:relative;
+  background:linear-gradient(180deg,#f8f1e3 0%,#f4ede1 100%);
 }
 header h1{
-  font-family:'Playfair Display',serif;font-weight:400;
-  font-size:clamp(14px,1.9vw,20px);letter-spacing:5px;
-  color:#c9a84c;text-transform:uppercase;
+  font-family:'Playfair Display',serif;font-weight:500;
+  font-size:clamp(15px,1.9vw,21px);letter-spacing:5px;
+  color:#5a3a20;text-transform:uppercase;
 }
 header p{
-  font-size:11px;letter-spacing:2px;color:rgba(201,168,76,.38);
+  font-size:11px;letter-spacing:2px;color:rgba(90,58,32,.55);
   margin-top:4px;text-transform:uppercase;
 }
 
-#tree-wrap{flex:1;min-height:0;position:relative;cursor:grab;touch-action:none;overflow:hidden}
+#tree-wrap{
+  flex:1;min-height:0;position:relative;cursor:grab;touch-action:none;overflow:hidden;
+  background:radial-gradient(ellipse at center 40%,#fbf6e9 0%,#f4ede1 55%,#ebe0c9 100%);
+}
 #tree-wrap.panning{cursor:grabbing}
 #tree-svg{width:100%;height:100%;display:block}
 
 #zoom-ctrl{position:absolute;bottom:40px;right:16px;display:flex;flex-direction:column;gap:5px;z-index:10}
-.z-btn{width:30px;height:30px;background:rgba(12,11,29,.85);border:1px solid rgba(201,168,76,.22);color:rgba(201,168,76,.6);font-size:18px;line-height:30px;text-align:center;cursor:pointer;user-select:none;transition:border-color .15s,color .15s}
-.z-btn:hover{border-color:rgba(201,168,76,.55);color:#c9a84c}
+.z-btn{
+  width:32px;height:32px;background:rgba(255,250,240,.92);
+  border:1px solid rgba(90,58,32,.32);color:rgba(90,58,32,.75);
+  font-size:18px;line-height:32px;text-align:center;cursor:pointer;
+  user-select:none;transition:border-color .15s,color .15s,background .15s;
+  border-radius:3px;
+}
+.z-btn:hover{border-color:rgba(90,58,32,.7);color:#5a3a20;background:#fff}
 
-/* All SVG text gets a dark stroke halo so it stays readable over branch lines */
-#tree-svg text{paint-order:stroke fill;stroke:#07070f;stroke-width:3px;stroke-linejoin:round;stroke-linecap:round}
+/* Cream halo on text so labels stay readable when crossing branches */
+#tree-svg text{
+  paint-order:stroke fill;stroke:#f4ede1;stroke-width:3.5px;
+  stroke-linejoin:round;stroke-linecap:round;
+}
 
 .node-l{cursor:pointer}
-.node-l .l-dot{transition:r .15s,opacity .15s}
-.node-l:hover .l-dot{r:6.5;opacity:1}
-.node-l .l-label{transition:opacity .15s,fill .15s}
+.node-l .l-leaf{transition:opacity .15s,filter .15s}
+.node-l:hover .l-leaf{
+  opacity:1 !important;
+  filter:drop-shadow(0 1.5px 2.5px rgba(40,30,15,.35));
+}
+.node-l .l-label{transition:opacity .15s,font-weight .15s}
 .node-l:hover .l-label{opacity:1}
 
-/* overlay */
+/* overlay - cream paper card */
 #overlay{
-  position:fixed;inset:0;background:rgba(4,4,10,.92);
-  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  position:fixed;inset:0;background:rgba(40,28,15,.55);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
   display:flex;align-items:center;justify-content:center;
   z-index:300;opacity:0;pointer-events:none;transition:opacity .3s;
 }
 #overlay.open{opacity:1;pointer-events:all}
 
 #ov-card{
-  max-width:700px;width:94%;background:#0c0b1d;
-  border:1px solid rgba(201,168,76,.22);position:relative;
+  max-width:700px;width:94%;background:#fbf6e9;
+  border:1px solid rgba(90,58,32,.18);position:relative;
   transform:translateY(18px);transition:transform .32s ease;overflow:hidden;
+  box-shadow:0 30px 70px -20px rgba(40,28,15,.45);
+  border-radius:4px;
 }
 #overlay.open #ov-card{transform:translateY(0)}
 
@@ -62,50 +80,50 @@ header p{
 #ov-header{padding:28px 44px 18px}
 #ov-situation{
   font-size:11px;letter-spacing:2.5px;text-transform:uppercase;
-  color:var(--qcolor,#c9a84c);opacity:.65;margin-bottom:4px;
+  color:var(--qcolor,#5a3a20);font-weight:600;margin-bottom:4px;
 }
 #ov-question{
   font-size:13px;letter-spacing:.5px;
-  color:rgba(201,168,76,.55);font-style:italic;margin-bottom:10px;
+  color:rgba(90,58,32,.7);font-style:italic;margin-bottom:10px;
 }
 #ov-title{
-  font-family:'Playfair Display',serif;font-style:italic;
-  font-size:clamp(22px,3vw,30px);color:#f0e8d2;line-height:1.2;
+  font-family:'Playfair Display',serif;font-style:italic;font-weight:600;
+  font-size:clamp(22px,3vw,30px);color:#2d2419;line-height:1.2;
 }
 
 #ov-context-wrap{
   padding:18px 44px;
-  border-top:1px solid rgba(201,168,76,.1);
-  border-bottom:1px solid rgba(201,168,76,.1);
-  background:rgba(201,168,76,.04);
+  border-top:1px solid rgba(90,58,32,.12);
+  border-bottom:1px solid rgba(90,58,32,.12);
+  background:rgba(90,58,32,.05);
 }
 #ov-context{
-  font-size:clamp(14px,1.5vw,16px);color:rgba(232,220,188,.88);
-  font-style:italic;font-weight:300;line-height:1.6;
+  font-size:clamp(14px,1.5vw,16px);color:rgba(60,46,30,.88);
+  font-style:italic;font-weight:400;line-height:1.6;
 }
-#ov-context::before{content:'↳ ';color:rgba(201,168,76,.5);font-style:normal;}
+#ov-context::before{content:'↳ ';color:rgba(90,58,32,.55);font-style:normal;}
 
 #ov-body{padding:26px 44px 32px}
 #ov-text{
-  font-size:clamp(15px,1.6vw,17px);line-height:2;
-  color:rgba(224,214,196,.85);font-weight:300;
+  font-size:clamp(15px,1.6vw,17px);line-height:1.85;
+  color:rgba(45,36,25,.92);font-weight:400;
 }
 #ov-source{
-  margin-top:22px;font-size:12px;color:rgba(201,168,76,.45);
+  margin-top:22px;font-size:12px;color:rgba(90,58,32,.6);
   letter-spacing:1px;font-style:italic;
 }
 
 #ov-close{
   position:absolute;top:14px;right:18px;background:none;border:none;
-  color:rgba(201,168,76,.35);font-size:26px;cursor:pointer;
+  color:rgba(90,58,32,.55);font-size:26px;cursor:pointer;
   line-height:1;padding:4px 6px;transition:color .2s;z-index:1;
 }
-#ov-close:hover{color:#c9a84c}
+#ov-close:hover{color:#5a3a20}
 
 #hint{
   position:absolute;bottom:12px;left:50%;transform:translateX(-50%);
   font-size:10px;letter-spacing:2px;text-transform:uppercase;
-  color:rgba(201,168,76,.2);pointer-events:none;white-space:nowrap;
+  color:rgba(90,58,32,.42);pointer-events:none;white-space:nowrap;
   transition:opacity .5s;
 }
 
@@ -123,7 +141,7 @@ header p{
 </header>
 
 <div id="tree-wrap">
-  <svg id="tree-svg" viewBox="0 0 3600 1700" preserveAspectRatio="xMidYMid meet">
+  <svg id="tree-svg" viewBox="0 0 1800 980" preserveAspectRatio="xMidYMid meet">
     <defs>
       <filter id="glow-soft" x="-50%" y="-50%" width="200%" height="200%">
         <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="b"/>
@@ -259,24 +277,43 @@ header p{
 const DATA = JSON.parse(document.getElementById('tree-data').textContent);
 const NS = 'http://www.w3.org/2000/svg';
 
-const VW0 = 3600, VH0 = 1700;
-const TRUNK_X = 1800, TRUNK_TOP = 100, TRUNK_BOT = 1620;
+const VW0 = 1800, VH0 = 980;
+const TRUNK_X = 900, TRUNK_TOP = 60, TRUNK_BOT = 920;
 
-const QC = {self:'#7b9acc', work:'#8fbf7f', love:'#c47d9e', beyond:'#c9a84c'};
+// Earthy quadrant palette tuned for cream parchment background
+const QC = {
+  self:   '#3f6e9e',   // ocean blue
+  work:   '#5e8c47',   // moss green
+  love:   '#b16585',   // berry rose
+  beyond: '#b08130'    // amber / ochre
+};
+const QC_DARK = {
+  self:   '#26496c',
+  work:   '#3a6b2c',
+  love:   '#7d3e58',
+  beyond: '#7d5818'
+};
+
+const TRUNK_CLR  = '#5a3a20';
+const BRANCH_CLR = '#7a5a3c';
+const TEXT_DARK  = '#2d2419';
+const TEXT_MUTED = '#6e5c47';
+const HUB_FILL   = '#fbf6e9';
 
 // Hub layout follows DATA.quadrants order: self, work, love, beyond
 const HUBS = [
-  {id:'self',   x:880,  y:420,  side:'L'},
-  {id:'work',   x:2720, y:420,  side:'R'},
-  {id:'love',   x:880,  y:1280, side:'L'},
-  {id:'beyond', x:2720, y:1280, side:'R'}
+  {id:'self',   x:580,  y:280, side:'L'},
+  {id:'work',   x:1220, y:280, side:'R'},
+  {id:'love',   x:580,  y:700, side:'L'},
+  {id:'beyond', x:1220, y:700, side:'R'}
 ];
-const TIP_OFFSETS  = [-240, 0, 240];
-const LEAF_OFFSETS = [-75, -25, 25, 75];
+const HUB_R = 44;
+const TIP_OFFSETS  = [-160, 0, 160];
+const LEAF_OFFSETS = [-50, -17, 17, 50];
 
-const TIP_X_L = 480,  TIP_X_R = 3120;
-const LEAF_X_L = 260, LEAF_X_R = 3340;
-const LEAF_LABEL_X_L = 248, LEAF_LABEL_X_R = 3352;
+const TIP_X_L = 360,  TIP_X_R = 1440;
+const LEAF_X_L = 240, LEAF_X_R = 1560;
+const LEAF_LABEL_X_L = 220, LEAF_LABEL_X_R = 1580;
 
 function el(tag, attrs, parent) {
   const e = document.createElementNS(NS, tag);
@@ -304,27 +341,44 @@ const gHubs   = document.getElementById('g-hubs');
 const gTips   = document.getElementById('g-tips');
 const gLeaves = document.getElementById('g-leaves');
 
-// ── Trunk ──
-el('line', {x1:TRUNK_X, y1:TRUNK_TOP, x2:TRUNK_X, y2:TRUNK_BOT,
-  stroke:'#c9a84c', 'stroke-width':3, opacity:.35, 'stroke-linecap':'round'}, gTrunk);
+// ── Trunk: tapered organic shape, narrow at top, flared at the base ──
+(function drawTrunk() {
+  const wT = 4, wB = 16, top = TRUNK_TOP, bot = TRUNK_BOT;
+  const d = `M${TRUNK_X-wT/2},${top}
+             C${TRUNK_X-wT/2-1},${top+260} ${TRUNK_X-wB/2+1},${bot-260} ${TRUNK_X-wB/2},${bot}
+             L${TRUNK_X+wB/2},${bot}
+             C${TRUNK_X+wB/2-1},${bot-260} ${TRUNK_X+wT/2+1},${top+260} ${TRUNK_X+wT/2},${top} Z`;
+  el('path', {d, fill: TRUNK_CLR, opacity: 0.92}, gTrunk);
+  // soft inner shadow line down the trunk
+  el('line', {x1: TRUNK_X+1, y1: top+4, x2: TRUNK_X+2, y2: bot-4,
+    stroke:'#3d2616', 'stroke-width':1, opacity:.35}, gTrunk);
+})();
 
-// Crown — soft halo + ring + dot at top of trunk
-el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:60, fill:'#c9a84c',
-  opacity:.05, filter:'url(#glow-lg)'}, gTrunk);
-el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:22, fill:'none',
-  stroke:'#c9a84c', 'stroke-width':1.4, opacity:.45}, gTrunk);
-el('circle', {cx:TRUNK_X, cy:TRUNK_TOP-10, r:8, fill:'#c9a84c', opacity:.55}, gTrunk);
+// Crown — small leaf cluster at the top of the trunk
+[
+  {dx:0,   dy:-14, ang:-90, sc:1.0,  clr:'#7e9a5c'},
+  {dx:-10, dy:-6,  ang:-150, sc:0.85, clr:'#8aa56a'},
+  {dx:10,  dy:-6,  ang:-30,  sc:0.85, clr:'#8aa56a'},
+  {dx:-4,  dy:-22, ang:-100, sc:0.7,  clr:'#92ad72'},
+  {dx:4,   dy:-22, ang:-80,  sc:0.7,  clr:'#92ad72'}
+].forEach(({dx, dy, ang, sc, clr}) => {
+  el('path', {
+    d: 'M0,0 Q9,-5 16,0 Q9,5 0,0 Z',
+    fill: clr, opacity: .82, stroke: '#5e7a44', 'stroke-width': 0.5,
+    transform: `translate(${TRUNK_X+dx} ${TRUNK_TOP+dy}) rotate(${ang}) scale(${sc})`
+  }, gTrunk);
+});
 
 // Decorative roots fanning out from the trunk's base
 const ROOTS = [
-  'M1800 1620 C1740 1655 1620 1670 1440 1685',
-  'M1800 1620 C1860 1655 1980 1670 2160 1685',
-  'M1800 1620 C1780 1665 1690 1685 1560 1695',
-  'M1800 1620 C1820 1665 1910 1685 2040 1695',
-  'M1800 1620 C1800 1660 1800 1680 1800 1690'
+  {d:'M900 920 C870 945 805 957 720 964', w:3.5},
+  {d:'M900 920 C930 945 995 957 1080 964', w:3.5},
+  {d:'M900 920 C885 950 825 965 760 972', w:2.4},
+  {d:'M900 920 C915 950 975 965 1040 972', w:2.4},
+  {d:'M900 920 C898 948 898 962 898 970', w:1.8}
 ];
-ROOTS.forEach(d => el('path', {d, stroke:'#c9a84c', 'stroke-width':1.4,
-  fill:'none', opacity:.3, 'stroke-linecap':'round'}, gTrunk));
+ROOTS.forEach(({d, w}) => el('path', {d, stroke: TRUNK_CLR, 'stroke-width': w,
+  fill:'none', opacity:.7, 'stroke-linecap':'round'}, gTrunk));
 
 const LEAVES = [];
 
@@ -332,32 +386,44 @@ const LEAVES = [];
 DATA.quadrants.forEach((q, qi) => {
   const hub = HUBS[qi];
   const c   = QC[q.id];
+  const cD  = QC_DARK[q.id];
   const isLeft = hub.side === 'L';
+  const sgn         = isLeft ? -1 : 1;       // outward direction
   const tipX        = isLeft ? TIP_X_L      : TIP_X_R;
   const leafX       = isLeft ? LEAF_X_L     : LEAF_X_R;
   const leafLabelX  = isLeft ? LEAF_LABEL_X_L : LEAF_LABEL_X_R;
   const leafAnchor  = isLeft ? 'end'   : 'start';
-  const tipLabelX   = isLeft ? tipX + 22 : tipX - 22;
+  const tipLabelX   = isLeft ? tipX + 16 : tipX - 16;
   const tipAnchor   = isLeft ? 'start' : 'end';
+  const leafAngle   = isLeft ? 180 : 0;
+  const mainEndX    = hub.x - sgn * HUB_R;   // attach to disc edge facing trunk
+  const subStartX   = hub.x + sgn * HUB_R;   // sub-branches leave from outer edge
 
-  // Main branch: trunk → hub
-  el('path', {d: hCurve(TRUNK_X, hub.y, hub.x, hub.y),
-    stroke:c, 'stroke-width':2.5, fill:'none', opacity:.5}, gMain);
+  // Main branch: trunk → hub disc edge (thick brown)
+  el('path', {d: hCurve(TRUNK_X, hub.y, mainEndX, hub.y),
+    stroke: BRANCH_CLR, 'stroke-width': 6, fill:'none', opacity: .85,
+    'stroke-linecap':'round'}, gMain);
+  // subtle highlight
+  el('path', {d: hCurve(TRUNK_X, hub.y - 1, mainEndX, hub.y - 1),
+    stroke: '#a78562', 'stroke-width': 1.4, fill:'none', opacity: .35,
+    'stroke-linecap':'round'}, gMain);
 
   q.branches.forEach((b, bi) => {
     const tipY = hub.y + TIP_OFFSETS[bi];
 
-    // Sub-branch: hub → tip
-    el('path', {d: hCurve(hub.x, hub.y, tipX, tipY),
-      stroke:c, 'stroke-width':1.8, fill:'none', opacity:.45}, gSub);
+    // Sub-branch: hub edge → tip
+    el('path', {d: hCurve(subStartX, hub.y, tipX, tipY),
+      stroke: BRANCH_CLR, 'stroke-width': 3.2, fill:'none', opacity: .8,
+      'stroke-linecap':'round'}, gSub);
 
     // Four leaves per tip
     b.leaves.forEach((leaf, li) => {
       const leafY = tipY + LEAF_OFFSETS[li];
 
-      // Leaf stem
+      // Leaf stem (thin twig)
       el('path', {d: hCurve(tipX, tipY, leafX, leafY),
-        stroke:c, 'stroke-width':1, fill:'none', opacity:.35}, gStems);
+        stroke: BRANCH_CLR, 'stroke-width': 1.4, fill:'none', opacity: .65,
+        'stroke-linecap':'round'}, gStems);
 
       const lid = LEAVES.length;
       LEAVES.push({
@@ -372,85 +438,92 @@ DATA.quadrants.forEach((q, qi) => {
       });
 
       const lg = el('g', {'class':'node-l', 'data-li':lid}, gLeaves);
-      // Generous transparent hit target
-      el('circle', {cx:leafX, cy:leafY, r:18, fill:'transparent'}, lg);
-      // Soft halo
-      el('circle', {cx:leafX, cy:leafY, r:9, fill:c, opacity:.12}, lg);
-      // Leaf dot
-      el('circle', {cx:leafX, cy:leafY, r:4, fill:c, opacity:.9,
-        'class':'l-dot'}, lg);
-      // Title label, single line, on the outer edge
+      // Generous transparent hit target covering the leaf shape
+      el('rect', {x: leafX - (isLeft ? 22 : 4), y: leafY - 10,
+        width: 26, height: 20, fill:'transparent'}, lg);
+      // The leaf — almond shape pointing outward, with vein
+      const leafG = el('g', {
+        transform: `translate(${leafX} ${leafY}) rotate(${leafAngle})`,
+        'class':'l-leaf', opacity:.92
+      }, lg);
+      el('path', {
+        d: 'M0,0 Q9,-7 18,0 Q9,7 0,0 Z',
+        fill: c, stroke: cD, 'stroke-width': 0.8
+      }, leafG);
+      el('path', {
+        d: 'M0,0 L15,0',
+        stroke: cD, 'stroke-width': 0.6, fill:'none', opacity:.55
+      }, leafG);
+      // Title label, sits just past the leaf tip
       txt(leaf.title, {
-        x: leafLabelX, y: leafY + 3.5,
+        x: leafLabelX, y: leafY + 4,
         'text-anchor': leafAnchor,
-        fill: '#ddd4ba',
+        fill: TEXT_DARK,
         'font-family': 'Inter,sans-serif',
-        'font-size': 12,
-        'font-weight': 300,
-        opacity: .85,
+        'font-size': 12.5,
+        'font-weight': 400,
+        opacity: .92,
         'class': 'l-label'
       }, lg);
     });
 
-    // Tip node (above the leaf stems so it sits cleanly on top)
-    el('circle', {cx:tipX, cy:tipY, r:9, fill:'#0d0b1c',
-      stroke:c, 'stroke-width':1.6, opacity:.95}, gTips);
-    el('circle', {cx:tipX, cy:tipY, r:3.2, fill:c, opacity:.95}, gTips);
+    // Tip — small wood-knot dot
+    el('circle', {cx:tipX, cy:tipY, r:4.5, fill: TRUNK_CLR, opacity:.92}, gTips);
+    el('circle', {cx:tipX, cy:tipY, r:1.6, fill:'#a78562', opacity:.7}, gTips);
 
     // Branch name + question on the inward side of the tip
     txt(b.name, {
-      x: tipLabelX, y: tipY - 14,
+      x: tipLabelX, y: tipY - 12,
       'text-anchor': tipAnchor,
-      fill: c,
+      fill: cD,
       'font-family': 'Inter,sans-serif',
-      'font-size': 12,
-      'font-weight': 500,
-      'letter-spacing': .3
+      'font-size': 12.5,
+      'font-weight': 600,
+      'letter-spacing': .25
     }, gTips);
     txt(b.question, {
-      x: tipLabelX, y: tipY - 2,
+      x: tipLabelX, y: tipY + 1,
       'text-anchor': tipAnchor,
-      fill: c,
+      fill: TEXT_MUTED,
       'font-family': 'Inter,sans-serif',
-      'font-size': 9.5,
-      'font-style': 'italic',
-      opacity: .72
+      'font-size': 10.5,
+      'font-style': 'italic'
     }, gTips);
   });
 
-  // Hub circle (drawn last so it sits on top of incoming branches)
-  el('circle', {cx:hub.x, cy:hub.y, r:78, fill:c, opacity:.05,
-    filter:'url(#glow-soft)'}, gHubs);
-  el('circle', {cx:hub.x, cy:hub.y, r:52, fill:'#0d0b1c',
-    stroke:c, 'stroke-width':1.8, opacity:.95}, gHubs);
+  // Hub disc — cream paper disc with colored ring
+  el('circle', {cx:hub.x, cy:hub.y, r: HUB_R + 4, fill:'none',
+    stroke: c, 'stroke-width': 0.6, opacity: .35}, gHubs);
+  el('circle', {cx:hub.x, cy:hub.y, r: HUB_R, fill: HUB_FILL,
+    stroke: c, 'stroke-width': 2.2, opacity: 0.98}, gHubs);
 
-  // Hub label inside the circle: quadrant name
+  // Hub label — quadrant name, Playfair italic
   const labelWords = q.label.split(' & ');
   if (labelWords.length === 2) {
-    const t = el('text', {x:hub.x, y:hub.y - 4,
-      'text-anchor':'middle', fill:c,
+    const t = el('text', {x:hub.x, y:hub.y - 3,
+      'text-anchor':'middle', fill: cD,
       'font-family':'Playfair Display,serif',
-      'font-size':12, 'font-style':'italic'}, gHubs);
+      'font-size':14, 'font-style':'italic', 'font-weight':600}, gHubs);
     el('tspan', {x:hub.x, dy:0},  t).textContent = labelWords[0];
-    el('tspan', {x:hub.x, dy:14}, t).textContent = '& ' + labelWords[1];
+    el('tspan', {x:hub.x, dy:16}, t).textContent = '& ' + labelWords[1];
   } else {
-    txt(q.label, {x:hub.x, y:hub.y + 4,
-      'text-anchor':'middle', fill:c,
+    txt(q.label, {x:hub.x, y:hub.y + 5,
+      'text-anchor':'middle', fill: cD,
       'font-family':'Playfair Display,serif',
-      'font-size':12, 'font-style':'italic'}, gHubs);
+      'font-size':16, 'font-style':'italic', 'font-weight':600}, gHubs);
   }
 
-  // Situation tagline below the hub circle
-  const sitY = hub.y + 76;
+  // Situation tagline outside the hub (above for lower hubs, below for upper)
+  const sitY = hub.y + (hub.y < VH0/2 ? HUB_R + 22 : -(HUB_R + 14));
   txt(q.situation, {
     x: hub.x, y: sitY,
-    'text-anchor': 'middle',
-    fill: c,
-    'font-family': 'Inter,sans-serif',
-    'font-size': 10.5,
+    'text-anchor':'middle',
+    fill: TEXT_MUTED,
+    'font-family':'Inter,sans-serif',
+    'font-size': 11.5,
     'font-weight': 400,
-    opacity: .7,
-    'letter-spacing': .6
+    'font-style':'italic',
+    'letter-spacing': .4
   }, gHubs);
 });
 
