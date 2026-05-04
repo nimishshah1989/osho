@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Krishna · The Complete Human · Osho</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@1,400;1,600&family=Playfair+Display:wght@700&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:   #0C0602;
+  --gold: #C89940;
+  --hi:   #E8C060;
+  --cr:   #F0E4CA;
+  --dim:  #8A7A5C;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  color: var(--cr);
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ── HEADER ── */
+header {
+  text-align: center;
+  padding: 16px 20px 4px;
+  flex-shrink: 0;
+}
+.title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(15px, 4vw, 21px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.title em { font-style: italic; color: var(--gold); }
+.sub {
+  font-family: 'Lora', serif;
+  font-style: italic;
+  font-size: clamp(9px, 2.2vw, 11px);
+  color: var(--dim);
+  margin-top: 3px;
+  opacity: 0.8;
+}
+
+/* ── SVG STAGE ── */
+main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+  padding: 0 4px;
+}
+#tree {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* ── HINT ── */
+.hint {
+  text-align: center;
+  padding: 4px 20px 12px;
+  font-size: 9px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--gold);
+  opacity: 0.3;
+  flex-shrink: 0;
+}
+
+/* ── TREE SVG ── */
+.trunk  { fill:none; stroke:var(--gold); stroke-linecap:round; }
+.branch { fill:none; stroke:var(--gold); stroke-linecap:round; opacity:0; transition:opacity .6s ease; }
+.branch.vis { opacity:.65; }
+
+.leaf { cursor:pointer; opacity:0; transition:opacity .5s ease; }
+.leaf.vis { opacity:1; }
+.leaf-glow { fill:var(--gold); opacity:.12; }
+.leaf-dot  { fill:var(--gold); opacity:.55; transition:opacity .2s; }
+.leaf:hover .leaf-dot,
+.leaf:active .leaf-dot { opacity:1; }
+.leaf-dot { animation: lp 3s ease-in-out infinite; }
+@keyframes lp {
+  0%,100% { opacity:.4; }
+  50%      { opacity:.85; }
+}
+
+.blabel  { opacity:0; transition:opacity .5s; pointer-events:none; }
+.blabel.vis { opacity:1; }
+
+/* ── OVERLAY ── */
+#ov {
+  position:fixed; inset:0;
+  background: rgba(8,4,1,.97);
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding: 52px 28px 36px;
+  opacity:0; pointer-events:none;
+  transition: opacity .3s;
+  z-index:200;
+}
+#ov.open { opacity:1; pointer-events:all; }
+
+.ov-name {
+  font-size:10px; font-weight:500;
+  letter-spacing:.4em; text-transform:uppercase;
+  color:var(--gold); margin-bottom:3px;
+}
+.ov-sk {
+  font-family:'Lora',serif; font-style:italic;
+  font-size:13px; color:var(--gold); opacity:.55;
+  margin-bottom:32px;
+}
+.ov-qwrap {
+  max-width:520px; width:100%; position:relative;
+}
+.ov-qwrap::before {
+  content:'\201C';
+  font-family:'Playfair Display',serif;
+  font-size:88px; line-height:1;
+  color:var(--gold); opacity:.1;
+  position:absolute; top:-6px; left:-16px;
+}
+.ov-q {
+  font-family:'Lora',serif; font-style:italic;
+  font-size:clamp(13px,3.6vw,17px); line-height:1.9;
+  color:var(--cr); text-align:center;
+  position:relative; z-index:1;
+}
+.ov-cite {
+  margin-top:20px;
+  font-size:10px; letter-spacing:.22em; text-transform:uppercase;
+  color:var(--gold); opacity:.4;
+}
+.ov-dots {
+  display:flex; gap:10px; margin-top:24px;
+}
+.ov-dot {
+  width:5px; height:5px; border-radius:50%;
+  background:var(--gold); opacity:.2;
+  cursor:pointer; transition:opacity .2s, transform .2s;
+}
+.ov-dot.on { opacity:.9; transform:scale(1.5); }
+.ov-swipe {
+  position:absolute; bottom:16px;
+  font-size:9px; letter-spacing:.28em; text-transform:uppercase;
+  color:var(--dim); opacity:.3;
+}
+#ov-x {
+  position:absolute; top:16px; right:16px;
+  width:32px; height:32px;
+  border:1px solid rgba(200,153,60,.25); border-radius:50%;
+  background:none; color:var(--gold); font-size:13px;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  opacity:.45; transition:opacity .2s, border-color .2s;
+}
+#ov-x:hover { opacity:1; border-color:var(--gold); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">Krishna &middot; The <em>Complete</em> Human</div>
+  <div class="sub">Six teachings · Osho's discourses on Krishna</div>
+</header>
+
+<main><svg id="tree" viewBox="0 0 360 500" preserveAspectRatio="xMidYMid meet"></svg></main>
+
+<div class="hint">tap any leaf to read</div>
+
+<div id="ov">
+  <button id="ov-x">✕</button>
+  <div class="ov-name" id="ov-name"></div>
+  <div class="ov-sk"   id="ov-sk"></div>
+  <div class="ov-qwrap"><p class="ov-q" id="ov-q"></p></div>
+  <div class="ov-cite" id="ov-cite"></div>
+  <div class="ov-dots" id="ov-dots"></div>
+  <div class="ov-swipe">swipe to navigate</div>
+</div>
+
+<script>
+const NS  = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('tree');
+
+/* ── DATA ── */
+const T = [
+  {
+    name:'THE EMPTY FLUTE', sk:'Shunya Bansuri',
+    b:[180,460, 80,360, 28,222], sw:3,
+    lp:[82,354], la:'end',
+    fp:[[12,202],[36,180],[58,204]],
+    lv:[
+      {q:"The music flows through the flute only because the flute is empty inside. If the flute has something inside it — any obstruction, any fullness — the music cannot flow. Similarly, when you are empty of ego, empty of desire, empty of self, then existence itself begins to sing through you. You become the instrument of the divine.", c:"Krishna: The Man and His Philosophy"},
+      {q:"What is the secret of Krishna's flute? He could have played a drum, a veena, a sitar. But he chose the flute. The flute is the symbol of emptiness. It says: I am nothing. I am just a passage. And because of this nothingness, this emptiness, the most beautiful music in existence flows through it.", c:"Krishna: The Man and His Philosophy"},
+      {q:"The ego is the blockage. Drop the ego and you become a hollow bamboo — and through the hollow bamboo, existence begins to play its music. That music is what we call bliss, what we call enlightenment. It is not your achievement. It is what happens when you stop blocking it.", c:"The Beloved, Vol. 1"}
+    ]
+  },
+  {
+    name:'LIFE AS PLAY', sk:'Divya Lila',
+    b:[180,420, 100,302, 58,160], sw:2.5,
+    lp:[104,294], la:'end',
+    fp:[[36,140],[60,120],[83,143]],
+    lv:[
+      {q:"Krishna is the only religious figure in the whole history of consciousness who has taken life as a play, as a game, as a dance. He never becomes serious about it. Even in the great war of Mahabharata — even surrounded by death and destruction — he is laughing inside. He tells Arjuna: the soul cannot be killed. This is all a lila. Why weep?", c:"Krishna: The Man and His Philosophy"},
+      {q:"Life is a dance. But we have turned it into a burden, into a problem to be solved, into a war to be won. And in turning it into a war, we have lost the very thing we were trying to protect. Krishna says: drop the seriousness. Existence is celebrating itself. You are invited to join the celebration — not to stand aside and judge it.", c:"Krishna: The Man and His Philosophy"},
+      {q:"The gopis dancing with Krishna under the full moon — this is not a love story. This is a teaching about how existence dances with itself. You are one of those gopis. The dance is already happening. The only question is whether you have joined it, or are still sitting on the sidelines, waiting for the right moment. The right moment is always now.", c:"Krishna: The Man and His Philosophy"}
+    ]
+  },
+  {
+    name:'ACTION WITHOUT DOERSHIP', sk:'Nishkama Karma',
+    b:[180,386, 152,264, 132,120], sw:2,
+    lp:[146,256], la:'end',
+    fp:[[110,100],[133,82],[156,104]],
+    lv:[
+      {q:"Krishna does not say to Arjuna: fight, or don't fight. He says something far more radical: stop making yourself the doer. The action will happen — it is already happening. The question is whether you will claim it as yours, load it with your ego, and suffer the consequences. Act — but let existence be the actor.", c:"Bhagavad Gita Darshan"},
+      {q:"Nishkama karma is not indifference. It is not coldness. It is the action of a person so alive, so total, so fully present — that there is no room for the petty mind to calculate, to worry, to desire a particular outcome. The flower blooms completely without asking whether it will be admired.", c:"Krishna: The Man and His Philosophy"},
+      {q:"You are not the doer. You have never been the doer. You are a wave on the ocean, believing it is separate, believing it rises and falls by its own effort. Krishna's teaching is the wave recognizing the ocean. Act — but know that it is the ocean acting, not the wave claiming credit.", c:"Bhagavad Gita Darshan"}
+    ]
+  },
+  {
+    name:'TOTAL YES TO LIFE', sk:'Purna Sweekar',
+    b:[180,386, 208,264, 228,120], sw:2,
+    lp:[214,256], la:'start',
+    fp:[[204,104],[228,82],[250,100]],
+    lv:[
+      {q:"Ram said no to pleasure. Buddha said no to the world. Mahavira said no to the body. Every teacher has their no. But Krishna said yes to everything — to the sword and to the flute, to philosophy and to dance, to war and to love. This total yes is his uniqueness. This is why I call him Purna Avatar — the complete incarnation.", c:"Krishna: The Man and His Philosophy"},
+      {q:"The split in human beings — between body and soul, between the earthly and the divine — is a wound created by religion itself. Krishna heals this wound. He does not ask you to transcend the body. He says: the divine is here, in this body, in this world, in this very moment. There is nowhere else to go.", c:"Krishna: The Man and His Philosophy"},
+      {q:"The person who says no to life will never know the full depth of yes. Krishna chose the harder path: to be in the marketplace and not be of it, to fight in the war and not be consumed by it, to love without losing himself. This is the real renunciation — not of life, but of the ego that clings to life.", c:"Krishna: The Man and His Philosophy"}
+    ]
+  },
+  {
+    name:'LOVE AS DISSOLUTION', sk:'Prema Samarpan',
+    b:[180,420, 260,302, 302,160], sw:2.5,
+    lp:[256,294], la:'start',
+    fp:[[278,143],[302,120],[326,143]],
+    lv:[
+      {q:"Radha is the symbol of the highest devotion in the whole history of human consciousness. Her love for Krishna has no demand in it. She does not ask that Krishna love her back. She simply loves — the way a river flows to the sea, knowing it will dissolve and never return. And in that dissolution, she finds what no clinging lover has ever found.", c:"Krishna: The Man and His Philosophy"},
+      {q:"Ordinary love says: I love you, therefore you belong to me. Devotion says: I love you, therefore I belong to you. And the highest love — the love that Radha embodies — says: there is no I left to belong to anyone. The river has reached the ocean. The name remains, but the separation is gone.", c:"The Beloved, Vol. 1"},
+      {q:"When you love someone truly, without demand, without the ego's calculation — what happens? You disappear. Not into nothingness, but into a greater wholeness. The drop does not lose itself when it falls into the ocean. It becomes the ocean. This is what Krishna means when he dances with the gopis.", c:"Krishna: The Man and His Philosophy"}
+    ]
+  },
+  {
+    name:'THE WITNESS', sk:'Sakshi Bhava',
+    b:[180,460, 280,360, 332,222], sw:3,
+    lp:[278,354], la:'start',
+    fp:[[302,204],[326,180],[348,204]],
+    lv:[
+      {q:"The witness is not the one who watches from the outside, like a spectator in the stands. The witness is the one who is fully in the fire — and yet the fire does not burn him. This is the paradox Krishna lives: he loves completely, he fights completely — and simultaneously he remains the unchanging sky against which all clouds move.", c:"Krishna: The Man and His Philosophy"},
+      {q:"You can be in the marketplace without being of the marketplace. You can be in the relationship without being imprisoned by it. This is the art Krishna teaches — not through renunciation, but through witnessing. The moment you witness something, you are no longer completely identified with it. That small gap is the space of freedom.", c:"Bhagavad Gita Darshan"},
+      {q:"In the Mahabharata, everything is lost. Families are destroyed. Friends kill friends. And Krishna moves through all of it — he weeps, he laughs, he teaches, he loves — and at the center of all this movement is an absolute stillness. That stillness is not the stillness of the dead. It is the stillness of the sky. That sky is also in you.", c:"Krishna: The Man and His Philosophy"}
+    ]
+  }
+];
+
+/* ── HELPERS ── */
+function mk(tag, a) {
+  const e = document.createElementNS(NS, tag);
+  if (a) Object.entries(a).forEach(([k,v]) => e.setAttribute(k,v));
+  return e;
+}
+function txt(tag, a, s) { const e = mk(tag,a); e.textContent = s; return e; }
+
+/* ── BACKGROUND ── */
+svg.appendChild(mk('rect', {width:360, height:500,
+  fill:'url(#bg-grad)'}));
+const defs = mk('defs');
+const rg = mk('radialGradient', {id:'bg-grad', cx:'50%', cy:'35%', r:'60%'});
+const s1 = mk('stop', {offset:'0%',  'stop-color':'#1c0d06', 'stop-opacity':'1'});
+const s2 = mk('stop', {offset:'100%','stop-color':'#0C0602', 'stop-opacity':'1'});
+rg.appendChild(s1); rg.appendChild(s2); defs.appendChild(rg);
+svg.insertBefore(defs, svg.firstChild);
+
+/* ── TRUNK ── */
+svg.appendChild(mk('path', {d:'M 180,494 C 180,478 181,462 180,448',
+  class:'trunk', 'stroke-width':'9', opacity:'.8'}));
+svg.appendChild(mk('path', {d:'M 180,448 C 179,428 181,400 180,365',
+  class:'trunk', 'stroke-width':'6', opacity:'.65'}));
+
+/* root label */
+const rl = txt('text', {x:180, y:480, 'text-anchor':'middle',
+  fill:'#C89940', 'font-family':'Lora,serif', 'font-style':'italic',
+  'font-size':'7', opacity:'0'}, '— Purna Avatar —');
+svg.appendChild(rl);
+setTimeout(() => rl.setAttribute('opacity','0.28'), 250);
+
+/* ── BRANCHES + LABELS + LEAVES ── */
+const branches=[], labels=[], leaves=[];
+
+T.forEach((t, ti) => {
+  const [x0,y0,cx,cy,x1,y1] = t.b;
+
+  /* branch */
+  const br = mk('path', {
+    d:`M ${x0},${y0} Q ${cx},${cy} ${x1},${y1}`,
+    class:'branch', 'stroke-width':t.sw
+  });
+  svg.appendChild(br);
+  branches.push(br);
+
+  /* label */
+  const lg = mk('g', {class:'blabel'});
+  lg.appendChild(txt('text', {
+    x:t.lp[0], y:t.lp[1],
+    'text-anchor':t.la,
+    fill:'#C89940',
+    'font-family':'Inter,sans-serif',
+    'font-size':'8',
+    'font-weight':'500',
+    'letter-spacing':'0.1em'
+  }, t.name));
+  lg.appendChild(txt('text', {
+    x:t.lp[0], y:t.lp[1]+10,
+    'text-anchor':t.la,
+    fill:'#C89940',
+    'font-family':'Lora,serif',
+    'font-style':'italic',
+    'font-size':'7.5',
+    opacity:'0.55'
+  }, t.sk));
+  svg.appendChild(lg);
+  labels.push(lg);
+
+  /* leaves */
+  t.fp.forEach(([fx,fy], li) => {
+    const g = mk('g', {
+      class:'leaf',
+      role:'button',
+      tabindex:'0',
+      'aria-label':`${t.name}, passage ${li+1}`
+    });
+    /* stagger pulse via style */
+    const delay = (ti * 0.7 + li * 0.28).toFixed(2);
+    g.appendChild(mk('circle', {cx:fx, cy:fy, r:16, class:'leaf-glow'}));
+    const dot = mk('circle', {cx:fx, cy:fy, r:8,  class:'leaf-dot'});
+    dot.style.animationDelay = `${delay}s`;
+    g.appendChild(dot);
+    g.addEventListener('click',    ()   => open(ti, li));
+    g.addEventListener('touchend', e => { e.preventDefault(); open(ti, li); });
+    g.addEventListener('keydown',  e => { if(e.key==='Enter'||e.key===' ') open(ti,li); });
+    svg.appendChild(g);
+    leaves.push(g);
+  });
+});
+
+/* ── ANIMATE IN ── */
+setTimeout(() => {
+  branches.forEach((b, i) => setTimeout(() => {
+    b.classList.add('vis');
+    labels[i].classList.add('vis');
+  }, i * 180));
+
+  leaves.forEach((l, i) => setTimeout(() => l.classList.add('vis'),
+    Math.floor(i/3)*180 + (i%3)*80 + 380));
+}, 300);
+
+/* ── OVERLAY ── */
+const ov    = document.getElementById('ov');
+const oName = document.getElementById('ov-name');
+const oSk   = document.getElementById('ov-sk');
+const oQ    = document.getElementById('ov-q');
+const oCite = document.getElementById('ov-cite');
+const oDots = document.getElementById('ov-dots');
+
+let cT=0, cL=0;
+
+function open(ti, li) {
+  cT=ti; cL=li;
+  const t=T[ti], l=t.lv[li];
+  oName.textContent = t.name;
+  oSk.textContent   = t.sk;
+  oQ.textContent    = l.q;
+  oCite.textContent = '— ' + l.c;
+  oDots.innerHTML   = '';
+  t.lv.forEach((_,i) => {
+    const d = document.createElement('div');
+    d.className = 'ov-dot' + (i===li?' on':'');
+    d.onclick = () => open(ti, i);
+    oDots.appendChild(d);
+  });
+  ov.classList.add('open');
+}
+
+function close() { ov.classList.remove('open'); }
+
+document.getElementById('ov-x').onclick = close;
+ov.addEventListener('click', e => { if(e.target===ov) close(); });
+document.addEventListener('keydown', e => { if(e.key==='Escape') close(); });
+
+let tx0=0;
+ov.addEventListener('touchstart', e => { tx0 = e.touches[0].clientX; }, {passive:true});
+ov.addEventListener('touchend',   e => {
+  const dx = e.changedTouches[0].clientX - tx0;
+  if(Math.abs(dx) < 40) return;
+  const n = T[cT].lv.length;
+  if(dx < 0 && cL < n-1) open(cT, cL+1);
+  if(dx > 0 && cL > 0)   open(cT, cL-1);
+});
+</script>
+</body>
+</html>
