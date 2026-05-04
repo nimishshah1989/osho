@@ -287,32 +287,32 @@ const QP = {
 // Branch positions — spread around the perimeter
 const BP = [
   {x:155,  y:362},  // B0  self-0   left
-  {x:202,  y:100},  // B1  self-1   top-left
-  {x:432,  y:84},   // B2  self-2   top-center-left
-  {x:890,  y:84},   // B3  work-0   top-center-right
-  {x:1192, y:100},  // B4  work-1   top-right
-  {x:1258, y:240},  // B5  work-2   right-upper (new)
+  {x:202,  y:130},  // B1  self-1   top-left
+  {x:432,  y:130},  // B2  self-2   top-center
+  {x:890,  y:130},  // B3  work-0   top-center
+  {x:1170, y:150},  // B4  work-1   top-right
+  {x:1258, y:270},  // B5  work-2   right-upper
   {x:155,  y:456},  // B6  love-0   left-lower
-  {x:222,  y:720},  // B7  love-1   bottom-left
-  {x:555,  y:720},  // B8  love-2   bottom-center-left (new)
-  {x:978,  y:720},  // B9  beyond-0 bottom-center-right
-  {x:1260, y:718},  // B10 beyond-1 bottom-right
+  {x:222,  y:700},  // B7  love-1   bottom-left
+  {x:555,  y:700},  // B8  love-2   bottom-center
+  {x:978,  y:700},  // B9  beyond-0 bottom-center
+  {x:1260, y:700},  // B10 beyond-1 bottom-right
   {x:1258, y:418}   // B11 beyond-2 right-middle
 ];
 
 // Hardcoded label anchor positions for each branch question
 const BLP = [
   {x:200,  y:354, a:'start'},   // B0  right
-  {x:202,  y:136, a:'middle'},  // B1  below
-  {x:432,  y:120, a:'middle'},  // B2  below
-  {x:890,  y:120, a:'middle'},  // B3  below
-  {x:1192, y:136, a:'middle'},  // B4  below
-  {x:1218, y:232, a:'end'},     // B5  left (new)
+  {x:202,  y:166, a:'middle'},  // B1  below
+  {x:432,  y:166, a:'middle'},  // B2  below
+  {x:890,  y:166, a:'middle'},  // B3  below
+  {x:1170, y:186, a:'middle'},  // B4  below
+  {x:1218, y:262, a:'end'},     // B5  left
   {x:200,  y:448, a:'start'},   // B6  right
-  {x:222,  y:686, a:'middle'},  // B7  above
-  {x:555,  y:686, a:'middle'},  // B8  above (new)
-  {x:978,  y:686, a:'middle'},  // B9  above
-  {x:1260, y:684, a:'middle'},  // B10 above
+  {x:222,  y:666, a:'middle'},  // B7  above
+  {x:555,  y:666, a:'middle'},  // B8  above
+  {x:978,  y:666, a:'middle'},  // B9  above
+  {x:1260, y:666, a:'middle'},  // B10 above
   {x:1218, y:410, a:'end'}      // B11 left
 ];
 
@@ -399,13 +399,16 @@ DATA.quadrants.forEach(q => {
         'font-family':'Playfair Display,serif', 'font-size':10, 'font-style':'italic'}, gQ);
     }
   }
-  // Situation label outside circle
-  const qdx = qp.x - CX, qdy = qp.y - CY, ql = Math.sqrt(qdx*qdx+qdy*qdy)||1;
-  const sx = qp.x + (qdx/ql)*52, sy = qp.y + (qdy/ql)*52;
+  // Situation label — placed INWARD (toward canvas center) where branches don't reach
+  const dxc = CX - qp.x, dyc = CY - qp.y;
+  const dlc = Math.sqrt(dxc*dxc + dyc*dyc) || 1;
+  const sx = qp.x + (dxc/dlc) * 62;
+  const sy = qp.y + (dyc/dlc) * 62;
+  const sa = dxc > 0 ? 'start' : 'end';
   const sw = q.situation.split(' '), smid = Math.ceil(sw.length/2);
-  const st = el('text', {x:sx, y:sy-5, 'text-anchor':anc(sx), fill:c,
+  const st = el('text', {x:sx, y:sy-5, 'text-anchor':sa, fill:c,
     'font-family':'Inter,sans-serif', 'font-size':11, 'font-weight':400,
-    opacity:.65, 'letter-spacing':.3}, gQ);
+    opacity:.7, 'letter-spacing':.3}, gQ);
   el('tspan', {x:sx, dy:0},  st).textContent = sw.slice(0,smid).join(' ');
   el('tspan', {x:sx, dy:15}, st).textContent = sw.slice(smid).join(' ');
 });
