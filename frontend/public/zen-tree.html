@@ -399,18 +399,19 @@ DATA.quadrants.forEach(q => {
         'font-family':'Playfair Display,serif', 'font-size':10, 'font-style':'italic'}, gQ);
     }
   }
-  // Situation label — placed INWARD (toward canvas center) where branches don't reach
-  const dxc = CX - qp.x, dyc = CY - qp.y;
-  const dlc = Math.sqrt(dxc*dxc + dyc*dyc) || 1;
-  const sx = qp.x + (dxc/dlc) * 62;
-  const sy = qp.y + (dyc/dlc) * 62;
-  const sa = dxc > 0 ? 'start' : 'end';
+  // Situation label — placed in the empty diagonal zone of each quadrant,
+  // 60-70px away from quadrant centre, in directions verified to be branch-free.
+  let sx, sy, sa;
+  if      (q.id === 'self')   { sx = qp.x + 36; sy = qp.y + 70; sa = 'start'; }
+  else if (q.id === 'work')   { sx = qp.x - 36; sy = qp.y + 70; sa = 'end';   }
+  else if (q.id === 'love')   { sx = qp.x + 36; sy = qp.y - 70; sa = 'start'; }
+  else                        { sx = qp.x - 36; sy = qp.y - 70; sa = 'end';   }
   const sw = q.situation.split(' '), smid = Math.ceil(sw.length/2);
-  const st = el('text', {x:sx, y:sy-5, 'text-anchor':sa, fill:c,
-    'font-family':'Inter,sans-serif', 'font-size':11, 'font-weight':400,
-    opacity:.7, 'letter-spacing':.3}, gQ);
+  const st = el('text', {x:sx, y:sy, 'text-anchor':sa, fill:c,
+    'font-family':'Inter,sans-serif', 'font-size':10.5, 'font-weight':400,
+    opacity:.6, 'letter-spacing':.4}, gQ);
   el('tspan', {x:sx, dy:0},  st).textContent = sw.slice(0,smid).join(' ');
-  el('tspan', {x:sx, dy:15}, st).textContent = sw.slice(smid).join(' ');
+  el('tspan', {x:sx, dy:14}, st).textContent = sw.slice(smid).join(' ');
 });
 
 // ── Branch & leaf nodes ──
