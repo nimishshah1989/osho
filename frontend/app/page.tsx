@@ -56,6 +56,7 @@ interface SearchResponse {
 interface Paragraph {
   sequence_number: number;
   content: string;
+  hl?: string;
 }
 
 interface DiscourseResponse {
@@ -114,7 +115,13 @@ function extractHighlights(query: string): RegExp | null {
   for (const w of words) {
     if (w.endsWith('*')) {
       const stem = w.slice(0, -1);
-      if (stem) parts.push(`\\b${escape(stem)}\\w*`);
+      if (stem) {
+        if (HAS_DEVANAGARI.test(stem)) {
+          parts.push(`${escape(stem)}\\S*`);
+        } else {
+          parts.push(`\\b${escape(stem)}\\w*`);
+        }
+      }
     } else if (HAS_DEVANAGARI.test(w)) {
       // Devanagari: \b is ASCII-only and never matches Hindi characters.
       // Use the raw word — Devanagari syllables are space-delimited in text.
@@ -211,20 +218,15 @@ function SearchPageInner() {
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
-  const firstMatchIndex = useMemo(() => {
-    if (!highlightPattern || !discourse) return -1;
-    const re = new RegExp(highlightPattern.source, 'i');
-    return discourse.paragraphs.findIndex((p) => re.test(p.content));
-  }, [highlightPattern, discourse]);
-
-  // All paragraph indices that contain a match (for next/prev navigation)
+  // All paragraph indices that contain a match (driven by backend hl markers)
   const matchIndices = useMemo(() => {
-    if (!highlightPattern || !discourse) return [];
-    const re = new RegExp(highlightPattern.source, 'i');
+    if (!discourse) return [];
     return discourse.paragraphs
-      .map((p, idx) => (re.test(p.content) ? idx : -1))
+      .map((p, idx) => (p.hl ? idx : -1))
       .filter((idx) => idx >= 0);
-  }, [highlightPattern, discourse]);
+  }, [discourse]);
+
+  const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
 
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
@@ -302,7 +304,16 @@ function SearchPageInner() {
 
   useEffect(() => {
     trackPageView(window.location.pathname + window.location.search);
-    if (initialQuery) void runSearch(initialQuery, initialSort, initialMode, initialProx);
+    if (initialQuery) {
+      // URL stores the user-intent query (raw / devanagari) — re-apply the
+      // same Hindi variant expansion that doSearch does, so reloads behave
+      // identically to a fresh submission.
+      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(initialQuery);
+      const devanagari = isRoman ? romanToDevanagari(initialQuery) : initialQuery;
+      const hasDev = HAS_DEVANAGARI.test(devanagari);
+      const fts = hasDev && initialMode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
+      void runSearch(fts, initialSort, initialMode, initialProx);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -322,7 +333,8 @@ function SearchPageInner() {
     let cancelled = false;
     setDiscourseLoading(true);
     setDiscourseError(null);
-    fetch(`/api/discourse?event_id=${encodeURIComponent(selectedEventId)}`)
+    const qParam = submittedQuery ? `&q=${encodeURIComponent(submittedQuery)}` : '';
+    fetch(`/api/discourse?event_id=${encodeURIComponent(selectedEventId)}${qParam}`)
       .then(async (r) => {
         const body = await r.json().catch(() => null);
         if (!r.ok) throw new Error((body && body.error) || `Status ${r.status}`);
@@ -340,7 +352,7 @@ function SearchPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEventId]);
+  }, [selectedEventId, submittedQuery]);
 
   const doSearch = useCallback(
     (rawQ: string) => {
@@ -357,7 +369,7 @@ function SearchPageInner() {
         hasDevanagari && mode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
 
       setSelectedEventId('');
-      syncUrl(searchTerm, sort, '', mode, proximity);
+      syncUrl(devanagari, sort, '', mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     },
     [locale, mode, sort, proximity, syncUrl, runSearch],
@@ -382,6 +394,8 @@ function SearchPageInner() {
     if (next === mode) return;
     trackModeChange(mode, next);
     setMode(next);
+    // Intentionally re-runs with current input (`query`), not `submittedQuery`:
+    // user changed the mode pill, expecting the visible input to be re-searched.
     if (query.trim() && results) {
       syncUrl(query.trim(), sort, '', next, proximity);
       setSelectedEventId('');
@@ -927,7 +941,7 @@ function SearchPageInner() {
                                     : undefined
                               }
                             >
-                              <Highlighted text={p.content} pattern={highlightPattern} />
+                              <Highlighted text={p.content} hl={p.hl} pattern={null} />
                             </p>
                           );
                         })}
