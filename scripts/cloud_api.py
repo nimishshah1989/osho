@@ -1,3 +1,4 @@
+# discourse endpoint now supports ?q= for FTS5 highlight markers
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
@@ -146,18 +147,12 @@ def _era_from_date(raw: str) -> str:
 
 
 # ─── Devanagari normalisation ────────────────────────────────────────────────
-# Mirrors the same logic in build_fts.py — must stay in sync.
-# Converts nasal-consonant+virama → anusvara (ं) when the nasal belongs to
-# the same phonological class as the following consonant.
-# This collapses अनन्त ↔ अनंत, मन्त्र ↔ मंत्र, etc. at query time,
-# matching the canonical form stored in the FTS index.
-
 _NASAL_RULES = [
-    ('ङ', 'क', 'ङ'),  # velar
-    ('ञ', 'च', 'ञ'),  # palatal
-    ('ण', 'ट', 'ण'),  # retroflex
-    ('न', 'त', 'न'),  # dental
-    ('म', 'प', 'म'),  # labial
+    ('ङ', 'क', 'ङ'),
+    ('ञ', 'च', 'ञ'),
+    ('ण', 'ट', 'ण'),
+    ('न', 'त', 'न'),
+    ('म', 'प', 'म'),
 ]
 _VIRAMA   = '्'
 _ANUSVARA = 'ं'
@@ -190,9 +185,6 @@ def _rewrite_query(user_query: str) -> str:
 
 
 # ─── Cross-paragraph NEAR support ────────────────────────────────────────────
-# FTS5 NEAR() only matches within a single row (paragraph). For large distances
-# (N ≥ 30) we also look for events where each query word appears in paragraphs
-# whose sequence_numbers are within N // 30 steps of each other.
 
 _NEAR_RE = re.compile(
     r'^NEAR\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)\s*$',
@@ -201,7 +193,6 @@ _NEAR_RE = re.compile(
 
 
 def _parse_near(fts_query: str):
-    """Return (words, distance) if query is a bare NEAR(...) expression, else None."""
     m = _NEAR_RE.match(fts_query.strip())
     if not m:
         return None
@@ -213,15 +204,8 @@ def _parse_near(fts_query: str):
 
 
 def _min_para_span(seqs_per_word: list[list[int]]) -> int:
-    """Given sorted sequence-number lists per word, return the minimum
-    window width that contains at least one paragraph per word.
-
-    Uses a sliding-window / merge-pointer approach over sorted lists.
-    Returns sys.maxsize if any word list is empty.
-    """
     if any(not lst for lst in seqs_per_word):
         return sys.maxsize
-    # Heap entries: (seq_number, word_index, position_in_that_list)
     heap = [(seqs[0], i, 0) for i, seqs in enumerate(seqs_per_word)]
     heapq.heapify(heap)
     max_val = max(seqs[0] for seqs in seqs_per_word)
@@ -247,14 +231,6 @@ def _augment_near_cross_paragraph(
     where_extra: str,
     filter_params: list,
 ) -> dict:
-    """Return event dicts for cross-paragraph matches of all words in `words`.
-
-    For each word we query FTS independently. Then for each event that appears
-    in ALL per-word result sets, we compute the minimum paragraph window that
-    covers one occurrence of each word. Events whose window ≤ para_span are
-    returned with up to 3 sample hit paragraphs.
-    """
-    # Per-word: {event_id → sorted list of sequence_numbers}
     per_word: list[dict[int, list[int]]] = []
     for word in words:
         word_fts = _normalize_devanagari(word)
@@ -276,7 +252,6 @@ def _augment_near_cross_paragraph(
             d.setdefault(r[0], []).append(r[1])
         per_word.append(d)
 
-    # Intersect: events present in every word's result
     if not per_word:
         return {}
     common_ids = set(per_word[0].keys())
@@ -290,7 +265,6 @@ def _augment_near_cross_paragraph(
         if span > para_span:
             continue
 
-        # Fetch event metadata and a few sample paragraphs
         ev_row = conn.execute(
             "SELECT title, date, location, language FROM events WHERE id = ?",
             (ev_id,),
@@ -298,7 +272,6 @@ def _augment_near_cross_paragraph(
         if not ev_row:
             continue
 
-        # Collect the closest paragraphs (union of matching seqs, keep first 5)
         all_seqs: list[int] = []
         for seqs in seqs_per_word:
             all_seqs.extend(seqs)
@@ -404,7 +377,6 @@ def catalog():
 
         has_tags = _table_exists(conn, 'event_tags')
 
-        # Build tags map: event_id → sorted list of tags
         tags_map: dict = {}
         if has_tags:
             for r in cur.execute("SELECT event_id, tag FROM event_tags").fetchall():
@@ -426,7 +398,6 @@ def catalog():
 
 @app.get("/api/tags")
 def tags():
-    """Return all topic tags with event counts, sorted by frequency."""
     if not os.path.exists(DB_PATH):
         return {"tags": []}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
@@ -449,12 +420,6 @@ def search(
     date_from: Optional[str] = Query(None, description="Start date YYYY or YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="End date YYYY or YYYY-MM-DD"),
 ):
-    """Keyword search with BM25 ranking, phrase / NEAR / OR / prefix / title: support.
-
-    Returns events sorted by rank (or alphabetical by title). For each event
-    the top 3 matching paragraphs are included. Ranking uses combined BM25
-    score across paragraphs so events with more hits rank higher.
-    """
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=503, detail="Archive unavailable.")
 
@@ -462,11 +427,9 @@ def search(
     if not fts_query:
         raise HTTPException(status_code=400, detail="Empty query.")
 
-    # Validate date range
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=400, detail="date_from must be ≤ date_to")
 
-    # Build filter clauses
     filters = []
     filter_params: list = []
     padded_from = ''
@@ -517,7 +480,6 @@ def search(
         except sqlite3.OperationalError as ex:
             raise HTTPException(status_code=400, detail="Invalid search syntax.")
 
-        # Group by event. Track all hits for ranking, keep top 3 for display.
         events: dict = {}
         for r in rows:
             ev_id = r["event_id"]
@@ -549,11 +511,6 @@ def search(
                     "hl": hl,
                 })
 
-        # Augment with cross-paragraph NEAR matches only for large distances.
-        # FTS5 NEAR is exact within a single paragraph row, so for distance < 100
-        # same-paragraph matching is sufficient and correct.
-        # For distance ≥ 100, words may genuinely span paragraphs, so we also
-        # search across adjacent paragraphs (para_span = distance // 30).
         if near_parsed:
             near_words, near_dist = near_parsed
             if near_dist >= 100:
@@ -565,11 +522,6 @@ def search(
                     if ev_id not in events:
                         events[ev_id] = cev
 
-        # Count distinct events and hits.
-        # For NEAR queries with cross-paragraph augmentation the SQL MATCH count
-        # only reflects same-paragraph FTS5 hits, not the augmented results, so
-        # the two numbers would disagree. Always derive counts from the events
-        # dict after augmentation so that "N discourses · M hits" matches the list.
         near_words, near_dist = near_parsed if near_parsed else (None, 0)
         if near_parsed and near_dist >= 30:
             total_events = len(events)
@@ -592,7 +544,6 @@ def search(
                 total_events = len(events)
                 total_hits = sum(e["hit_count"] for e in events.values())
 
-    # Compute combined rank: BM25 is negative (lower=better).
     for ev in events.values():
         hit_bonus = math.log1p(ev.get("hit_count", 1))
         best = ev.get("best_rank", 0.0)
@@ -602,7 +553,6 @@ def search(
     if sort == 'title':
         out.sort(key=lambda e: (e["title"] or "").lower())
 
-    # Remove internal fields before response
     for ev in out:
         ev.pop("best_rank", None)
         ev.pop("_cross_para", None)
@@ -617,7 +567,6 @@ def search(
 
 @app.get("/api/languages")
 def languages():
-    """Return distinct languages in the archive for filter UI."""
     if not os.path.exists(DB_PATH):
         return {"languages": []}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
@@ -630,7 +579,6 @@ def languages():
 
 @app.get("/api/date-range")
 def date_range():
-    """Return min/max year in the archive for date filter UI."""
     if not os.path.exists(DB_PATH):
         return {"min_year": None, "max_year": None}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
@@ -778,7 +726,7 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
                         .replace('\x03', '»')
                     )
             except sqlite3.OperationalError:
-                pass  # Invalid query — return without hl markers
+                pass
 
         paragraphs = [
             {
@@ -929,7 +877,6 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
     if not title or not content:
         raise HTTPException(status_code=400, detail="title and content are required")
 
-    # Split into paragraphs
     raw = [p.strip() for p in re.split(r'\n{2,}', content)]
     paragraphs = [p for p in raw if len(p) >= 20]
     if not paragraphs:
@@ -952,7 +899,6 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
             " VALUES (?, ?, ?, 0)",
             [(event_id, seq, para, 0) for seq, para in enumerate(paragraphs, 1)],
         )
-        # Index into FTS
         norm_title = _normalize_devanagari(title)
         conn.execute("""
             INSERT INTO paragraphs_fts
