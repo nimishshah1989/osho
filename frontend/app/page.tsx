@@ -221,17 +221,21 @@ function SearchPageInner() {
   // All paragraph indices that contain a match.
   // Primary: backend hl markers (accurate — covers stemming and NEAR proximity).
   // Fallback: client-side regex when backend didn't return hl (old server, no query).
-  const matchIndices = useMemo(() => {
-    if (!discourse) return [];
+  // hasBackendHl tells the renderer to suppress the regex fallback in non-matching
+  // paragraphs when the backend provided authoritative hl markers — otherwise the
+  // regex would over-highlight standalone words in NEAR queries.
+  const { matchIndices, hasBackendHl } = useMemo(() => {
+    if (!discourse) return { matchIndices: [] as number[], hasBackendHl: false };
     const fromHl = discourse.paragraphs
       .map((p, idx) => (p.hl ? idx : -1))
       .filter((idx) => idx >= 0);
-    if (fromHl.length > 0) return fromHl;
-    if (!highlightPattern) return [];
+    if (fromHl.length > 0) return { matchIndices: fromHl, hasBackendHl: true };
+    if (!highlightPattern) return { matchIndices: [] as number[], hasBackendHl: false };
     const re = new RegExp(highlightPattern.source, 'i');
-    return discourse.paragraphs
+    const indices = discourse.paragraphs
       .map((p, idx) => (re.test(p.content) ? idx : -1))
       .filter((idx) => idx >= 0);
+    return { matchIndices: indices, hasBackendHl: false };
   }, [discourse, highlightPattern]);
 
   const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
@@ -949,7 +953,11 @@ function SearchPageInner() {
                                     : undefined
                               }
                             >
-                              <Highlighted text={p.content} hl={p.hl} pattern={highlightPattern} />
+                              <Highlighted
+                                text={p.content}
+                                hl={p.hl}
+                                pattern={hasBackendHl ? null : highlightPattern}
+                              />
                             </p>
                           );
                         })}
