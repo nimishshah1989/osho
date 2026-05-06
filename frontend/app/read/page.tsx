@@ -74,7 +74,7 @@ function ReaderInner() {
   const headerTitle = data?.event.title ?? title ?? t('read.discourse');
 
   const sannyasWikiUrl = headerTitle
-    ? `https://www.sannyas.wiki/${encodeURIComponent(headerTitle.replace(/ /g, '_'))}`
+    ? `https://www.sannyas.wiki/index.php?title=${encodeURIComponent(headerTitle.replace(/ /g, '_'))}`
     : null;
 
   return (

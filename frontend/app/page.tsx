@@ -255,6 +255,17 @@ function SearchPageInner() {
     [matchIndices],
   );
 
+  const expandQuery = useCallback(
+    (raw: string, m: Mode): { devanagari: string; searchTerm: string } => {
+      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(raw);
+      const devanagari = isRoman ? romanToDevanagari(raw) : raw;
+      const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
+      const searchTerm = hasDevanagari && m === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
+      return { devanagari, searchTerm };
+    },
+    [locale],
+  );
+
   const syncUrl = useCallback(
     (q: string, s: Sort, event: string, m: Mode, prox: number) => {
       const params = new URLSearchParams();
@@ -313,14 +324,8 @@ function SearchPageInner() {
   useEffect(() => {
     trackPageView(window.location.pathname + window.location.search);
     if (initialQuery) {
-      // URL stores the user-intent query (raw / devanagari) — re-apply the
-      // same Hindi variant expansion that doSearch does, so reloads behave
-      // identically to a fresh submission.
-      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(initialQuery);
-      const devanagari = isRoman ? romanToDevanagari(initialQuery) : initialQuery;
-      const hasDev = HAS_DEVANAGARI.test(devanagari);
-      const fts = hasDev && initialMode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
-      void runSearch(fts, initialSort, initialMode, initialProx);
+      const { searchTerm } = expandQuery(initialQuery, initialMode);
+      void runSearch(searchTerm, initialSort, initialMode, initialProx);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -366,21 +371,12 @@ function SearchPageInner() {
     (rawQ: string) => {
       const raw = rawQ.trim();
       if (!raw) return;
-
-      // Transliterate Roman \u2192 Devanagari if needed.
-      // Only expand OR variants (vowel/anusvara) for 'all words' mode \u2014
-      // phrase and near modes need literal terms, not OR expressions.
-      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(raw);
-      const devanagari = isRoman ? romanToDevanagari(raw) : raw;
-      const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
-      const searchTerm =
-        hasDevanagari && mode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
-
+      const { devanagari, searchTerm } = expandQuery(raw, mode);
       setSelectedEventId('');
       syncUrl(devanagari, sort, '', mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     },
-    [locale, mode, sort, proximity, syncUrl, runSearch],
+    [expandQuery, mode, sort, proximity, syncUrl, runSearch],
   );
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -393,8 +389,9 @@ function SearchPageInner() {
     trackSortChange(next);
     setSort(next);
     if (query.trim()) {
-      syncUrl(query.trim(), next, selectedEventId, mode, proximity);
-      void runSearch(query.trim(), next, mode, proximity);
+      const { devanagari, searchTerm } = expandQuery(query.trim(), mode);
+      syncUrl(devanagari, next, selectedEventId, mode, proximity);
+      void runSearch(searchTerm, next, mode, proximity);
     }
   };
 
@@ -402,12 +399,11 @@ function SearchPageInner() {
     if (next === mode) return;
     trackModeChange(mode, next);
     setMode(next);
-    // Intentionally re-runs with current input (`query`), not `submittedQuery`:
-    // user changed the mode pill, expecting the visible input to be re-searched.
     if (query.trim() && results) {
-      syncUrl(query.trim(), sort, '', next, proximity);
+      const { devanagari, searchTerm } = expandQuery(query.trim(), next);
+      syncUrl(devanagari, sort, '', next, proximity);
       setSelectedEventId('');
-      void runSearch(query.trim(), sort, next, proximity);
+      void runSearch(searchTerm, sort, next, proximity);
     }
   };
 
@@ -416,9 +412,10 @@ function SearchPageInner() {
     trackProxChange(clamped, 'input');
     setProximity(clamped);
     if (mode === 'near' && query.trim() && results) {
-      syncUrl(query.trim(), sort, '', mode, clamped);
+      const { devanagari, searchTerm } = expandQuery(query.trim(), mode);
+      syncUrl(devanagari, sort, '', mode, clamped);
       setSelectedEventId('');
-      void runSearch(query.trim(), sort, mode, clamped);
+      void runSearch(searchTerm, sort, mode, clamped);
     }
   };
 
@@ -432,7 +429,10 @@ function SearchPageInner() {
   const isMountedLangRef = useRef(false);
   useEffect(() => {
     if (!isMountedLangRef.current) { isMountedLangRef.current = true; return; }
-    if (query.trim()) void runSearch(query.trim(), sort, mode, proximity);
+    if (query.trim()) {
+      const { searchTerm } = expandQuery(query.trim(), mode);
+      void runSearch(searchTerm, sort, mode, proximity);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [langFilter]);
 

@@ -334,12 +334,12 @@ export default function TreeExplorer() {
   }, [events, selected, groupDim]);
 
   if (loading) return (
-    <main className="max-w-4xl mx-auto px-4 py-12 text-center text-stone-400 dark:text-ivory/40 text-sm">
+    <main className="max-w-4xl mx-auto px-4 pt-28 pb-12 text-center text-stone-400 dark:text-ivory/40 text-sm">
       Loading archive…
     </main>
   );
   if (error) return (
-    <main className="max-w-4xl mx-auto px-4 py-12 text-center text-red-500 text-sm">{error}</main>
+    <main className="max-w-4xl mx-auto px-4 pt-28 pb-12 text-center text-red-500 text-sm">{error}</main>
   );
 
   return (
