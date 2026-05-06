@@ -304,7 +304,16 @@ function SearchPageInner() {
 
   useEffect(() => {
     trackPageView(window.location.pathname + window.location.search);
-    if (initialQuery) void runSearch(initialQuery, initialSort, initialMode, initialProx);
+    if (initialQuery) {
+      // URL stores the user-intent query (raw / devanagari) — re-apply the
+      // same Hindi variant expansion that doSearch does, so reloads behave
+      // identically to a fresh submission.
+      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(initialQuery);
+      const devanagari = isRoman ? romanToDevanagari(initialQuery) : initialQuery;
+      const hasDev = HAS_DEVANAGARI.test(devanagari);
+      const fts = hasDev && initialMode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
+      void runSearch(fts, initialSort, initialMode, initialProx);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -360,7 +369,7 @@ function SearchPageInner() {
         hasDevanagari && mode === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
 
       setSelectedEventId('');
-      syncUrl(searchTerm, sort, '', mode, proximity);
+      syncUrl(devanagari, sort, '', mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     },
     [locale, mode, sort, proximity, syncUrl, runSearch],
@@ -385,6 +394,8 @@ function SearchPageInner() {
     if (next === mode) return;
     trackModeChange(mode, next);
     setMode(next);
+    // Intentionally re-runs with current input (`query`), not `submittedQuery`:
+    // user changed the mode pill, expecting the visible input to be re-searched.
     if (query.trim() && results) {
       syncUrl(query.trim(), sort, '', next, proximity);
       setSelectedEventId('');
