@@ -56,6 +56,7 @@ interface SearchResponse {
 interface Paragraph {
   sequence_number: number;
   content: string;
+  hl?: string;
 }
 
 interface DiscourseResponse {
@@ -114,7 +115,13 @@ function extractHighlights(query: string): RegExp | null {
   for (const w of words) {
     if (w.endsWith('*')) {
       const stem = w.slice(0, -1);
-      if (stem) parts.push(`\\b${escape(stem)}\\w*`);
+      if (stem) {
+        if (HAS_DEVANAGARI.test(stem)) {
+          parts.push(`${escape(stem)}\\S*`);
+        } else {
+          parts.push(`\\b${escape(stem)}\\w*`);
+        }
+      }
     } else if (HAS_DEVANAGARI.test(w)) {
       // Devanagari: \b is ASCII-only and never matches Hindi characters.
       // Use the raw word — Devanagari syllables are space-delimited in text.
@@ -211,20 +218,15 @@ function SearchPageInner() {
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
-  const firstMatchIndex = useMemo(() => {
-    if (!highlightPattern || !discourse) return -1;
-    const re = new RegExp(highlightPattern.source, 'i');
-    return discourse.paragraphs.findIndex((p) => re.test(p.content));
-  }, [highlightPattern, discourse]);
-
-  // All paragraph indices that contain a match (for next/prev navigation)
+  // All paragraph indices that contain a match (driven by backend hl markers)
   const matchIndices = useMemo(() => {
-    if (!highlightPattern || !discourse) return [];
-    const re = new RegExp(highlightPattern.source, 'i');
+    if (!discourse) return [];
     return discourse.paragraphs
-      .map((p, idx) => (re.test(p.content) ? idx : -1))
+      .map((p, idx) => (p.hl ? idx : -1))
       .filter((idx) => idx >= 0);
-  }, [highlightPattern, discourse]);
+  }, [discourse]);
+
+  const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
 
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
@@ -322,7 +324,8 @@ function SearchPageInner() {
     let cancelled = false;
     setDiscourseLoading(true);
     setDiscourseError(null);
-    fetch(`/api/discourse?event_id=${encodeURIComponent(selectedEventId)}`)
+    const qParam = submittedQuery ? `&q=${encodeURIComponent(submittedQuery)}` : '';
+    fetch(`/api/discourse?event_id=${encodeURIComponent(selectedEventId)}${qParam}`)
       .then(async (r) => {
         const body = await r.json().catch(() => null);
         if (!r.ok) throw new Error((body && body.error) || `Status ${r.status}`);
@@ -340,7 +343,7 @@ function SearchPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEventId]);
+  }, [selectedEventId, submittedQuery]);
 
   const doSearch = useCallback(
     (rawQ: string) => {
@@ -927,7 +930,7 @@ function SearchPageInner() {
                                     : undefined
                               }
                             >
-                              <Highlighted text={p.content} pattern={highlightPattern} />
+                              <Highlighted text={p.content} hl={p.hl} pattern={null} />
                             </p>
                           );
                         })}

@@ -602,9 +602,10 @@ def search(
     if sort == 'title':
         out.sort(key=lambda e: (e["title"] or "").lower())
 
-    # Remove internal ranking fields before response
+    # Remove internal fields before response
     for ev in out:
         ev.pop("best_rank", None)
+        ev.pop("_cross_para", None)
 
     return {
         "query": q,
@@ -723,11 +724,13 @@ def clusters(lens: str = "themes", limit: int = 20):
 
 
 @app.get("/api/discourse")
-def discourse(title: str | None = None, event_id: str | None = None):
+def discourse(title: str | None = None, event_id: str | None = None, q: str | None = None):
     if not title and not event_id:
         raise HTTPException(status_code=400, detail="Provide title or event_id")
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="Discourse store unavailable")
+
+    fts_query = _rewrite_query(q) if q else None
 
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
@@ -753,13 +756,37 @@ def discourse(title: str | None = None, event_id: str | None = None):
             " WHERE event_id = ? ORDER BY sequence_number",
             (ev["id"],),
         )
+        para_rows = cur.fetchall()
+
+        hl_map: dict = {}
+        if fts_query:
+            try:
+                hl_rows = conn.execute(
+                    """
+                    SELECT f.paragraph_id, highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl
+                    FROM paragraphs_fts f
+                    WHERE paragraphs_fts MATCH ?
+                    AND f.event_id = ?
+                    """,
+                    (fts_query, ev["id"]),
+                ).fetchall()
+                for row in hl_rows:
+                    raw_hl = row["hl"] or ''
+                    hl_map[row["paragraph_id"]] = (
+                        _strip_shailendra(raw_hl)
+                        .replace('\x02', '«')
+                        .replace('\x03', '»')
+                    )
+            except sqlite3.OperationalError:
+                pass  # Invalid query — return without hl markers
+
         paragraphs = [
             {
-                "id": r["id"],
                 "sequence_number": r["sequence_number"],
                 "content": _strip_shailendra(r["content"]),
+                **({"hl": hl_map[r["id"]]} if r["id"] in hl_map else {}),
             }
-            for r in cur.fetchall()
+            for r in para_rows
         ]
 
     return {
