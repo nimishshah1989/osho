@@ -218,13 +218,21 @@ function SearchPageInner() {
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
-  // All paragraph indices that contain a match (driven by backend hl markers)
+  // All paragraph indices that contain a match.
+  // Primary: backend hl markers (accurate — covers stemming and NEAR proximity).
+  // Fallback: client-side regex when backend didn't return hl (old server, no query).
   const matchIndices = useMemo(() => {
     if (!discourse) return [];
-    return discourse.paragraphs
+    const fromHl = discourse.paragraphs
       .map((p, idx) => (p.hl ? idx : -1))
       .filter((idx) => idx >= 0);
-  }, [discourse]);
+    if (fromHl.length > 0) return fromHl;
+    if (!highlightPattern) return [];
+    const re = new RegExp(highlightPattern.source, 'i');
+    return discourse.paragraphs
+      .map((p, idx) => (re.test(p.content) ? idx : -1))
+      .filter((idx) => idx >= 0);
+  }, [discourse, highlightPattern]);
 
   const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
 
@@ -941,7 +949,7 @@ function SearchPageInner() {
                                     : undefined
                               }
                             >
-                              <Highlighted text={p.content} hl={p.hl} pattern={null} />
+                              <Highlighted text={p.content} hl={p.hl} pattern={highlightPattern} />
                             </p>
                           );
                         })}
