@@ -127,7 +127,80 @@ function extractHighlights(query: string): RegExp | null {
   return new RegExp(`(${parts.join('|')})`, 'gi');
 }
 
-function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern: RegExp | null }) {
+// Parse a FTS5 NEAR query like "NEAR(meditation compassion, 5)" into the
+// individual search terms and the proximity window. Returns null if the query
+// isn't a NEAR query.
+function extractNearInfo(query: string): { terms: string[]; prox: number } | null {
+  if (!query) return null;
+  const m = query.match(/^\s*NEAR\s*\(\s*([^,)]+?)\s*(?:,\s*(\d+))?\s*\)\s*$/i);
+  if (!m) return null;
+  const terms = m[1].split(/\s+/).filter(Boolean);
+  if (terms.length < 2) return null;
+  const prox = m[2] ? Number.parseInt(m[2], 10) : 10;
+  return { terms, prox: Number.isFinite(prox) ? prox : 10 };
+}
+
+// Find character-offset spans in `text` whose tokens are part of a proximity
+// match — i.e. each highlighted token has a token of a *different* search term
+// within ±(prox + 1) positions (FTS5 NEAR semantics: at most `prox` intervening
+// tokens). Returns spans in document order.
+function findNearHighlights(
+  text: string,
+  terms: string[],
+  prox: number,
+): Array<[number, number]> {
+  if (!text || terms.length < 2) return [];
+  const tokens: { start: number; end: number; lower: string }[] = [];
+  const tokRe = /\p{L}[\p{L}\p{N}']*/gu;
+  let m: RegExpExecArray | null;
+  while ((m = tokRe.exec(text)) !== null) {
+    tokens.push({ start: m.index, end: m.index + m[0].length, lower: m[0].toLowerCase() });
+  }
+  if (tokens.length === 0) return [];
+
+  const tokenTermIdx: number[] = new Array(tokens.length).fill(-1);
+  for (let ti = 0; ti < terms.length; ti++) {
+    const t = terms[ti].toLowerCase();
+    const wildcard = t.endsWith('*');
+    const stem = wildcard ? t.slice(0, -1) : t;
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokenTermIdx[i] !== -1) continue;
+      const lower = tokens[i].lower;
+      if (wildcard ? lower.startsWith(stem) : lower === t) {
+        tokenTermIdx[i] = ti;
+      }
+    }
+  }
+
+  const window = prox + 1;
+  const spans: Array<[number, number]> = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokenTermIdx[i] < 0) continue;
+    const lo = Math.max(0, i - window);
+    const hi = Math.min(tokens.length - 1, i + window);
+    for (let j = lo; j <= hi; j++) {
+      if (j === i) continue;
+      const tj = tokenTermIdx[j];
+      if (tj >= 0 && tj !== tokenTermIdx[i]) {
+        spans.push([tokens[i].start, tokens[i].end]);
+        break;
+      }
+    }
+  }
+  return spans;
+}
+
+function Highlighted({
+  text,
+  hl,
+  pattern,
+  nearSpans,
+}: {
+  text: string;
+  hl?: string;
+  pattern: RegExp | null;
+  nearSpans?: ReadonlyArray<readonly [number, number]>;
+}) {
   // Backend sends FTS5 highlight markers «...» that correctly reflect porter-stemmed matches.
   if (hl) {
     const parts = hl.split(/(«[^»]*»)/);
@@ -144,6 +217,25 @@ function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern
         )}
       </>
     );
+  }
+  // NEAR mode: highlight only the precomputed proximity-matched spans.
+  // Passing nearSpans (even if empty) suppresses the OR-regex fallback below,
+  // so single-term occurrences in non-matching paragraphs stay unhighlighted.
+  if (nearSpans) {
+    if (nearSpans.length === 0) return <>{text}</>;
+    const out: React.ReactNode[] = [];
+    let cursor = 0;
+    nearSpans.forEach(([s, e], i) => {
+      if (cursor < s) out.push(<React.Fragment key={`t${i}`}>{text.slice(cursor, s)}</React.Fragment>);
+      out.push(
+        <mark key={`m${i}`} className="bg-yellow-300 dark:bg-yellow-500/40 text-[rgb(var(--fg))] font-bold rounded-sm px-0.5">
+          {text.slice(s, e)}
+        </mark>,
+      );
+      cursor = e;
+    });
+    if (cursor < text.length) out.push(<React.Fragment key="t-end">{text.slice(cursor)}</React.Fragment>);
+    return <>{out}</>;
   }
   if (!pattern) return <>{text}</>;
   const parts = text.split(pattern);
@@ -211,20 +303,36 @@ function SearchPageInner() {
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
-  const firstMatchIndex = useMemo(() => {
-    if (!highlightPattern || !discourse) return -1;
-    const re = new RegExp(highlightPattern.source, 'i');
-    return discourse.paragraphs.findIndex((p) => re.test(p.content));
-  }, [highlightPattern, discourse]);
+  // NEAR mode: parse the submitted FTS5 query into individual terms + window so
+  // we can run proximity-aware highlighting (instead of the OR regex fallback,
+  // which would mark every standalone occurrence of either term).
+  const nearInfo = useMemo(() => extractNearInfo(submittedQuery), [submittedQuery]);
+
+  // Per-paragraph proximity spans, computed once per discourse load. Only
+  // paragraphs with at least one matching pair are present in the map.
+  const nearSpansMap = useMemo(() => {
+    if (!nearInfo || !discourse) return null;
+    const map = new Map<number, Array<[number, number]>>();
+    discourse.paragraphs.forEach((p, idx) => {
+      const spans = findNearHighlights(p.content, nearInfo.terms, nearInfo.prox);
+      if (spans.length > 0) map.set(idx, spans);
+    });
+    return map;
+  }, [nearInfo, discourse]);
 
   // All paragraph indices that contain a match (for next/prev navigation)
   const matchIndices = useMemo(() => {
+    if (nearSpansMap) {
+      return Array.from(nearSpansMap.keys()).sort((a, b) => a - b);
+    }
     if (!highlightPattern || !discourse) return [];
     const re = new RegExp(highlightPattern.source, 'i');
     return discourse.paragraphs
       .map((p, idx) => (re.test(p.content) ? idx : -1))
       .filter((idx) => idx >= 0);
-  }, [highlightPattern, discourse]);
+  }, [highlightPattern, discourse, nearSpansMap]);
+
+  const firstMatchIndex = matchIndices.length > 0 ? matchIndices[0] : -1;
 
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
@@ -927,7 +1035,11 @@ function SearchPageInner() {
                                     : undefined
                               }
                             >
-                              <Highlighted text={p.content} pattern={highlightPattern} />
+                              <Highlighted
+                                text={p.content}
+                                pattern={nearInfo ? null : highlightPattern}
+                                nearSpans={nearInfo ? (nearSpansMap?.get(idx) ?? []) : undefined}
+                              />
                             </p>
                           );
                         })}
