@@ -9,11 +9,21 @@ The FTS table shares the same data/osho.db database.
 Tokenizer choice
 ----------------
 * porter       – English stemming (meditation ↔ meditate ↔ meditating)
-* unicode61    – Unicode-aware tokenisation, handles Devanagari correctly
+* unicode61    – Unicode-aware tokenisation
 * remove_diacritics 1 – strips only Latin-script combining marks (é → e).
   We deliberately do NOT use remove_diacritics 2 which would also strip
   Devanagari matras (ा ि ी …) — that causes unrelated Hindi words to
   collapse to the same token.
+* categories 'L* N* Co Mn Mc' – CRITICAL for Devanagari. Without this,
+  unicode61 defaults to 'L* N* Co' which treats combining marks (Mn, Mc)
+  as token separators. That silently splits every Hindi word at every
+  matra and virama: धर्म → "धर"+"म", विश्वास → "व"+"श"+"व"+"स",
+  धन्य → "धन"+"य". The result was both false positives (a query for
+  "धन" matching "धन्य", "धना", etc.) and false negatives (NEAR queries
+  failing because position math broke after the splits). Adding Mn
+  (nonspacing marks: virama, anusvara, nukta) and Mc (spacing combining
+  marks: vowel matras, visarga) keeps Devanagari words whole. Danda (।)
+  remains a separator (category Po), as expected.
 
 Devanagari normalisation
 ------------------------
@@ -97,7 +107,7 @@ def build():
     cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
     conn.commit()
 
-    print("Creating paragraphs_fts (porter + unicode61, remove_diacritics 1)…", flush=True)
+    print("Creating paragraphs_fts (porter + unicode61, Mn+Mc included)…", flush=True)
     cur.execute(
         """
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
@@ -107,7 +117,7 @@ def build():
             paragraph_id UNINDEXED,
             sequence_number UNINDEXED,
             title_search,
-            tokenize = 'porter unicode61 remove_diacritics 1'
+            tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
         )
         """
     )
