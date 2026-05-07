@@ -909,31 +909,6 @@ function SearchPageInner() {
                         {t('search.detail.showAll', { n: discourse.paragraphs.length })}
                       </summary>
 
-                      {/* Hit navigation controls */}
-                      {matchIndices.length > 0 && (
-                        <div className="mt-3 mb-2 flex items-center gap-3 text-[11px] tracking-[0.2em] uppercase">
-                          <button
-                            type="button"
-                            onClick={() => jumpToMatch(currentMatchPos - 1)}
-                            disabled={currentMatchPos <= 0}
-                            className="px-2 py-1 border border-gold/30 rounded text-gold hover:bg-gold/10 disabled:opacity-30"
-                          >
-                            ← {locale === 'hi' ? 'पिछला' : 'Prev'} (p)
-                          </button>
-                          <span className="text-stone-500 dark:text-ivory/60 tabular-nums font-medium">
-                            {currentMatchPos + 1} / {matchIndices.length} {locale === 'hi' ? 'अंश' : 'hits'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => jumpToMatch(currentMatchPos + 1)}
-                            disabled={currentMatchPos >= matchIndices.length - 1}
-                            className="px-2 py-1 border border-gold/30 rounded text-gold hover:bg-gold/10 disabled:opacity-30"
-                          >
-                            {locale === 'hi' ? 'अगला' : 'Next'} (n) →
-                          </button>
-                        </div>
-                      )}
-
                       <div className="mt-4 space-y-3 text-stone-800 dark:text-ivory/90 leading-relaxed text-[17px]">
                         {discourse.paragraphs.map((p, idx) => {
                           const isMatch = matchIndices.includes(idx);
@@ -962,6 +937,35 @@ function SearchPageInner() {
                           );
                         })}
                       </div>
+
+                      {/* Floating hit navigation — sticks to bottom of discourse pane */}
+                      {matchIndices.length > 0 && (
+                        <div className="sticky bottom-3 z-20 mt-6 flex justify-center pointer-events-none">
+                          <div className="pointer-events-auto flex items-center gap-1 text-[11px] tracking-[0.2em] uppercase backdrop-blur-md bg-[rgb(var(--bg))]/85 border border-gold/40 rounded-full px-2 py-1 shadow-lg shadow-black/20">
+                            <button
+                              type="button"
+                              onClick={() => jumpToMatch(currentMatchPos - 1)}
+                              disabled={currentMatchPos <= 0}
+                              className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                              aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
+                            >
+                              ← {locale === 'hi' ? 'पिछला' : 'Prev'}
+                            </button>
+                            <span className="text-stone-500 dark:text-ivory/70 tabular-nums font-medium px-1.5">
+                              {currentMatchPos + 1} / {matchIndices.length}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => jumpToMatch(currentMatchPos + 1)}
+                              disabled={currentMatchPos >= matchIndices.length - 1}
+                              className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                              aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
+                            >
+                              {locale === 'hi' ? 'अगला' : 'Next'} →
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </details>
                   )}
                 </article>
