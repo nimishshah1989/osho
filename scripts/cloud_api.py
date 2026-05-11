@@ -1,4 +1,3 @@
-# discourse endpoint now supports ?q= for FTS5 highlight markers
 from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
@@ -13,6 +12,16 @@ import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Optional
+
+# Load env vars from .env file in repo root, BEFORE we read os.getenv() below.
+# Lets ADMIN_KEY / OSHO_ENV / ALLOWED_ORIGINS live in a file on disk so it
+# doesn't matter who starts uvicorn (supervisor, watchdog, manual) — the
+# config always comes from the same place. dotenv is in requirements.txt.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+except ImportError:
+    pass  # dotenv is optional — env vars from the shell still work
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, 'data/osho.db')
