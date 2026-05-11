@@ -87,7 +87,7 @@ export default function Nav() {
         </Link>
         <Link href="/help" aria-current={isActive('/help') ? 'page' : undefined} className={linkClass('/help')}>
           <HelpCircle size={14} />
-          <span className="hidden sm:inline">Help</span>
+          <span className="hidden sm:inline">{t('nav.help')}</span>
         </Link>
       </div>
     </nav>

@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
+import { useLocale } from '../../lib/i18n';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,7 @@ function Chip({
 }
 
 function SeriesList({ events }: { events: EnrichedEvent[] }) {
+  const { t } = useLocale();
   const [openSeries, setOpenSeries] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
@@ -183,7 +185,7 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
   }, [events]);
 
   if (!grouped.length) return (
-    <div className="text-center py-8 text-stone-400 dark:text-ivory/40 text-sm">No talks match these filters.</div>
+    <div className="text-center py-8 text-stone-400 dark:text-ivory/40 text-sm">{t('archive.noMatch')}</div>
   );
 
   return (
@@ -203,7 +205,7 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
               <div className="flex-1 min-w-0">
                 <span className="text-[13px] font-medium text-[rgb(var(--fg))] truncate block">{name}</span>
                 <span className="text-[11px] text-stone-400 dark:text-ivory/40">
-                  {talks.length} {talks.length === 1 ? 'talk' : 'talks'}
+                  {talks.length} {talks.length === 1 ? t('archive.talkOne') : t('archive.talkMany')}
                   {talks[0]._city !== 'Unknown' && ` · ${talks[0]._city}`}
                   {talks[0]._lang && talks[0]._lang !== 'English' && ` · ${talks[0]._lang}`}
                 </span>
@@ -246,6 +248,7 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TreeExplorer() {
+  const { t } = useLocale();
   const [rawEvents, setRawEvents]   = useState<Event[]>([]);
   const [loading,   setLoading]     = useState(true);
   const [error,     setError]       = useState<string | null>(null);
@@ -264,7 +267,8 @@ export default function TreeExplorer() {
     fetch('/api/catalog', { cache: 'no-store' })
       .then((r) => r.json())
       .then((d: { events: Event[] }) => { setRawEvents(d.events ?? []); setLoading(false); })
-      .catch(() => { setError('Archive unreachable.'); setLoading(false); });
+      .catch(() => { setError(t('archive.unreachable')); setLoading(false); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const events = useMemo(() => enrich(rawEvents), [rawEvents]);
@@ -335,21 +339,35 @@ export default function TreeExplorer() {
 
   if (loading) return (
     <main className="max-w-4xl mx-auto px-4 pt-28 pb-12 text-center text-stone-400 dark:text-ivory/40 text-sm">
-      Loading archive…
+      {t('archive.loading')}
     </main>
   );
   if (error) return (
     <main className="max-w-4xl mx-auto px-4 pt-28 pb-12 text-center text-red-500 text-sm">{error}</main>
   );
 
+  const summaryKey =
+    groupDim === 'year'  ? 'archive.summary.years'  :
+    groupDim === 'place' ? 'archive.summary.places' :
+                           'archive.summary.themes';
+
+  const dimLabelKey = (d: GroupDim) =>
+    d === 'year'  ? 'archive.byDim.year'  :
+    d === 'place' ? 'archive.byDim.place' :
+                    'archive.byDim.theme';
+
+  const allLabelKey =
+    groupDim === 'year'  ? 'archive.allYears'  :
+    groupDim === 'place' ? 'archive.allPlaces' :
+                           'archive.allThemes';
+
   return (
     <main className="max-w-4xl mx-auto px-4 pt-28 pb-20">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-light text-[rgb(var(--fg))] tracking-wide mb-1">Archive</h1>
+        <h1 className="text-2xl font-light text-[rgb(var(--fg))] tracking-wide mb-1">{t('archive.title')}</h1>
         <p className="text-[13px] text-stone-500 dark:text-ivory/55">
-          {rawEvents.length.toLocaleString()} talks across {topGroups.length}{' '}
-          {groupDim === 'year' ? 'years' : groupDim === 'place' ? 'locations' : 'themes'}
+          {t(summaryKey, { n: rawEvents.length.toLocaleString(), g: topGroups.length })}
         </p>
       </div>
 
@@ -365,7 +383,7 @@ export default function TreeExplorer() {
                 : 'text-stone-400 dark:text-ivory/45 hover:text-gold'
             }`}
           >
-            By {dim}
+            {t(dimLabelKey(dim))}
           </button>
         ))}
       </div>
@@ -377,12 +395,12 @@ export default function TreeExplorer() {
             onClick={() => setSelected(null)}
             className="text-gold hover:underline"
           >
-            All {groupDim === 'year' ? 'Years' : groupDim === 'place' ? 'Places' : 'Themes'}
+            {t(allLabelKey)}
           </button>
           <ChevronRight size={12} className="text-stone-400" />
           <span className="text-[rgb(var(--fg))] font-medium">{selected}</span>
           <span className="text-stone-400 dark:text-ivory/40 ml-2">
-            {filteredEvents.length.toLocaleString()} talks
+            {filteredEvents.length.toLocaleString()} {filteredEvents.length === 1 ? t('archive.talkOne') : t('archive.talkMany')}
           </span>
         </div>
       )}
@@ -410,8 +428,8 @@ export default function TreeExplorer() {
           <div className="space-y-2">
             {secondaryFilters.cities.length > 1 && (
               <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">Place</span>
-                <Chip label="All" active={!filterCity} onClick={() => setFilterCity('')} />
+                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">{t('archive.filter.place')}</span>
+                <Chip label={t('archive.filter.all')} active={!filterCity} onClick={() => setFilterCity('')} />
                 {secondaryFilters.cities.map((c) => (
                   <Chip key={c.label} label={`${c.label} ${c.count}`} active={filterCity === c.label}
                     onClick={() => setFilterCity(filterCity === c.label ? '' : c.label)} />
@@ -420,8 +438,8 @@ export default function TreeExplorer() {
             )}
             {secondaryFilters.years.length > 1 && (
               <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">Year</span>
-                <Chip label="All" active={!filterYear} onClick={() => setFilterYear('')} />
+                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">{t('archive.filter.year')}</span>
+                <Chip label={t('archive.filter.all')} active={!filterYear} onClick={() => setFilterYear('')} />
                 {secondaryFilters.years.map((y) => (
                   <Chip key={y.label} label={`${y.label} · ${y.count}`} active={filterYear === y.label}
                     onClick={() => setFilterYear(filterYear === y.label ? '' : y.label)} />
@@ -430,8 +448,8 @@ export default function TreeExplorer() {
             )}
             {secondaryFilters.themes.length > 1 && (
               <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">Theme</span>
-                <Chip label="All" active={!filterTheme} onClick={() => setFilterTheme('')} />
+                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">{t('archive.filter.theme')}</span>
+                <Chip label={t('archive.filter.all')} active={!filterTheme} onClick={() => setFilterTheme('')} />
                 {secondaryFilters.themes.map((th) => (
                   <Chip key={th.label} label={th.label} active={filterTheme === th.label}
                     color={themeColor(th.label)}
@@ -441,8 +459,8 @@ export default function TreeExplorer() {
             )}
             {secondaryFilters.langs.length > 1 && (
               <div className="flex flex-wrap gap-1.5 items-center">
-                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">Lang</span>
-                <Chip label="All" active={!filterLang} onClick={() => setFilterLang('')} />
+                <span className="text-[10px] tracking-[0.2em] uppercase text-stone-400 dark:text-ivory/40 w-12">{t('archive.filter.lang')}</span>
+                <Chip label={t('archive.filter.all')} active={!filterLang} onClick={() => setFilterLang('')} />
                 {secondaryFilters.langs.map((l) => (
                   <Chip key={l.label} label={l.label} active={filterLang === l.label}
                     onClick={() => setFilterLang(filterLang === l.label ? '' : l.label)} />

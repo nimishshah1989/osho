@@ -440,6 +440,22 @@ function SearchPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [langFilter]);
 
+  // Debounced auto-rerun when the user edits the date range (year inputs).
+  // Without this the filter looks broken: you type 1972 → nothing happens
+  // until you toggle another control. 400ms is long enough to finish typing
+  // a 4-digit year without firing on every keystroke.
+  const isMountedDateRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedDateRef.current) { isMountedDateRef.current = true; return; }
+    if (!query.trim()) return;
+    const handle = setTimeout(() => {
+      const { searchTerm } = expandQuery(query.trim(), mode);
+      void runSearch(searchTerm, sort, mode, proximity);
+    }, 400);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dateFrom, dateTo]);
+
   const selectEvent = (eventId: string) => {
     if (results) {
       const ev = results.events.find(e => e.event_id === eventId);
@@ -535,7 +551,7 @@ function SearchPageInner() {
                   <HindiInput
                     value={query}
                     onChange={setQuery}
-                    onSubmit={() => doSearch(query)}
+                    onSubmit={(v) => doSearch(v ?? query)}
                     placeholder={placeholder}
                     className="w-full bg-transparent border-b-2 border-gold/40 py-4 pr-12 text-xl md:text-2xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     disabled={loading}
