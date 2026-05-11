@@ -24,6 +24,13 @@ ALLOWED_ORIGINS = [
 ]
 
 ADMIN_KEY = os.getenv("ADMIN_KEY", "osho-admin")
+OSHO_ENV = os.getenv("OSHO_ENV", "development")
+
+if OSHO_ENV == "production" and (not ADMIN_KEY or ADMIN_KEY == "osho-admin"):
+    raise RuntimeError(
+        "ADMIN_KEY must be set to a non-default value when OSHO_ENV=production. "
+        "Refusing to start with the default key — it would let anyone edit/delete events."
+    )
 
 # Tags used for auto-classification on ingest
 _ADMIN_TOPIC_TAGS: dict[str, str] = {
@@ -522,8 +529,15 @@ def search(
                     if ev_id not in events:
                         events[ev_id] = cev
 
+        # Count strategy:
+        #   - Cross-paragraph NEAR augmentation (dist >= 100) can add events
+        #     that FTS5 alone wouldn't return, so we must derive counts from
+        #     the merged events dict.
+        #   - Otherwise (all-words / phrase / narrow NEAR), derive counts from
+        #     a separate COUNT(*) over the FTS index — this is unlimited and
+        #     stays accurate even when the main SELECT is capped by LIMIT.
         near_words, near_dist = near_parsed if near_parsed else (None, 0)
-        if near_parsed and near_dist >= 30:
+        if near_parsed and near_dist >= 100:
             total_events = len(events)
             total_hits = sum(e["hit_count"] for e in events.values())
         else:
@@ -899,13 +913,31 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
             " VALUES (?, ?, ?, 0)",
             [(event_id, seq, para, 0) for seq, para in enumerate(paragraphs, 1)],
         )
+        # FTS rows must use the normalised form so anusvara/nasal-virama variants
+        # search identically. Raw paragraphs keep the original spelling for display.
         norm_title = _normalize_devanagari(title)
-        conn.execute("""
+        para_rows = conn.execute(
+            "SELECT id, sequence_number, content FROM paragraphs WHERE event_id = ?",
+            (event_id,),
+        ).fetchall()
+        conn.executemany(
+            """
             INSERT INTO paragraphs_fts
                 (content, title, event_id, paragraph_id, sequence_number, title_search)
-            SELECT content, ?, event_id, id, sequence_number, ?
-            FROM paragraphs WHERE event_id = ?
-        """, (norm_title, norm_title, event_id))
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    _normalize_devanagari(content or ""),
+                    norm_title,
+                    event_id,
+                    pid,
+                    seq,
+                    norm_title,
+                )
+                for pid, seq, content in para_rows
+            ],
+        )
         conn.executemany(
             "INSERT OR IGNORE INTO event_tags (event_id, tag) VALUES (?, ?)",
             [(event_id, tag) for tag in all_tags],

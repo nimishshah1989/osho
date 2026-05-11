@@ -93,6 +93,32 @@ const EN: Dict = {
   'read.error': 'Discourse unavailable',
   'read.empty': 'This discourse has no paragraphs indexed yet.',
   'read.searchInstead': 'Search for this instead',
+
+  'nav.help': 'Help',
+
+  // Archive page
+  'archive.unreachable': 'Archive unreachable.',
+  'archive.byDim.theme': 'By theme',
+  'archive.byDim.year': 'By year',
+  'archive.byDim.place': 'By place',
+  'archive.allYears': 'All Years',
+  'archive.allPlaces': 'All Places',
+  'archive.allThemes': 'All Themes',
+  'archive.filter.place': 'Place',
+  'archive.filter.year': 'Year',
+  'archive.filter.theme': 'Theme',
+  'archive.filter.lang': 'Lang',
+  'archive.filter.all': 'All',
+  'archive.summary.years': '{n} talks across {g} years',
+  'archive.summary.places': '{n} talks across {g} locations',
+  'archive.summary.themes': '{n} talks across {g} themes',
+  'archive.noMatch': 'No talks match these filters.',
+  'archive.talkOne': 'talk',
+  'archive.talkMany': 'talks',
+
+  // Help page
+  'help.title': 'Search Guide',
+  'help.kicker': 'Osho Discourse Search',
 };
 
 const HI: Dict = {
@@ -175,6 +201,32 @@ const HI: Dict = {
   'read.error': 'प्रवचन उपलब्ध नहीं',
   'read.empty': 'इस प्रवचन के अंश अभी तैयार नहीं हैं।',
   'read.searchInstead': 'इसके बदले खोज में देखो',
+
+  'nav.help': 'मदद',
+
+  // Archive page
+  'archive.unreachable': 'संग्रह उपलब्ध नहीं।',
+  'archive.byDim.theme': 'विषय से',
+  'archive.byDim.year': 'साल से',
+  'archive.byDim.place': 'जगह से',
+  'archive.allYears': 'सभी साल',
+  'archive.allPlaces': 'सभी जगह',
+  'archive.allThemes': 'सभी विषय',
+  'archive.filter.place': 'जगह',
+  'archive.filter.year': 'साल',
+  'archive.filter.theme': 'विषय',
+  'archive.filter.lang': 'भाषा',
+  'archive.filter.all': 'सभी',
+  'archive.summary.years': '{g} साल में {n} प्रवचन',
+  'archive.summary.places': '{g} जगहों पर {n} प्रवचन',
+  'archive.summary.themes': '{g} विषयों पर {n} प्रवचन',
+  'archive.noMatch': 'इन छानने वालों से कोई प्रवचन नहीं मिला।',
+  'archive.talkOne': 'प्रवचन',
+  'archive.talkMany': 'प्रवचन',
+
+  // Help page
+  'help.title': 'खोज की पुस्तिका',
+  'help.kicker': 'ओशो प्रवचन खोज',
 };
 
 const DICTS: Record<Locale, Dict> = { en: EN, hi: HI };

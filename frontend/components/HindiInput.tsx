@@ -14,7 +14,12 @@ import { romanToDevanagari } from '../lib/transliterate';
 interface HindiInputProps {
   value: string;
   onChange: (value: string) => void;
-  onSubmit: () => void;
+  // onSubmit receives the converted value explicitly. When called without an
+  // argument the consumer should fall back to its own current `value`. Passing
+  // the converted text through avoids the stale-closure bug where pressing
+  // Enter mid-conversion would submit the un-converted Roman string before
+  // React had a chance to commit the setState from onChange().
+  onSubmit: (value?: string) => void;
   placeholder?: string;
   className?: string;
   disabled?: boolean;
@@ -126,7 +131,7 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
             if (lastRomanWord && suggestions.length > 0) {
               const converted = commitWord(0);
               onChange(converted);
-              setTimeout(onSubmit, 0);
+              setTimeout(() => onSubmit(converted), 0);
             } else {
               onSubmit();
             }
@@ -153,7 +158,7 @@ const HindiInput = forwardRef<HindiInputHandle, HindiInputProps>(
             {
               const converted = commitWord(selectedSuggestion);
               onChange(converted);
-              setTimeout(onSubmit, 0);
+              setTimeout(() => onSubmit(converted), 0);
             }
             break;
           case 'Escape':
