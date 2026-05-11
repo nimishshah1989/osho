@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Inter, Noto_Sans_Devanagari } from "next/font/google";
 import Script from "next/script";
 import "../styles/globals.css";
 import { LocaleProvider } from "../lib/i18n";
@@ -7,6 +7,18 @@ import { ThemeProvider } from "../lib/theme";
 import { GA_ID } from "../lib/analytics";
 
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
+
+// Inter has no Devanagari glyphs; without a dedicated Devanagari webfont the
+// browser falls back to whatever the user's OS provides (Mangal on Windows,
+// Devanagari MT on Mac, varies on Linux), producing inconsistent and sometimes
+// broken glyphs for marks like ्. Loading Noto Sans Devanagari guarantees a
+// consistent, well-shaped rendering for every reader.
+const notoDevanagari = Noto_Sans_Devanagari({
+  subsets: ["devanagari"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-devanagari",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Osho Discourse Search — Every Word, Verbatim",
@@ -38,7 +50,7 @@ export default function RootLayout({
         {/* eslint-disable-next-line react/no-danger */}
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
-      <body className={`${inter.variable} font-sans`}>
+      <body className={`${inter.variable} ${notoDevanagari.variable} font-sans`}>
         <Script
           src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
           strategy="afterInteractive"

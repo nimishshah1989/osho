@@ -7,7 +7,10 @@
   /* Light mode: warm off-white bg, very dark text for elderly readability */
   --bg: 248, 247, 244;
   --fg: 15, 12, 10;
-  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
+  /* Stack Inter (Latin) then Noto Sans Devanagari so the browser picks each
+     glyph from the first font that has it — Latin from Inter, Devanagari from
+     Noto. Without Noto, Devanagari falls back to OS fonts (inconsistent). */
+  --font-sans: var(--font-inter), var(--font-devanagari), -apple-system, BlinkMacSystemFont, sans-serif;
 
   /* Dark amber for high contrast on light bg — WCAG AA+ (≈7:1) */
   --gold: 100, 75, 0;
