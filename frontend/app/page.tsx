@@ -80,7 +80,14 @@ const HAS_DEVANAGARI = /[\u0900-\u097F]/;
 function buildQuery(raw: string, mode: Mode, prox: number): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
-  if (mode === 'phrase') return `"${trimmed.replace(/"/g, '')}"`;
+  if (mode === 'phrase') {
+    // If the value has already been OR-expanded by expandQuery (single Hindi
+    // word → `(रूद्र OR रुद्र)`), don't wrap it in quotes — you can't OR
+    // inside a phrase. Multi-word phrases like "love is god" still get
+    // the phrase wrap so word order is preserved.
+    if (trimmed.startsWith('(') && trimmed.includes(' OR ')) return trimmed;
+    return `"${trimmed.replace(/"/g, '')}"`;
+  }
   if (mode === 'near') {
     const words = trimmed.split(/\s+/).filter(Boolean);
     if (words.length < 2) return trimmed;
@@ -264,7 +271,15 @@ function SearchPageInner() {
       const isRoman = locale === 'hi' && /[a-zA-Z]/.test(raw);
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
-      const searchTerm = hasDevanagari && m === 'all' ? buildHindiFtsQuery(devanagari) : devanagari;
+      // OR-expand Hindi vowel-length and anusvara variants:
+      //   - always for 'all words' mode
+      //   - also for 'phrase' mode when there's only a single word, since
+      //     there's no real phrase to preserve and users expect `Rudra` to
+      //     match both रुद्र and रूद्र regardless of mode pill
+      const isSingleWord = !/\s/.test(devanagari.trim());
+      const shouldExpand =
+        hasDevanagari && (m === 'all' || (m === 'phrase' && isSingleWord));
+      const searchTerm = shouldExpand ? buildHindiFtsQuery(devanagari) : devanagari;
       return { devanagari, searchTerm };
     },
     [locale],
