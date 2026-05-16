@@ -199,6 +199,7 @@ function SearchPageInner() {
       ? initialProxParam
       : DEFAULT_PROX;
   const initialLang = searchParams?.get('lang') ?? '';
+  const initialExact = searchParams?.get('exact') === '1';
   const initialDateFrom = searchParams?.get('from') ?? '';
   const initialDateTo = searchParams?.get('to') ?? '';
 
@@ -208,6 +209,7 @@ function SearchPageInner() {
   const [proximity, setProximity] = useState<number>(initialProx);
   const [sort, setSort] = useState<Sort>(initialSort);
   const [langFilter, setLangFilter] = useState(initialLang);
+  const [exactMatch, setExactMatch] = useState<boolean>(initialExact);
   const [dateFrom, setDateFrom] = useState(initialDateFrom);
   const [dateTo, setDateTo] = useState(initialDateTo);
   const [results, setResults] = useState<SearchResponse | null>(null);
@@ -252,9 +254,22 @@ function SearchPageInner() {
 
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
+  // When the user steps off the end of one discourse, we navigate to the
+  // adjacent one and need the new discourse to land focused on either its
+  // first or last match. The load is async (the matchIndices effect below
+  // runs once the new discourse arrives), so we stash the intent here.
+  const pendingJumpRef = useRef<'first' | 'last' | null>(null);
 
   useEffect(() => {
-    setCurrentMatchPos(0);
+    if (matchIndices.length === 0) {
+      setCurrentMatchPos(0);
+      pendingJumpRef.current = null;
+      return;
+    }
+    const pos =
+      pendingJumpRef.current === 'last' ? matchIndices.length - 1 : 0;
+    setCurrentMatchPos(pos);
+    pendingJumpRef.current = null;
   }, [matchIndices]);
 
   const jumpToMatch = useCallback(
@@ -280,12 +295,17 @@ function SearchPageInner() {
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
       const isSingleWord = !/\s/.test(devanagari.trim());
+      // In exact-match mode the backend hits an un-normalised FTS index, so
+      // we must NOT expand vowel-length / anusvara variants either — doing
+      // so would broaden the match the user explicitly asked to narrow.
       const shouldExpand =
-        hasDevanagari && (m === 'all' || (m === 'phrase' && isSingleWord));
+        !exactMatch
+        && hasDevanagari
+        && (m === 'all' || (m === 'phrase' && isSingleWord));
       const searchTerm = shouldExpand ? buildHindiFtsQuery(devanagari) : devanagari;
       return { devanagari, searchTerm };
     },
-    [locale, langFilter],
+    [locale, langFilter, exactMatch],
   );
 
   const syncUrl = useCallback(
@@ -297,12 +317,13 @@ function SearchPageInner() {
       if (m !== 'all') params.set('mode', m);
       if (m === 'near' && prox !== DEFAULT_PROX) params.set('prox', String(prox));
       if (langFilter) params.set('lang', langFilter);
+      if (exactMatch) params.set('exact', '1');
       if (dateFrom) params.set('from', dateFrom);
       if (dateTo) params.set('to', dateTo);
       const qs = params.toString();
       router.replace(qs ? `/?${qs}` : '/', { scroll: false });
     },
-    [router, langFilter, dateFrom, dateTo],
+    [router, langFilter, exactMatch, dateFrom, dateTo],
   );
 
   const runSearch = useCallback(
@@ -322,6 +343,7 @@ function SearchPageInner() {
         } else if (langFilter) {
           params.set('language', langFilter);
         }
+        if (exactMatch) params.set('exact', 'true');
         if (dateFrom) params.set('date_from', dateFrom);
         if (dateTo) params.set('date_to', dateTo);
         const r = await fetch(`/api/ask?${params.toString()}`);
@@ -348,7 +370,7 @@ function SearchPageInner() {
         setLoading(false);
       }
     },
-    [langFilter, dateFrom, dateTo],
+    [langFilter, dateFrom, dateTo, exactMatch],
   );
 
   useEffect(() => {
@@ -466,6 +488,19 @@ function SearchPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [langFilter]);
 
+  // Same effect for the Exact-match toggle — flipping the pill re-issues
+  // the search against the (un)stemmed index without the user having to
+  // hit Enter again.
+  const isMountedExactRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedExactRef.current) { isMountedExactRef.current = true; return; }
+    if (query.trim()) {
+      const { searchTerm } = expandQuery(query.trim(), mode);
+      void runSearch(searchTerm, sort, mode, proximity);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exactMatch]);
+
   // Debounced auto-rerun when the user edits the date range (year inputs).
   // Without this the filter looks broken: you type 1972 → nothing happens
   // until you toggle another control. 400ms is long enough to finish typing
@@ -514,6 +549,30 @@ function SearchPageInner() {
     [results, selectedEventId],
   );
 
+  // Step one match forward / back, crossing into the adjacent discourse
+  // when we're already at the end / start. Mirrors how OCTP and the
+  // CD-ROM behave so a single "Next" press eventually walks through every
+  // matched paragraph across every matched discourse. (Sugit 2026-05-16.)
+  const jumpToMatchAcross = useCallback(
+    (direction: 1 | -1) => {
+      const next = currentMatchPos + direction;
+      if (next >= 0 && next < matchIndices.length) {
+        jumpToMatch(next);
+        return;
+      }
+      if (!results || !results.events.length) return;
+      const currentIdx = results.events.findIndex(
+        (e) => e.event_id === selectedEventId,
+      );
+      const targetIdx = currentIdx + direction;
+      if (targetIdx < 0 || targetIdx >= results.events.length) return;
+      pendingJumpRef.current = direction === -1 ? 'last' : 'first';
+      selectEvent(results.events[targetIdx].event_id);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [currentMatchPos, matchIndices, jumpToMatch, results, selectedEventId],
+  );
+
   const clearSelection = () => {
     setSelectedEventId('');
     syncUrl(query.trim(), sort, '', mode, proximity);
@@ -527,11 +586,22 @@ function SearchPageInner() {
     }
   };
 
-  // Keyboard shortcuts: j/k or arrow keys for hit navigation
+  // Keyboard shortcuts:
+  //   ← / →           — step one match back / forward, crossing into the
+  //                     adjacent discourse at the boundary (Sugit 2026-05-16).
+  //   j / n           — step forward, within current discourse only.
+  //   k / p           — step back,   within current discourse only.
+  //   Alt+↑ / Alt+↓   — jump to previous / next discourse in the result list.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'n' || e.key === 'j') {
+      if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        jumpToMatchAcross(1);
+      } else if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        jumpToMatchAcross(-1);
+      } else if (e.key === 'n' || e.key === 'j') {
         e.preventDefault();
         jumpToMatch(currentMatchPos + 1);
       } else if (e.key === 'p' || e.key === 'k') {
@@ -547,7 +617,7 @@ function SearchPageInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [jumpToMatch, currentMatchPos, navigateEvent]);
+  }, [jumpToMatch, jumpToMatchAcross, currentMatchPos, navigateEvent]);
 
   const selectedEvent = results?.events.find((e) => e.event_id === selectedEventId) ?? null;
   const selectedIdx = results?.events.findIndex((e) => e.event_id === selectedEventId) ?? -1;
@@ -731,6 +801,43 @@ function SearchPageInner() {
                     {label}
                   </button>
                 ))}
+              </div>
+
+              {/* Stemmed vs Exact toggle — Sugit 2026-05-16. When off
+                  (default), porter stemming + Devanagari normalisation are
+                  applied so "teach" matches teacher/teaching/teaches and
+                  अनन्त matches अनंत. When on, the backend hits an
+                  un-stemmed/un-normalised parallel FTS index so the query
+                  matches literally — what OCTP and the CD-ROM do. */}
+              <div className="flex items-center gap-3">
+                <span className="text-stone-500 dark:text-ivory/60">
+                  {t('search.exact.label')}:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setExactMatch(false)}
+                  title={t('search.exact.stemmed.tooltip')}
+                  className={
+                    !exactMatch
+                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
+                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
+                  }
+                >
+                  {t('search.exact.stemmed')}
+                </button>
+                <span className="opacity-20">|</span>
+                <button
+                  type="button"
+                  onClick={() => setExactMatch(true)}
+                  title={t('search.exact.exact.tooltip')}
+                  className={
+                    exactMatch
+                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
+                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
+                  }
+                >
+                  {t('search.exact.exact')}
+                </button>
               </div>
 
               {/* Date range */}
@@ -993,34 +1100,53 @@ function SearchPageInner() {
                         })}
                       </div>
 
-                      {/* Floating hit navigation — sticks to bottom of discourse pane */}
-                      {matchIndices.length > 0 && (
-                        <div className="sticky bottom-3 z-20 mt-6 flex justify-center pointer-events-none">
-                          <div className="pointer-events-auto flex items-center gap-1 text-[11px] tracking-[0.2em] uppercase backdrop-blur-md bg-[rgb(var(--bg))]/85 border border-gold/40 rounded-full px-2 py-1 shadow-lg shadow-black/20">
-                            <button
-                              type="button"
-                              onClick={() => jumpToMatch(currentMatchPos - 1)}
-                              disabled={currentMatchPos <= 0}
-                              className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
-                              aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
-                            >
-                              ← {locale === 'hi' ? 'पिछला' : 'Prev'}
-                            </button>
-                            <span className="text-stone-500 dark:text-ivory/70 tabular-nums font-medium px-1.5">
-                              {currentMatchPos + 1} / {matchIndices.length}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => jumpToMatch(currentMatchPos + 1)}
-                              disabled={currentMatchPos >= matchIndices.length - 1}
-                              className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
-                              aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
-                            >
-                              {locale === 'hi' ? 'अगला' : 'Next'} →
-                            </button>
+                      {/* Floating hit navigation — sticks to bottom of discourse pane.
+                          Prev / Next cross into the adjacent record once the current
+                          record's matches are exhausted (Sugit 2026-05-16, matches
+                          OCTP and CD-ROM behaviour). Buttons are only disabled when
+                          we're at the very first / last match of the very first / last
+                          record in the result list. */}
+                      {matchIndices.length > 0 && (() => {
+                        const totalEvents = results?.events.length ?? 0;
+                        const atFirstEvent = selectedIdx <= 0;
+                        const atLastEvent = selectedIdx >= totalEvents - 1;
+                        const atFirstMatch = currentMatchPos <= 0;
+                        const atLastMatch = currentMatchPos >= matchIndices.length - 1;
+                        const prevDisabled = atFirstMatch && atFirstEvent;
+                        const nextDisabled = atLastMatch && atLastEvent;
+                        return (
+                          <div className="sticky bottom-3 z-20 mt-6 flex justify-center pointer-events-none">
+                            <div className="pointer-events-auto flex items-center gap-1 text-[11px] tracking-[0.2em] uppercase backdrop-blur-md bg-[rgb(var(--bg))]/85 border border-gold/40 rounded-full px-2 py-1 shadow-lg shadow-black/20">
+                              <button
+                                type="button"
+                                onClick={() => jumpToMatchAcross(-1)}
+                                disabled={prevDisabled}
+                                className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                                aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
+                                title={locale === 'hi' ? 'पिछला मिलान (←)' : 'Previous match (←)'}
+                              >
+                                ← {locale === 'hi' ? 'पिछला' : 'Prev'}
+                              </button>
+                              <span className="text-stone-500 dark:text-ivory/70 tabular-nums font-medium px-1.5">
+                                {currentMatchPos + 1} / {matchIndices.length}
+                                {totalEvents > 1 && (
+                                  <span className="opacity-50">  · {selectedIdx + 1}/{totalEvents}</span>
+                                )}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => jumpToMatchAcross(1)}
+                                disabled={nextDisabled}
+                                className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                                aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
+                                title={locale === 'hi' ? 'अगला मिलान (→)' : 'Next match (→)'}
+                              >
+                                {locale === 'hi' ? 'अगला' : 'Next'} →
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </details>
                   )}
                 </article>

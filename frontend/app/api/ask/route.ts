@@ -23,6 +23,8 @@ export async function GET(req: Request) {
   if (language) params.set('language', language);
   const original = searchParams.get('original');
   if (original) params.set('original', original);
+  const exact = searchParams.get('exact');
+  if (exact) params.set('exact', exact);
   const dateFrom = searchParams.get('date_from');
   if (dateFrom) params.set('date_from', dateFrom);
   const dateTo = searchParams.get('date_to');

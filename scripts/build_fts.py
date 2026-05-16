@@ -103,11 +103,26 @@ def build():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    print("Dropping existing FTS table (if any)…", flush=True)
+    print("Dropping existing FTS tables (if any)…", flush=True)
     cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
+    cur.execute("DROP TABLE IF EXISTS paragraphs_fts_exact")
     conn.commit()
 
-    print("Creating paragraphs_fts (porter + unicode61, Mn+Mc included)…", flush=True)
+    # Two parallel FTS5 tables side by side:
+    #
+    #   paragraphs_fts        — porter stemming (English) + Devanagari
+    #                           normalisation at index time. Default search.
+    #                           "teach" matches teacher / teaching / teaches;
+    #                           अनन्त matches अनंत.
+    #   paragraphs_fts_exact  — no porter, no normalisation. Used when the
+    #                           UI sends `exact=true` so reviewers can find
+    #                           a specific spelling literally, the way OCTP
+    #                           and the CD-ROM do.
+    #
+    # Doubles disk usage but the row data is shared and FTS5's term index
+    # is compact, so the increase is modest (~30%) and the alternative —
+    # querying-time post-filtering — would be much slower and uglier.
+    print("Creating paragraphs_fts (porter + unicode61, Mn+Mc)…", flush=True)
     cur.execute(
         """
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
@@ -121,10 +136,24 @@ def build():
         )
         """
     )
+    print("Creating paragraphs_fts_exact (no porter, no normalisation)…", flush=True)
+    cur.execute(
+        """
+        CREATE VIRTUAL TABLE paragraphs_fts_exact USING fts5(
+            content,
+            title       UNINDEXED,
+            event_id    UNINDEXED,
+            paragraph_id UNINDEXED,
+            sequence_number UNINDEXED,
+            title_search,
+            tokenize = "unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
+        )
+        """
+    )
     conn.commit()
 
     (total,) = cur.execute("SELECT COUNT(*) FROM paragraphs").fetchone()
-    print(f"Indexing {total:,} paragraphs…", flush=True)
+    print(f"Indexing {total:,} paragraphs into both tables…", flush=True)
 
     batch_size = 10_000
     inserted = 0
@@ -143,13 +172,23 @@ def build():
         if not rows:
             break
 
-        # Normalise Devanagari in both content and title before indexing so
-        # that अनन्त and अनंत (etc.) produce the same FTS tokens.
-        normalised = []
+        # paragraphs_fts gets Devanagari-normalised text so anusvara and
+        # nasal-virama variants collapse into one token at index time.
+        # paragraphs_fts_exact gets the *original* text so the reviewer
+        # can find the exact spelling they typed.
+        normalised: list[tuple] = []
+        exact: list[tuple] = []
         for r in rows:
-            content = normalize_devanagari(r[3] or '')
-            title   = normalize_devanagari(r[4] or '')
-            normalised.append((content, title, r[1], r[0], r[2], title))
+            content_raw = r[3] or ''
+            title_raw = r[4] or ''
+            content_norm = normalize_devanagari(content_raw)
+            title_norm = normalize_devanagari(title_raw)
+            normalised.append(
+                (content_norm, title_norm, r[1], r[0], r[2], title_norm)
+            )
+            exact.append(
+                (content_raw, title_raw, r[1], r[0], r[2], title_raw)
+            )
 
         cur.executemany(
             """
@@ -159,6 +198,14 @@ def build():
             """,
             normalised,
         )
+        cur.executemany(
+            """
+            INSERT INTO paragraphs_fts_exact
+                (content, title, event_id, paragraph_id, sequence_number, title_search)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            exact,
+        )
         conn.commit()
 
         inserted += len(rows)
@@ -166,8 +213,9 @@ def build():
         pct = (inserted / total) * 100 if total else 100
         print(f"  {inserted:,}/{total:,} ({pct:.1f}%)", flush=True)
 
-    print("Optimising FTS index…", flush=True)
+    print("Optimising FTS indices…", flush=True)
     cur.execute("INSERT INTO paragraphs_fts(paragraphs_fts) VALUES('optimize')")
+    cur.execute("INSERT INTO paragraphs_fts_exact(paragraphs_fts_exact) VALUES('optimize')")
     conn.commit()
     conn.close()
     print(f"Done in {time.perf_counter() - t0:.1f}s", flush=True)

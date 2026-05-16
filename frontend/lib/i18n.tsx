@@ -66,6 +66,13 @@ const EN: Dict = {
   'search.lang.original': 'Original',
   'search.lang.original.tooltip':
     'Only records Osho originally gave in their language (excludes translations).',
+  'search.exact.label': 'Spelling',
+  'search.exact.stemmed': 'Stemmed',
+  'search.exact.exact': 'Exact',
+  'search.exact.stemmed.tooltip':
+    'Default: "teach" finds teacher / teaching / teaches; अनन्त matches अनंत.',
+  'search.exact.exact.tooltip':
+    'Find the literal word, like OCTP and the CD-ROM. "teach" matches only "teach".',
   'search.translit.toggle': 'Type in Roman (phonetic)',
   'search.translit.preview': 'Hindi preview',
 
@@ -177,6 +184,13 @@ const HI: Dict = {
   'search.lang.original': 'मूल',
   'search.lang.original.tooltip':
     'सिर्फ़ वे प्रवचन जो ओशो ने मूल रूप से इसी भाषा में दिए (अनुवाद नहीं)।',
+  'search.exact.label': 'वर्तनी',
+  'search.exact.stemmed': 'स्टेम्ड',
+  'search.exact.exact': 'सटीक',
+  'search.exact.stemmed.tooltip':
+    'डिफ़ॉल्ट: "teach" → teacher / teaching / teaches; अनन्त = अनंत।',
+  'search.exact.exact.tooltip':
+    'जैसा OCTP और CD-ROM में होता है — शब्द को बिल्कुल वैसा ही ढूंढो।',
   'search.translit.toggle': 'रोमन में लिखो (उच्चारण से)',
   'search.translit.preview': 'हिंदी में',
 

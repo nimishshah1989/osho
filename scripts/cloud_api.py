@@ -195,9 +195,16 @@ def _normalize_devanagari(text: str) -> str:
 _TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
 
 
-def _rewrite_query(user_query: str) -> str:
+def _rewrite_query(user_query: str, exact: bool = False) -> str:
+    """Normalise the user's query for FTS5.
+
+    When `exact` is False (default) we apply Devanagari nasal-virama →
+    anusvara collapsing so अनन्त and अनंत find each other. When `exact`
+    is True we leave the text alone so the reviewer can find the literal
+    spelling they typed — the paragraphs_fts_exact index they're hitting
+    in that mode was built with the same hands-off policy."""
     q = _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
-    return _normalize_devanagari(q)
+    return q if exact else _normalize_devanagari(q)
 
 
 # ─── Cross-paragraph NEAR support ────────────────────────────────────────────
@@ -276,6 +283,7 @@ def _augment_near_adjacent_strict(
     near_dist: int,
     where_extra: str,
     filter_params: list,
+    fts_table: str = "paragraphs_fts",
 ) -> dict:
     """Find pairs of *adjacent* paragraphs whose tokens span a NEAR match.
 
@@ -293,13 +301,24 @@ def _augment_near_adjacent_strict(
 
     Only handles len(words) == 2. For 3+-word NEAR, fall back to the
     existing paragraph-span heuristic via `_augment_near_cross_paragraph`.
+
+    `fts_table` selects the stemmed (default) or exact FTS index. The
+    name is taken only from the closed set
+    {paragraphs_fts, paragraphs_fts_exact}, never from user input — so
+    the f-string SQL stays injection-safe.
     """
     if len(words) != 2:
         return {}
+    if fts_table not in ("paragraphs_fts", "paragraphs_fts_exact"):
+        raise ValueError(f"unsupported fts_table: {fts_table!r}")
+    # In exact mode we don't normalise Devanagari at index time, so we must
+    # not normalise at query time either — otherwise the query token won't
+    # match the stored token.
+    word_norm = (lambda s: s) if fts_table.endswith("_exact") else _normalize_devanagari
 
     per_word: list[dict[str, dict[int, dict]]] = []
     for word in words:
-        word_fts = _normalize_devanagari(word)
+        word_fts = word_norm(word)
         try:
             wrows = conn.execute(
                 f"""
@@ -309,11 +328,11 @@ def _augment_near_adjacent_strict(
                     f.paragraph_id,
                     f.content,
                     p.role AS role,
-                    highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl
-                FROM paragraphs_fts f
+                    highlight({fts_table}, 0, '\x02', '\x03') AS hl
+                FROM {fts_table} f
                 LEFT JOIN events e ON e.id = f.event_id
                 LEFT JOIN paragraphs p ON p.id = f.paragraph_id
-                WHERE paragraphs_fts MATCH ?
+                WHERE {fts_table} MATCH ?
                 {where_extra}
                 """,
                 ([word_fts] + filter_params),
@@ -409,17 +428,22 @@ def _augment_near_cross_paragraph(
     para_span: int,
     where_extra: str,
     filter_params: list,
+    fts_table: str = "paragraphs_fts",
 ) -> dict:
+    if fts_table not in ("paragraphs_fts", "paragraphs_fts_exact"):
+        raise ValueError(f"unsupported fts_table: {fts_table!r}")
+    word_norm = (lambda s: s) if fts_table.endswith("_exact") else _normalize_devanagari
+
     per_word: list[dict[int, list[int]]] = []
     for word in words:
-        word_fts = _normalize_devanagari(word)
+        word_fts = word_norm(word)
         try:
             wrows = conn.execute(
                 f"""
                 SELECT f.event_id, f.sequence_number
-                FROM paragraphs_fts f
+                FROM {fts_table} f
                 LEFT JOIN events e ON e.id = f.event_id
-                WHERE paragraphs_fts MATCH ?
+                WHERE {fts_table} MATCH ?
                 {where_extra}
                 """,
                 ([word_fts] + filter_params),
@@ -615,13 +639,24 @@ def search(
             "language (translated_from is NULL or 'none')."
         ),
     ),
+    exact: bool = Query(
+        False,
+        description=(
+            "When true, search the un-stemmed / un-normalised FTS index. "
+            "'teach' matches only 'teach' (not 'teacher' or 'teaching'); "
+            "'अनन्त' matches only 'अनन्त' (not 'अनंत')."
+        ),
+    ),
     date_from: Optional[str] = Query(None, description="Start date YYYY or YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="End date YYYY or YYYY-MM-DD"),
 ):
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=503, detail="Archive unavailable.")
 
-    fts_query = _rewrite_query(q)
+    # Resolve which FTS table to hit. The names are hard-coded — never
+    # interpolated from user input — so the f-strings below are safe.
+    fts_table = "paragraphs_fts_exact" if exact else "paragraphs_fts"
+    fts_query = _rewrite_query(q, exact=exact)
     if not fts_query:
         raise HTTPException(status_code=400, detail="Empty query.")
 
@@ -666,17 +701,17 @@ def search(
                     f.paragraph_id,
                     f.sequence_number,
                     f.content,
-                    highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl,
+                    highlight({fts_table}, 0, '\x02', '\x03') AS hl,
                     f.title,
                     e.date,
                     e.location,
                     e.language,
                     p.role AS role,
-                    bm25(paragraphs_fts) AS rank
-                FROM paragraphs_fts f
+                    bm25({fts_table}) AS rank
+                FROM {fts_table} f
                 LEFT JOIN events e ON e.id = f.event_id
                 LEFT JOIN paragraphs p ON p.id = f.paragraph_id
-                WHERE paragraphs_fts MATCH ?
+                WHERE {fts_table} MATCH ?
                 {where_extra}
                 ORDER BY rank
                 LIMIT ?
@@ -729,7 +764,8 @@ def search(
             # something FTS5's row-bound NEAR cannot find on its own.
             if len(near_words) == 2:
                 adj = _augment_near_adjacent_strict(
-                    conn, near_words, near_dist, where_extra, filter_params
+                    conn, near_words, near_dist, where_extra, filter_params,
+                    fts_table=fts_table,
                 )
                 for ev_id, cev in adj.items():
                     if ev_id not in events:
@@ -738,7 +774,8 @@ def search(
             if near_dist >= 100:
                 para_span = max(1, near_dist // 30)
                 cross = _augment_near_cross_paragraph(
-                    conn, near_words, para_span, where_extra, filter_params
+                    conn, near_words, para_span, where_extra, filter_params,
+                    fts_table=fts_table,
                 )
                 for ev_id, cev in cross.items():
                     if ev_id not in events:
@@ -761,9 +798,9 @@ def search(
                 count_row = conn.execute(
                     f"""
                     SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
-                    FROM paragraphs_fts f
+                    FROM {fts_table} f
                     LEFT JOIN events e ON e.id = f.event_id
-                    WHERE paragraphs_fts MATCH ?
+                    WHERE {fts_table} MATCH ?
                     {where_extra}
                     """,
                     ([fts_query] + filter_params),
