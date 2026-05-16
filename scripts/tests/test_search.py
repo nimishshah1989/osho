@@ -266,6 +266,54 @@ def test_original_filter_default_off(app_client):
     assert "The Path of Meditation (Translation)" in titles
 
 
+# ── Stemmed vs exact (Sugit 2026-05-16) ──────────────────
+
+def test_stemmed_default_matches_inflections(app_client):
+    """Default search applies porter stemming — searching for "teach"
+    finds the paragraph that only contains "teaching"."""
+    r = app_client.get("/api/search?q=teach")
+    titles = [e["title"] for e in r.json()["events"]]
+    # e1 has the "teaching of the masters" seed paragraph.
+    assert "The Book of Secrets ~ 01" in titles
+
+
+def test_exact_skips_inflections(app_client):
+    """Same query with exact=true should NOT match "teaching" because
+    the un-stemmed index treats them as different tokens."""
+    r = app_client.get("/api/search?q=teach&exact=true")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Book of Secrets ~ 01" not in titles
+
+
+def test_exact_still_finds_literal_word(app_client):
+    """Exact mode is *narrower*, not broken — searching for "teaching"
+    in exact mode still finds the paragraph with "teaching"."""
+    r = app_client.get("/api/search?q=teaching&exact=true")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Book of Secrets ~ 01" in titles
+
+
+def test_stemmed_collapses_hindi_anusvara_variants(app_client):
+    """Default (normalised) index treats nasal+virama and anusvara as the
+    same token. h1 has 'अनन्त' and h2 has 'अनंत'; a query for either
+    spelling returns both."""
+    for q in ("अनन्त", "अनंत"):
+        r = app_client.get(f"/api/search?q={q}")
+        titles = [e["title"] for e in r.json()["events"]]
+        assert "Dekh Kabira Roya ~ 17" in titles, f"{q!r} missed h1"
+        assert "Dhammapada ~ 03" in titles, f"{q!r} missed h2"
+
+
+def test_exact_keeps_hindi_anusvara_variants_distinct(app_client):
+    """With exact=true the two spellings index as different tokens."""
+    r = app_client.get("/api/search?q=अनन्त&exact=true")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Dekh Kabira Roya ~ 17" in titles
+    assert "Dhammapada ~ 03" not in titles, (
+        "Exact 'अनन्त' should not match the paragraph spelled 'अनंत'"
+    )
+
+
 # ── Date range filter ────────────────────────────────────
 
 def test_date_from_filter(app_client):

@@ -45,11 +45,24 @@ def _seed_db(path: str) -> None:
             content TEXT NOT NULL,
             role TEXT
         );
+        -- Tokenizer strings match scripts/build_fts.py exactly. `remove_diacritics 1`
+        -- strips only Latin combining marks (é → e), never Devanagari matras —
+        -- per CLAUDE.md the `remove_diacritics 2` shortcut collapses unrelated
+        -- Hindi words and used to live here as a test-only divergence from prod.
+        -- The `categories 'L* N* Co Mn Mc'` directive keeps virama (U+094D) and
+        -- anusvara (U+0902) inside tokens, which is what makes the exact-mode
+        -- Hindi tests meaningful rather than incidental.
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
             content, title UNINDEXED, event_id UNINDEXED,
             paragraph_id UNINDEXED, sequence_number UNINDEXED,
             title_search,
-            tokenize = 'porter unicode61 remove_diacritics 2'
+            tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
+        );
+        CREATE VIRTUAL TABLE paragraphs_fts_exact USING fts5(
+            content, title UNINDEXED, event_id UNINDEXED,
+            paragraph_id UNINDEXED, sequence_number UNINDEXED,
+            title_search,
+            tokenize = "unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
         );
         """
     )
@@ -141,16 +154,39 @@ def _seed_db(path: str) -> None:
         (22, "e3", 0, "Vigyan Bhairav Tantra ~ 12"),
         (23, "e3", 2,
          "event page in sannyas.wiki: Vigyan Bhairav Tantra ~ 12."),
+        # Stemmed vs exact coverage:
+        #   "teaching" appears only as the inflected form — stemmed search
+        #   for "teach" should find it, exact should not.
+        (30, "e1", 50, "The teaching of the masters is one and the same."),
+        # Hindi anusvara variants: same word with the two acceptable
+        # spellings. Stemmed (normalised) search treats them as one
+        # token; exact search does not.
+        (31, "h1", 80, "अनन्त — समय के पार जो है, वही अनन्त है।"),
+        (32, "h2", 90, "अनंत यात्रा है, अंत नहीं।"),
     ]
     cur.executemany(
         "INSERT INTO paragraphs (id,event_id,sequence_number,content) VALUES (?,?,?,?)",
         paragraphs,
     )
-    # Mirror into FTS table
+    # Mirror into both FTS tables, matching build_fts.py:
+    #   paragraphs_fts        — content runs through Devanagari nasal+virama
+    #                           → anusvara normalisation so अनन्त and अनंत
+    #                           collapse to one token.
+    #   paragraphs_fts_exact  — raw content, no normalisation, so the two
+    #                           spellings remain distinct.
+    from scripts.build_fts import normalize_devanagari
     for p_id, ev_id, seq, content in paragraphs:
         title = next((t for i, t, *_ in events if i == ev_id), "")
+        norm_content = normalize_devanagari(content)
+        norm_title   = normalize_devanagari(title)
         cur.execute(
             "INSERT INTO paragraphs_fts"
+            " (content,title,event_id,paragraph_id,sequence_number,title_search)"
+            " VALUES (?,?,?,?,?,?)",
+            (norm_content, norm_title, ev_id, p_id, seq, norm_title),
+        )
+        cur.execute(
+            "INSERT INTO paragraphs_fts_exact"
             " (content,title,event_id,paragraph_id,sequence_number,title_search)"
             " VALUES (?,?,?,?,?,?)",
             (content, title, ev_id, p_id, seq, title),

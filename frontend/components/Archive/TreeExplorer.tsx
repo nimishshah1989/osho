@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLocale } from '../../lib/i18n';
 
@@ -249,13 +250,24 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
 
 export default function TreeExplorer() {
   const { t } = useLocale();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [rawEvents, setRawEvents]   = useState<Event[]>([]);
   const [loading,   setLoading]     = useState(true);
   const [error,     setError]       = useState<string | null>(null);
 
-  // Navigation state
-  const [groupDim,  setGroupDim]    = useState<GroupDim>('theme');
-  const [selected,  setSelected]    = useState<string | null>(null);
+  // Navigation state is persisted in the URL so the browser-back button
+  // (after opening a record in /read) lands the user back on the same
+  // year / theme / place they were exploring — Sugit's "breadcrumb"
+  // request from 2026-05-16. Default dim is "theme" when nothing is set.
+  const initialDim = (() => {
+    const d = searchParams?.get('dim');
+    return d === 'year' || d === 'place' || d === 'theme' ? d : 'theme';
+  })();
+  const initialSelected = searchParams?.get('group') ?? null;
+
+  const [groupDim,  setGroupDim]    = useState<GroupDim>(initialDim as GroupDim);
+  const [selected,  setSelected]    = useState<string | null>(initialSelected);
 
   // Secondary filters (applied once a group is selected)
   const [filterCity,  setFilterCity]  = useState('');
@@ -270,6 +282,18 @@ export default function TreeExplorer() {
       .catch(() => { setError(t('archive.unreachable')); setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Mirror groupDim + selected into the URL whenever they change. Using
+  // `replace` (not `push`) so each Archive interaction doesn't add an
+  // extra history entry, but the URL stays a faithful representation of
+  // the current view — which is what makes the back button restore it.
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (groupDim !== 'theme') params.set('dim', groupDim);
+    if (selected) params.set('group', selected);
+    const qs = params.toString();
+    router.replace(qs ? `/archive?${qs}` : '/archive', { scroll: false });
+  }, [groupDim, selected, router]);
 
   const events = useMemo(() => enrich(rawEvents), [rawEvents]);
 
