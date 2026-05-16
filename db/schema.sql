@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS paragraphs (
     event_id TEXT NOT NULL,
     sequence_number INTEGER NOT NULL,  -- To preserve the order of the discourse
     content TEXT NOT NULL,             -- The actual chunked paragraph text
+    role TEXT,                         -- Semantic role from Word style (osho_talking, sutra_question, …)
     is_embedded BOOLEAN DEFAULT 0,     -- Flag for Vector DB Sync
     FOREIGN KEY (event_id) REFERENCES events (id)
 );

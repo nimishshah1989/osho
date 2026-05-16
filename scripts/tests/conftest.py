@@ -37,7 +37,8 @@ def _seed_db(path: str) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             event_id TEXT NOT NULL,
             sequence_number INTEGER NOT NULL,
-            content TEXT NOT NULL
+            content TEXT NOT NULL,
+            role TEXT
         );
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
             content, title UNINDEXED, event_id UNINDEXED,

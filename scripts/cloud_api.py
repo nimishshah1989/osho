@@ -308,9 +308,11 @@ def _augment_near_adjacent_strict(
                     f.sequence_number,
                     f.paragraph_id,
                     f.content,
+                    p.role AS role,
                     highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl
                 FROM paragraphs_fts f
                 LEFT JOIN events e ON e.id = f.event_id
+                LEFT JOIN paragraphs p ON p.id = f.paragraph_id
                 WHERE paragraphs_fts MATCH ?
                 {where_extra}
                 """,
@@ -326,6 +328,7 @@ def _augment_near_adjacent_strict(
             per_ev.setdefault(r['event_id'], {})[r['sequence_number']] = {
                 'pid': r['paragraph_id'],
                 'content': r['content'],
+                'role': r['role'],
                 'positions': positions,
                 'token_count': total,
             }
@@ -375,12 +378,15 @@ def _augment_near_adjacent_strict(
                 or content.lower().startswith('event page in sannyas')
             )
             if not is_meta:
-                hits.append({
+                hit: dict = {
                     'paragraph_id': info['pid'],
                     'sequence_number': seq,
                     'content': content,
                     'hl': None,
-                })
+                }
+                if info.get('role'):
+                    hit['role'] = info['role']
+                hits.append(hit)
 
         events[ev_id] = {
             'event_id': ev_id,
@@ -485,6 +491,17 @@ def _augment_near_cross_paragraph(
     return events
 
 
+def _ensure_paragraph_role_column(conn: sqlite3.Connection) -> None:
+    """Idempotent migration. Older DBs (built before the Word-style ingester)
+    don't have `paragraphs.role`; add it on startup so the API can SELECT it
+    unconditionally. Existing rows get NULL, which the frontend renders as
+    plain body text — same as today's behaviour."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(paragraphs)").fetchall()}
+    if "role" not in cols:
+        conn.execute("ALTER TABLE paragraphs ADD COLUMN role TEXT")
+        conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not os.path.exists(DB_PATH):
@@ -492,6 +509,7 @@ async def lifespan(app: FastAPI):
     else:
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
             has_fts = _table_exists(conn, 'paragraphs_fts')
+            _ensure_paragraph_role_column(conn)
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:
@@ -640,9 +658,11 @@ def search(
                     e.date,
                     e.location,
                     e.language,
+                    p.role AS role,
                     bm25(paragraphs_fts) AS rank
                 FROM paragraphs_fts f
                 LEFT JOIN events e ON e.id = f.event_id
+                LEFT JOIN paragraphs p ON p.id = f.paragraph_id
                 WHERE paragraphs_fts MATCH ?
                 {where_extra}
                 ORDER BY rank
@@ -677,12 +697,15 @@ def search(
             if len(ev["hits"]) < 3 and not is_meta:
                 raw_hl = r["hl"] or r["content"]
                 hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
-                ev["hits"].append({
+                hit: dict = {
                     "paragraph_id": r["paragraph_id"],
                     "sequence_number": r["sequence_number"],
                     "content": content,
                     "hl": hl,
-                })
+                }
+                if r["role"]:
+                    hit["role"] = r["role"]
+                ev["hits"].append(hit)
 
         augmented_cross_para = False
         if near_parsed:
@@ -894,7 +917,7 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
             raise HTTPException(status_code=404, detail="Discourse not found")
 
         cur.execute(
-            "SELECT id, sequence_number, content FROM paragraphs"
+            "SELECT id, sequence_number, content, role FROM paragraphs"
             " WHERE event_id = ? ORDER BY sequence_number",
             (ev["id"],),
         )
@@ -926,6 +949,7 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
             {
                 "sequence_number": r["sequence_number"],
                 "content": _strip_shailendra(r["content"]),
+                **({"role": r["role"]} if r["role"] else {}),
                 **({"hl": hl_map[r["id"]]} if r["id"] in hl_map else {}),
             }
             for r in para_rows
