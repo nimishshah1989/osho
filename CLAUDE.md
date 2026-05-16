@@ -133,13 +133,20 @@ Push to `main` → Vercel builds and deploys within ~2-3 min. **Caveat:** Vercel
 sometimes silently skips builds — if production behaviour doesn't update 5 min after
 merge, manually click "Redeploy" in the Vercel dashboard.
 
-### Backend (currently broken — see `.github/workflows/deploy-backend.yml`)
-The GitHub Action `deploy-backend.yml` is supposed to SSH into EC2, `git pull`, and
-restart uvicorn. As of 2026-05-11 it **does not work** (wrong path `/home/user/osho`
-vs actual `/home/ubuntu/osho-speaks`, broken `head_commit.modified` check, no
-healthcheck).
+### Backend (auto via GitHub Actions — verify secrets exist)
+PR #34 (2026-05-11) rewrote the workflow. `deploy-backend.yml` SSHes into
+EC2 and runs `scripts/deploy.sh`, which does: git pull → `pip install`
+(only when `requirements.txt` changed) → FTS rebuild (only when
+`build_fts.py` or `data/**` changed) → uvicorn restart → `/health` probe
+(fails CI loudly if not 200). Trigger paths in the workflow's `on.push.paths`
+gate which commits actually fire it.
 
-### Manual backend redeploy (the procedure used today)
+The only remaining failure mode is missing/stale repo secrets:
+`BACKEND_HOST`, `BACKEND_USER`, `BACKEND_SSH_KEY`, and the optional
+`BACKEND_PORT` (defaults to 22). If a merge to main touches a backend
+path but no run appears in the Actions tab, the secrets need attention.
+
+### Manual backend redeploy (fallback when the auto-deploy hasn't run)
 ```bash
 ssh -i ~/.ssh/jsl-wealth-key.pem ubuntu@13.206.34.214
 cd /home/ubuntu/osho-speaks
