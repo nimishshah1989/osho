@@ -241,8 +241,12 @@ def test_original_filter_excludes_translations(app_client):
     assert "The Path of Meditation (Translation)" not in titles, (
         "Translated record leaked through the original=true filter"
     )
-    # Originals should still come through.
-    assert any("Meditation" in t for t in titles)
+    # Originals matching "meditation" in their *content* should still
+    # come through. e1 has "Meditation is not concentration…" in seq 1.
+    # (Pre-PR #45 this assertion also passed by matching titles like
+    # "A Course on Meditation"; since multi-word / single-word non-phrase
+    # queries no longer match titles, we anchor on a content match.)
+    assert "The Book of Secrets ~ 01" in titles
 
 
 def test_original_filter_combines_with_language(app_client):
@@ -264,6 +268,53 @@ def test_original_filter_default_off(app_client):
     r = app_client.get("/api/search?q=meditation")
     titles = [e["title"] for e in r.json()["events"]]
     assert "The Path of Meditation (Translation)" in titles
+
+
+# ── Title-exclusion for multi-word search (Sugit 2026-05-16) ─
+
+def test_multi_word_search_excludes_title_only_matches(app_client):
+    """A bag-of-words search for "Satyam Shivam" should NOT include the
+    `Satyam Shivam Sundaram ~ NN` series via title match — only via
+    content. Sugit's report: "It is including the title of the
+    discourses also … getting all the titles does not give the
+    results one is wanting to find." """
+    r = app_client.get("/api/search?q=Satyam Shivam")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Satyam Shivam Sundaram ~ 01" not in titles
+    assert "Satyam Shivam Sundaram ~ 02" not in titles
+
+
+def test_near_search_excludes_title_only_matches(app_client):
+    """Same exclusion for NEAR queries."""
+    r = app_client.get("/api/search?q=NEAR(Satyam Shivam, 30)")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Satyam Shivam Sundaram ~ 01" not in titles
+
+
+def test_phrase_search_still_matches_titles(app_client):
+    """Phrase mode is the explicit "find me anywhere" mode, including
+    titles — this is how a user looks up a series by name."""
+    r = app_client.get('/api/search?q="Satyam Shivam"')
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Satyam Shivam Sundaram ~ 01" in titles
+    assert "Satyam Shivam Sundaram ~ 02" in titles
+
+
+def test_explicit_title_filter_still_works(app_client):
+    """The `title:` shortcut is unaffected — it remains the way to
+    deliberately search the title column."""
+    r = app_client.get("/api/search?q=title:Satyam")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Satyam Shivam Sundaram ~ 01" in titles
+
+
+def test_multiword_still_finds_content_matches(app_client):
+    """Sanity: the title-exclusion fix doesn't break ordinary searches.
+    "techniques meditation" appears in e3's content; the search must
+    still return it."""
+    r = app_client.get("/api/search?q=techniques meditation")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "Vigyan Bhairav Tantra ~ 12" in titles
 
 
 # ── Stemmed vs exact (Sugit 2026-05-16) ──────────────────
