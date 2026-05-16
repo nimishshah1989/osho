@@ -22,6 +22,10 @@ import pytest
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+# Ensure scripts/tests is on sys.path so `from _helpers import …` works in tests.
+TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if TESTS_DIR not in sys.path:
+    sys.path.insert(0, TESTS_DIR)
 
 
 def _seed_db(path: str) -> None:

@@ -21,31 +21,10 @@ if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
 from word_update import Action, run_update  # noqa: E402
+from _helpers import make_docx  # noqa: E402  — shared `.docx` builder
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────
-
-def _make_docx(path, title, language, *, body_paragraphs=None, style="ctp - Osho Talking"):
-    """Build a small .docx with @-headers + optional body paragraphs."""
-    from docx import Document
-    from docx.enum.style import WD_STYLE_TYPE
-
-    doc = Document()
-    for name in ("ctp - Event Info", style):
-        if name not in [s.name for s in doc.styles]:
-            doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-
-    for line in (
-        f"@title={title}",
-        f"@language={language}",
-        "@translatedFrom=none",
-        "@time=1987-03-08-xm",
-        "@eventText=",
-    ):
-        doc.add_paragraph(line, style="ctp - Event Info")
-    for p in body_paragraphs or ["A single paragraph of body text."]:
-        doc.add_paragraph(p, style=style)
-    doc.save(str(path))
 
 
 def _seed_minimal_db(path):
@@ -82,16 +61,15 @@ def _build_root(tmp_path, *, adds=(), modifies=(), deletes=()):
     for sub in ("Add", "Modify", "Delete"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     for i, spec in enumerate(adds):
-        _make_docx(root / "Add" / f"add{i}.docx", **spec)
+        body = spec.pop("body_paragraphs", None)
+        make_docx(root / "Add" / f"add{i}.docx", body=body, **spec)
     for i, spec in enumerate(modifies):
-        _make_docx(root / "Modify" / f"mod{i}.docx", **spec)
+        body = spec.pop("body_paragraphs", None)
+        make_docx(root / "Modify" / f"mod{i}.docx", body=body, **spec)
     for i, spec in enumerate(deletes):
-        # Delete files may be empty-bodied — _make_docx still writes headers
-        _make_docx(
-            root / "Delete" / f"del{i}.docx",
-            body_paragraphs=spec.pop("body_paragraphs", ["irrelevant"]),
-            **spec,
-        )
+        # Delete files may be empty-bodied — make_docx still writes headers
+        body = spec.pop("body_paragraphs", ["irrelevant"])
+        make_docx(root / "Delete" / f"del{i}.docx", body=body, **spec)
     return root
 
 
