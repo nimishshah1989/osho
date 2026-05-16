@@ -328,7 +328,7 @@ def _augment_near_adjacent_strict(
             per_ev.setdefault(r['event_id'], {})[r['sequence_number']] = {
                 'pid': r['paragraph_id'],
                 'content': r['content'],
-                'role': r['role'] if 'role' in r.keys() else None,
+                'role': r['role'],
                 'positions': positions,
                 'token_count': total,
             }

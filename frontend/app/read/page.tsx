@@ -7,7 +7,7 @@ import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
-import { paragraphRoleClass, isMetadataRole } from '../../lib/paragraphRole';
+import { paragraphRoleClass, isMetadataRole, cx } from '../../lib/paragraphRole';
 
 interface Paragraph {
   sequence_number: number;
@@ -160,9 +160,7 @@ function ReaderInner() {
                 // ingested from a styled .docx.
                 .filter((p) => !isMetadataRole(p.role))
                 .map((p) => {
-                  const cls = ['whitespace-pre-wrap leading-loose', paragraphRoleClass(p.role)]
-                    .filter(Boolean)
-                    .join(' ');
+                  const cls = cx('whitespace-pre-wrap leading-loose', paragraphRoleClass(p.role));
                   return (
                     <p key={p.sequence_number} className={cls}>
                       {p.content}

@@ -61,3 +61,12 @@ export function paragraphRoleClass(role: string | null | undefined): string {
 export function isMetadataRole(role: string | null | undefined): boolean {
   return role === 'title' || role === 'event_info';
 }
+
+/** Tiny className joiner: filters out empty/falsy entries so paragraphs
+ *  without a role don't end up with a stray leading space, and so callers
+ *  can pass conditional strings without ternary noise. Returns undefined
+ *  when nothing is left, matching React's expectation for "no class". */
+export function cx(...parts: (string | false | null | undefined)[]): string | undefined {
+  const joined = parts.filter(Boolean).join(' ');
+  return joined || undefined;
+}

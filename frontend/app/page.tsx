@@ -22,7 +22,7 @@ import Nav from '../components/Nav';
 import HindiInput from '../components/HindiInput';
 import { useLocale } from '../lib/i18n';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
-import { paragraphRoleClass } from '../lib/paragraphRole';
+import { paragraphRoleClass, cx } from '../lib/paragraphRole';
 import {
   trackSearch, trackSearchEmpty, trackResultClick, trackDiscourseOpen,
   trackModeChange, trackProxChange, trackLanguageFilter, trackSortChange,
@@ -965,7 +965,7 @@ function SearchPageInner() {
                                 if (idx === firstMatchIndex && el) firstMatchRef.current = el;
                                 if (isMatch && el) matchRefs.current.set(idx, el);
                               }}
-                              className={[matchCls, roleCls].filter(Boolean).join(' ') || undefined}
+                              className={cx(matchCls, roleCls)}
                             >
                               <Highlighted
                                 text={p.content}

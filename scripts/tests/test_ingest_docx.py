@@ -45,6 +45,12 @@ from scripts.ingest_docx import (  # noqa: E402
         ("CTP - Osho Talking", "osho_talking"),
         # whitespace tolerant
         ("ctp -   Osho   Talking", "osho_talking"),
+        # Punctuation in the label is collapsed into a single underscore so the
+        # slug is always a safe map key / CSS class fragment. Guards against
+        # future style names like "ctp - Q & A" leaking ampersands into the role.
+        ("ctp - Q & A", "q_a"),
+        ("ctp - Footnote (1)", "footnote_1"),
+        ("ctp - !!!", None),  # nothing identifier-like left → None
         # Non-ctp styles → None (treated as plain body text)
         ("Normal", None),
         ("Heading 1", None),

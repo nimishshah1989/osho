@@ -113,8 +113,11 @@ def _normalise_role(style_name: str | None) -> str | None:
     if not m:
         return None
     label = m.group(1).strip().lower()
-    # "Sutra/Question" → "sutra_question", "Other Talking 1" → "other_talking_1"
-    return re.sub(r"[\s/\\\-]+", "_", label)
+    # "Sutra/Question" → "sutra_question", "Other Talking 1" → "other_talking_1",
+    # "Q & A" → "q_a". `[^\w]+` collapses any run of non-identifier characters
+    # so the slug is always a safe map-key / CSS-class fragment.
+    slug = re.sub(r"[^\w]+", "_", label).strip("_")
+    return slug or None
 
 
 def _import_python_docx():
