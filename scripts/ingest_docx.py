@@ -199,6 +199,25 @@ def _language_from(header: dict[str, str], filename: Path) -> str:
     return _LANG_MAP.get(raw, raw.title())
 
 
+def parse_docx_header(path: Path) -> tuple[dict[str, str], str]:
+    """Parse just the @-field headers from a .docx and return (header, language).
+
+    Used by the Delete flow, where a "delete this record" Word file may be
+    empty below the headers (Sugit's convention). `parse_docx` itself
+    insists on body paragraphs because it's about ingesting content; for
+    deletion we only need the (title, language) identifier."""
+    paras = _read_docx_paragraphs(path)
+    if not paras:
+        raise ValueError(f"{path.name}: empty document (no @title= header found)")
+    header, _ = _parse_header_and_body(paras)
+    if not header.get("title"):
+        raise ValueError(
+            f"{path.name}: missing @title= header line "
+            f"(found headers: {sorted(header.keys()) or 'none'})"
+        )
+    return header, _language_from(header, path)
+
+
 def parse_docx(path: Path) -> TalkRecord:
     """Read a single `.docx` and return a TalkRecord."""
     paras = _read_docx_paragraphs(path)
@@ -265,6 +284,26 @@ def _delete_event_rows(conn: sqlite3.Connection, event_id: str) -> None:
             para_ids,
         )
     conn.execute("DELETE FROM paragraphs WHERE event_id = ?", (event_id,))
+
+
+def delete_record(
+    conn: sqlite3.Connection, title: str, language: str
+) -> tuple[str | None, int]:
+    """Remove the (title, language) record entirely. Returns (event_id, paragraph_count)
+    of what was deleted, or (None, 0) if no such record existed."""
+    event_id = _find_existing_event_id(conn, title, language)
+    if not event_id:
+        return None, 0
+    para_count = conn.execute(
+        "SELECT COUNT(*) FROM paragraphs WHERE event_id = ?", (event_id,)
+    ).fetchone()[0]
+    _delete_event_rows(conn, event_id)
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_tags'"
+    ).fetchone():
+        conn.execute("DELETE FROM event_tags WHERE event_id = ?", (event_id,))
+    conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    return event_id, para_count
 
 
 def upsert(conn: sqlite3.Connection, talk: TalkRecord) -> tuple[str, bool]:
