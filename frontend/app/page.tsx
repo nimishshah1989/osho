@@ -268,21 +268,21 @@ function SearchPageInner() {
 
   const expandQuery = useCallback(
     (raw: string, m: Mode): { devanagari: string; searchTerm: string } => {
-      const isRoman = locale === 'hi' && /[a-zA-Z]/.test(raw);
+      // Auto-romanise Roman input only when the user is in Hindi UI AND
+      // hasn't explicitly asked for English content via the language filter.
+      // Without this opt-out, `Lang: English` + a Roman query produced zero
+      // hits because the query was silently rewritten to Devanagari.
+      const isRoman =
+        locale === 'hi' && langFilter !== 'English' && /[a-zA-Z]/.test(raw);
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
-      // OR-expand Hindi vowel-length and anusvara variants:
-      //   - always for 'all words' mode
-      //   - also for 'phrase' mode when there's only a single word, since
-      //     there's no real phrase to preserve and users expect `Rudra` to
-      //     match both रुद्र and रूद्र regardless of mode pill
       const isSingleWord = !/\s/.test(devanagari.trim());
       const shouldExpand =
         hasDevanagari && (m === 'all' || (m === 'phrase' && isSingleWord));
       const searchTerm = shouldExpand ? buildHindiFtsQuery(devanagari) : devanagari;
       return { devanagari, searchTerm };
     },
-    [locale],
+    [locale, langFilter],
   );
 
   const syncUrl = useCallback(

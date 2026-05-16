@@ -240,6 +240,163 @@ def _min_para_span(seqs_per_word: list[list[int]]) -> int:
     return best
 
 
+_TOKEN_RE = re.compile(r"[\wऀ-ॿ]+", re.UNICODE)
+
+
+def _hl_token_positions(hl: str) -> tuple[list[int], int]:
+    """Parse an FTS5 highlight() result containing \\x02 .. \\x03 markers.
+
+    Returns ([positions of matched tokens, 0-indexed], total_token_count).
+    Markers are padded with whitespace before tokenising so a marker that
+    butts up against a token character doesn't get swallowed into the
+    token. Lowercasing matches the unicode61 default folding.
+    """
+    if not hl:
+        return [], 0
+    padded = hl.replace('\x02', ' \x02 ').replace('\x03', ' \x03 ').lower()
+    parts = re.findall(r"\x02|\x03|[\wऀ-ॿ]+", padded)
+    positions: list[int] = []
+    total = 0
+    in_match = False
+    for p in parts:
+        if p == '\x02':
+            in_match = True
+        elif p == '\x03':
+            in_match = False
+        else:
+            if in_match:
+                positions.append(total)
+            total += 1
+    return positions, total
+
+
+def _augment_near_adjacent_strict(
+    conn: sqlite3.Connection,
+    words: list[str],
+    near_dist: int,
+    where_extra: str,
+    filter_params: list,
+) -> dict:
+    """Find pairs of *adjacent* paragraphs whose tokens span a NEAR match.
+
+    FTS5's NEAR() operates within a single FTS row (= one paragraph), so it
+    cannot find a match when the two query terms straddle a paragraph break.
+    This augmentation closes that gap for the common 2-word case by
+    measuring real token distance across consecutive paragraphs:
+
+        distance = (tokens after `word_a` in para_n)
+                   + (tokens before `word_b` in para_{n+1})
+
+    A pair is included only if distance <= near_dist, so it does NOT
+    re-introduce the false positives the paragraph-adjacency heuristic
+    produced (see commit 8c69841).
+
+    Only handles len(words) == 2. For 3+-word NEAR, fall back to the
+    existing paragraph-span heuristic via `_augment_near_cross_paragraph`.
+    """
+    if len(words) != 2:
+        return {}
+
+    per_word: list[dict[str, dict[int, dict]]] = []
+    for word in words:
+        word_fts = _normalize_devanagari(word)
+        try:
+            wrows = conn.execute(
+                f"""
+                SELECT
+                    f.event_id,
+                    f.sequence_number,
+                    f.paragraph_id,
+                    f.content,
+                    highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl
+                FROM paragraphs_fts f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE paragraphs_fts MATCH ?
+                {where_extra}
+                """,
+                ([word_fts] + filter_params),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return {}
+        per_ev: dict[str, dict[int, dict]] = {}
+        for r in wrows:
+            positions, total = _hl_token_positions(r['hl'] or r['content'])
+            if not positions:
+                continue
+            per_ev.setdefault(r['event_id'], {})[r['sequence_number']] = {
+                'pid': r['paragraph_id'],
+                'content': r['content'],
+                'positions': positions,
+                'token_count': total,
+            }
+        per_word.append(per_ev)
+
+    if not per_word or not per_word[0] or not per_word[1]:
+        return {}
+
+    common_ids = set(per_word[0].keys()) & set(per_word[1].keys())
+    events: dict = {}
+    for ev_id in common_ids:
+        wa = per_word[0][ev_id]
+        wb = per_word[1][ev_id]
+        best: tuple[int, int, int, dict, dict] | None = None  # (dist, seq_a, seq_b, info_a, info_b)
+        for seq_a, info_a in wa.items():
+            for delta in (-1, 1):
+                seq_b = seq_a + delta
+                if seq_b == seq_a or seq_b not in wb:
+                    continue
+                info_b = wb[seq_b]
+                if delta == 1:
+                    last_a = max(info_a['positions'])
+                    first_b = min(info_b['positions'])
+                    dist = (info_a['token_count'] - 1 - last_a) + first_b
+                else:
+                    first_a = min(info_a['positions'])
+                    last_b = max(info_b['positions'])
+                    dist = (info_b['token_count'] - 1 - last_b) + first_a
+                if dist <= near_dist and (best is None or dist < best[0]):
+                    best = (dist, seq_a, seq_b, info_a, info_b)
+        if best is None:
+            continue
+
+        _, seq_a, seq_b, info_a, info_b = best
+        ev_row = conn.execute(
+            "SELECT title, date, location, language FROM events WHERE id = ?",
+            (ev_id,),
+        ).fetchone()
+        if not ev_row:
+            continue
+
+        hits = []
+        for seq, info in sorted([(seq_a, info_a), (seq_b, info_b)]):
+            content = _strip_shailendra(info['content'] or '')
+            is_meta = (
+                seq == 0
+                or content.lower().startswith('event page in sannyas')
+            )
+            if not is_meta:
+                hits.append({
+                    'paragraph_id': info['pid'],
+                    'sequence_number': seq,
+                    'content': content,
+                    'hl': None,
+                })
+
+        events[ev_id] = {
+            'event_id': ev_id,
+            'title': ev_row[0],
+            'date': ev_row[1],
+            'location': ev_row[2],
+            'language': ev_row[3],
+            'rank': 0.0,
+            'hit_count': 2,
+            'hits': hits,
+            '_cross_para': True,
+        }
+
+    return events
+
+
 def _augment_near_cross_paragraph(
     conn: sqlite3.Connection,
     words: list[str],
@@ -527,8 +684,21 @@ def search(
                     "hl": hl,
                 })
 
+        augmented_cross_para = False
         if near_parsed:
             near_words, near_dist = near_parsed
+            # Strict adjacent-paragraph augmentation (2-word NEAR only).
+            # Catches matches where the two terms straddle a paragraph break
+            # but are still within `near_dist` actual tokens of each other —
+            # something FTS5's row-bound NEAR cannot find on its own.
+            if len(near_words) == 2:
+                adj = _augment_near_adjacent_strict(
+                    conn, near_words, near_dist, where_extra, filter_params
+                )
+                for ev_id, cev in adj.items():
+                    if ev_id not in events:
+                        events[ev_id] = cev
+                        augmented_cross_para = True
             if near_dist >= 100:
                 para_span = max(1, near_dist // 30)
                 cross = _augment_near_cross_paragraph(
@@ -537,16 +707,17 @@ def search(
                 for ev_id, cev in cross.items():
                     if ev_id not in events:
                         events[ev_id] = cev
+                        augmented_cross_para = True
 
         # Count strategy:
-        #   - Cross-paragraph NEAR augmentation (dist >= 100) can add events
-        #     that FTS5 alone wouldn't return, so we must derive counts from
-        #     the merged events dict.
-        #   - Otherwise (all-words / phrase / narrow NEAR), derive counts from
-        #     a separate COUNT(*) over the FTS index — this is unlimited and
-        #     stays accurate even when the main SELECT is capped by LIMIT.
+        #   - Whenever cross-paragraph augmentation added events that FTS5's
+        #     in-row NEAR didn't, derive counts from the merged events dict so
+        #     the total reflects what the user actually sees.
+        #   - Otherwise (all-words / phrase / pure in-row NEAR), the unlimited
+        #     COUNT(*) over the FTS index stays accurate even when the main
+        #     SELECT is capped by LIMIT.
         near_words, near_dist = near_parsed if near_parsed else (None, 0)
-        if near_parsed and near_dist >= 100:
+        if augmented_cross_para:
             total_events = len(events)
             total_hits = sum(e["hit_count"] for e in events.values())
         else:
