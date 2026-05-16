@@ -35,7 +35,8 @@ def _seed_db(path: str) -> None:
         """
         CREATE TABLE events (
             id TEXT PRIMARY KEY, title TEXT NOT NULL,
-            date TEXT, location TEXT, language TEXT
+            date TEXT, location TEXT, language TEXT,
+            translated_from TEXT
         );
         CREATE TABLE paragraphs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -52,24 +53,28 @@ def _seed_db(path: str) -> None:
         );
         """
     )
+    # Tuple: (id, title, date, location, language, translated_from).
+    # translated_from = "none" means Osho gave the talk originally in `language`;
+    # any other value identifies the source language of a translation.
     events = [
-        ("e1", "The Book of Secrets ~ 01",    "1973-01-01", "Bombay",  "English"),
-        ("e2", "The Mustard Seed ~ 04",       "1974-08-21", "Poona",   "English"),
-        ("e3", "Vigyan Bhairav Tantra ~ 12",  "1984-05-10", "Pune",    "English"),
-        ("e4", "A Course on Meditation ~ 03", "1988-03-03", "Pune",    "English"),
-        ("e5", "Zen: The Quantum Leap ~ 02",  "1989-04-04", "Pune",    "English"),
-        # Hindi events
-        ("h1", "Dekh Kabira Roya ~ 17",       "1978-06-15", "Pune",    "Hindi"),
-        ("h2", "Dhammapada ~ 03",             "1979-09-10", "Pune",    "Hindi"),
-        ("h3", "Ek Omkar Satnam ~ 05",        "1975-02-20", "Bombay",  "Hindi"),
-        # Translated event (English translation of Hindi)
-        ("t1", "The Path of Meditation (Translation)", "1980-01-01", "Pune", "English"),
+        ("e1", "The Book of Secrets ~ 01",    "1973-01-01", "Bombay",  "English", "none"),
+        ("e2", "The Mustard Seed ~ 04",       "1974-08-21", "Poona",   "English", "none"),
+        ("e3", "Vigyan Bhairav Tantra ~ 12",  "1984-05-10", "Pune",    "English", "none"),
+        ("e4", "A Course on Meditation ~ 03", "1988-03-03", "Pune",    "English", "none"),
+        ("e5", "Zen: The Quantum Leap ~ 02",  "1989-04-04", "Pune",    "English", "none"),
+        # Hindi events — all originals
+        ("h1", "Dekh Kabira Roya ~ 17",       "1978-06-15", "Pune",    "Hindi",   "none"),
+        ("h2", "Dhammapada ~ 03",             "1979-09-10", "Pune",    "Hindi",   "none"),
+        ("h3", "Ek Omkar Satnam ~ 05",        "1975-02-20", "Bombay",  "Hindi",   "none"),
+        # Translated event — English translation of a Hindi original
+        ("t1", "The Path of Meditation (Translation)", "1980-01-01", "Pune", "English", "Hindi"),
         # Event for proximity search testing
-        ("p1", "Light on the Path ~ 29",      "1986-02-25", "Pune",    "English"),
-        ("p2", "The Messiah Vol 1 ~ 15",      "1987-01-10", "Pune",    "English"),
+        ("p1", "Light on the Path ~ 29",      "1986-02-25", "Pune",    "English", "none"),
+        ("p2", "The Messiah Vol 1 ~ 15",      "1987-01-10", "Pune",    "English", "none"),
     ]
     cur.executemany(
-        "INSERT INTO events (id,title,date,location,language) VALUES (?,?,?,?,?)",
+        "INSERT INTO events (id,title,date,location,language,translated_from)"
+        " VALUES (?,?,?,?,?,?)",
         events,
     )
     paragraphs = [
