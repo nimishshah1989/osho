@@ -45,17 +45,24 @@ def _seed_db(path: str) -> None:
             content TEXT NOT NULL,
             role TEXT
         );
+        -- Tokenizer strings match scripts/build_fts.py exactly. `remove_diacritics 1`
+        -- strips only Latin combining marks (é → e), never Devanagari matras —
+        -- per CLAUDE.md the `remove_diacritics 2` shortcut collapses unrelated
+        -- Hindi words and used to live here as a test-only divergence from prod.
+        -- The `categories 'L* N* Co Mn Mc'` directive keeps virama (U+094D) and
+        -- anusvara (U+0902) inside tokens, which is what makes the exact-mode
+        -- Hindi tests meaningful rather than incidental.
         CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
             content, title UNINDEXED, event_id UNINDEXED,
             paragraph_id UNINDEXED, sequence_number UNINDEXED,
             title_search,
-            tokenize = 'porter unicode61 remove_diacritics 2'
+            tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
         );
         CREATE VIRTUAL TABLE paragraphs_fts_exact USING fts5(
             content, title UNINDEXED, event_id UNINDEXED,
             paragraph_id UNINDEXED, sequence_number UNINDEXED,
             title_search,
-            tokenize = 'unicode61 remove_diacritics 1'
+            tokenize = "unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
         );
         """
     )

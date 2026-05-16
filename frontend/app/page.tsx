@@ -476,26 +476,31 @@ function SearchPageInner() {
     setLangFilter(val);
   };
 
-  // Re-run search when language filter changes. Using useEffect so the search
-  // fires after React re-renders runSearch with the new langFilter in its closure.
+  // Re-run search + sync the URL when language filter changes. Using
+  // useEffect so the search fires after React re-renders runSearch with
+  // the new langFilter in its closure; the syncUrl call keeps `?lang=`
+  // in step with the pill the user just clicked so reloads and back/
+  // forward navigation reproduce the active filter.
   const isMountedLangRef = useRef(false);
   useEffect(() => {
     if (!isMountedLangRef.current) { isMountedLangRef.current = true; return; }
     if (query.trim()) {
-      const { searchTerm } = expandQuery(query.trim(), mode);
+      const { devanagari, searchTerm } = expandQuery(query.trim(), mode);
+      syncUrl(devanagari, sort, selectedEventId, mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [langFilter]);
 
-  // Same effect for the Exact-match toggle — flipping the pill re-issues
-  // the search against the (un)stemmed index without the user having to
-  // hit Enter again.
+  // Same for the Exact-match toggle — flipping the pill re-issues the
+  // search against the (un)stemmed index AND writes ?exact=1 to the URL
+  // so the URL is a faithful record of the current view.
   const isMountedExactRef = useRef(false);
   useEffect(() => {
     if (!isMountedExactRef.current) { isMountedExactRef.current = true; return; }
     if (query.trim()) {
-      const { searchTerm } = expandQuery(query.trim(), mode);
+      const { devanagari, searchTerm } = expandQuery(query.trim(), mode);
+      syncUrl(devanagari, sort, selectedEventId, mode, proximity);
       void runSearch(searchTerm, sort, mode, proximity);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
