@@ -7,10 +7,12 @@ import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
+import { paragraphRoleClass, isMetadataRole } from '../../lib/paragraphRole';
 
 interface Paragraph {
   sequence_number: number;
   content: string;
+  role?: string;
 }
 
 interface DiscourseResponse {
@@ -152,11 +154,21 @@ function ReaderInner() {
 
           {data && !loading && data.paragraphs.length > 0 && (
             <article className="prose-osho space-y-5">
-              {data.paragraphs.map((p) => (
-                <p key={p.sequence_number} className="whitespace-pre-wrap leading-loose">
-                  {p.content}
-                </p>
-              ))}
+              {data.paragraphs
+                // Title + event_info are already shown in the page header;
+                // hiding them here avoids duplication when reading a record
+                // ingested from a styled .docx.
+                .filter((p) => !isMetadataRole(p.role))
+                .map((p) => {
+                  const cls = ['whitespace-pre-wrap leading-loose', paragraphRoleClass(p.role)]
+                    .filter(Boolean)
+                    .join(' ');
+                  return (
+                    <p key={p.sequence_number} className={cls}>
+                      {p.content}
+                    </p>
+                  );
+                })}
             </article>
           )}
         </div>

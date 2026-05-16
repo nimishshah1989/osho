@@ -22,6 +22,7 @@ import Nav from '../components/Nav';
 import HindiInput from '../components/HindiInput';
 import { useLocale } from '../lib/i18n';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
+import { paragraphRoleClass } from '../lib/paragraphRole';
 import {
   trackSearch, trackSearchEmpty, trackResultClick, trackDiscourseOpen,
   trackModeChange, trackProxChange, trackLanguageFilter, trackSortChange,
@@ -33,6 +34,7 @@ interface Hit {
   sequence_number: number;
   content: string;
   hl?: string;
+  role?: string;
 }
 
 interface EventHit {
@@ -57,6 +59,7 @@ interface Paragraph {
   sequence_number: number;
   content: string;
   hl?: string;
+  role?: string;
 }
 
 interface DiscourseResponse {
@@ -907,17 +910,22 @@ function SearchPageInner() {
                       {t('search.detail.topMatches')}
                     </h3>
                     <ol className="space-y-4">
-                      {selectedEvent.hits.map((h) => (
-                        <li
-                          key={h.paragraph_id}
-                          className="bg-stone-100 dark:bg-ivory/5 border-l-[3px] border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
-                        >
-                          <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
-                            Para {h.sequence_number}
-                          </div>
-                          <Highlighted text={h.content} hl={h.hl} pattern={highlightPattern} />
-                        </li>
-                      ))}
+                      {selectedEvent.hits.map((h) => {
+                        const roleCls = paragraphRoleClass(h.role);
+                        return (
+                          <li
+                            key={h.paragraph_id}
+                            className="bg-stone-100 dark:bg-ivory/5 border-l-[3px] border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
+                          >
+                            <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
+                              Para {h.sequence_number}
+                            </div>
+                            <div className={roleCls}>
+                              <Highlighted text={h.content} hl={h.hl} pattern={highlightPattern} />
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ol>
                   </div>
 
@@ -944,6 +952,12 @@ function SearchPageInner() {
                         {discourse.paragraphs.map((p, idx) => {
                           const isMatch = matchIndices.includes(idx);
                           const isCurrent = matchIndices[currentMatchPos] === idx;
+                          const roleCls = paragraphRoleClass(p.role);
+                          const matchCls = isCurrent
+                            ? 'scroll-mt-4 ring-2 ring-gold/40 bg-gold/5 rounded-sm px-3 -mx-3 py-1'
+                            : isMatch
+                              ? 'scroll-mt-4 ring-1 ring-gold/15 rounded-sm px-2 -mx-2'
+                              : '';
                           return (
                             <p
                               key={p.sequence_number}
@@ -951,13 +965,7 @@ function SearchPageInner() {
                                 if (idx === firstMatchIndex && el) firstMatchRef.current = el;
                                 if (isMatch && el) matchRefs.current.set(idx, el);
                               }}
-                              className={
-                                isCurrent
-                                  ? 'scroll-mt-4 ring-2 ring-gold/40 bg-gold/5 rounded-sm px-3 -mx-3 py-1'
-                                  : isMatch
-                                    ? 'scroll-mt-4 ring-1 ring-gold/15 rounded-sm px-2 -mx-2'
-                                    : undefined
-                              }
+                              className={[matchCls, roleCls].filter(Boolean).join(' ') || undefined}
                             >
                               <Highlighted
                                 text={p.content}

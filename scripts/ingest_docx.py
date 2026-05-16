@@ -76,6 +76,12 @@ _LANG_MAP = {
 
 
 @dataclass
+class Paragraph:
+    text: str
+    role: str | None = None  # see _normalise_role
+
+
+@dataclass
 class TalkRecord:
     title: str
     language: str
@@ -83,13 +89,32 @@ class TalkRecord:
     time: str | None = None
     theme: str | None = None
     place: str | None = None
-    paragraphs: list[str] = field(default_factory=list)
+    paragraphs: list[Paragraph] = field(default_factory=list)
     source_path: str = ""
 
     @property
     def event_key(self) -> tuple[str, str]:
         """Composite upsert key — same talk in the same language is the same row."""
         return (self.title.strip(), self.language.strip())
+
+
+# Antar's Word documents tag every paragraph with a `ctp - ...` style that
+# carries the semantic role (Osho speaking vs. interviewer vs. sutra vs. poem
+# vs. footnote, etc). We strip the prefix and slugify the rest so the role is
+# a stable machine identifier the frontend can map to a CSS class. Paragraphs
+# without a `ctp -` style get role=None and render as plain body text.
+_CTP_STYLE_RE = re.compile(r"^ctp\s*-\s*(.+?)\s*$", re.IGNORECASE)
+
+
+def _normalise_role(style_name: str | None) -> str | None:
+    if not style_name:
+        return None
+    m = _CTP_STYLE_RE.match(style_name)
+    if not m:
+        return None
+    label = m.group(1).strip().lower()
+    # "Sutra/Question" → "sutra_question", "Other Talking 1" → "other_talking_1"
+    return re.sub(r"[\s/\\\-]+", "_", label)
 
 
 def _import_python_docx():
@@ -103,34 +128,43 @@ def _import_python_docx():
     return docx
 
 
-def _read_docx_paragraphs(path: Path) -> list[str]:
-    """Return non-empty paragraph strings from a .docx file, in document order."""
+def _read_docx_paragraphs(path: Path) -> list[Paragraph]:
+    """Return non-empty paragraphs (text + semantic role) in document order."""
     docx = _import_python_docx()
     doc = docx.Document(str(path))
-    return [p.text for p in doc.paragraphs if p.text and p.text.strip()]
+    out: list[Paragraph] = []
+    for p in doc.paragraphs:
+        text = p.text
+        if not text or not text.strip():
+            continue
+        style_name = p.style.name if p.style else None
+        out.append(Paragraph(text=text, role=_normalise_role(style_name)))
+    return out
 
 
-def _parse_header_and_body(lines: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Split a list of paragraph strings into (header_dict, body_paragraphs).
+def _parse_header_and_body(
+    paragraphs: list[Paragraph],
+) -> tuple[dict[str, str], list[Paragraph]]:
+    """Split a list of paragraphs into (header_dict, body_paragraphs).
 
     The header continues until we hit `@eventText=` (anything after the `=`
     on that line is treated as the first body paragraph, in case the author
     pasted the first paragraph inline). All subsequent paragraphs are body.
     """
     header: dict[str, str] = {}
-    body: list[str] = []
+    body: list[Paragraph] = []
     in_body = False
 
-    for line in lines:
+    for para in paragraphs:
         if in_body:
-            body.append(line)
+            body.append(para)
             continue
 
-        m = _HEADER_RE.match(line.strip())
+        m = _HEADER_RE.match(para.text.strip())
         if not m:
             # Header is over the moment we see a non-@ line.
             in_body = True
-            body.append(line)
+            body.append(para)
             continue
 
         key = m.group(1).lower()
@@ -139,7 +173,7 @@ def _parse_header_and_body(lines: list[str]) -> tuple[dict[str, str], list[str]]
         if key == "eventtext":
             in_body = True
             if value:  # rare: content inline on same line as @eventText=
-                body.append(value)
+                body.append(Paragraph(text=value, role=para.role))
         elif key in _HEADER_FIELDS:
             header[key] = value
         # silently ignore unknown @-fields so old docs don't error
@@ -164,18 +198,18 @@ def _language_from(header: dict[str, str], filename: Path) -> str:
 
 def parse_docx(path: Path) -> TalkRecord:
     """Read a single `.docx` and return a TalkRecord."""
-    lines = _read_docx_paragraphs(path)
-    if not lines:
+    paras = _read_docx_paragraphs(path)
+    if not paras:
         raise ValueError(f"{path.name}: empty document")
 
-    header, body = _parse_header_and_body(lines)
+    header, body = _parse_header_and_body(paras)
     if not header.get("title"):
         raise ValueError(
             f"{path.name}: missing @title= header line "
             f"(found headers: {sorted(header.keys()) or 'none'})"
         )
 
-    body = [p.strip() for p in body if p.strip()]
+    body = [Paragraph(text=p.text.strip(), role=p.role) for p in body if p.text.strip()]
     if not body:
         raise ValueError(f"{path.name}: no body paragraphs after @eventText=")
 
@@ -197,6 +231,12 @@ def _ensure_translated_from_column(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
     if "translated_from" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN translated_from TEXT")
+
+
+def _ensure_role_column(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(paragraphs)").fetchall()}
+    if "role" not in cols:
+        conn.execute("ALTER TABLE paragraphs ADD COLUMN role TEXT")
 
 
 def _find_existing_event_id(conn: sqlite3.Connection, title: str, language: str) -> str | None:
@@ -248,9 +288,12 @@ def upsert(conn: sqlite3.Connection, talk: TalkRecord) -> tuple[str, bool]:
         created_new = True
 
     conn.executemany(
-        "INSERT INTO paragraphs (event_id, sequence_number, content, is_embedded) "
-        "VALUES (?, ?, ?, 0)",
-        [(event_id, i, p) for i, p in enumerate(talk.paragraphs, start=1)],
+        "INSERT INTO paragraphs (event_id, sequence_number, content, role, is_embedded) "
+        "VALUES (?, ?, ?, ?, 0)",
+        [
+            (event_id, i, p.text, p.role)
+            for i, p in enumerate(talk.paragraphs, start=1)
+        ],
     )
 
     # Reinsert the FTS rows from the fresh paragraph rows, normalising
@@ -340,6 +383,7 @@ def main(argv: list[str] | None = None) -> int:
     failed_count = 0
     with sqlite3.connect(args.db) as conn:
         _ensure_translated_from_column(conn)
+        _ensure_role_column(conn)
         for f in files:
             try:
                 talk = parse_docx(f)
