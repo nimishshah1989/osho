@@ -104,6 +104,29 @@ def _seed_db(path: str) -> None:
          "The politicians have always been in alliance with the mafia."),
         (21, "p2", 10,
          "When politicians and the mafia join hands, the common man suffers."),
+        # Cross-paragraph case (on a *different* discourse so FTS5 in-row
+        # NEAR cannot find it): 'politicians' near the end of seq 4,
+        # 'mafia' at the start of seq 5. NEAR(..., 30) must still match.
+        (24, "e2", 4,
+         "Power corrupts every government and every assembly of politicians."),
+        (25, "e2", 5,
+         "Mafia bosses thrive whenever such corruption goes unchecked."),
+        # False-positive guard: the two words exist in adjacent paragraphs
+        # of this event, but they are far apart in tokens — NEAR(..., 30)
+        # must NOT match this discourse.
+        (26, "e5", 80,
+         "Politicians appear at the very beginning of this short paragraph "
+         "and the rest of the paragraph rambles on about altogether unrelated "
+         "matters, listing names of philosophers and saints, painting "
+         "long tableaus of imagined gardens, weaving sentence after sentence "
+         "of digression so the reader entirely forgets where the topic began "
+         "before the paragraph eventually wanders to an unrelated close."),
+        (27, "e5", 81,
+         "Through pages of unrelated meditations the discourse meanders, "
+         "touching upon silence, breath, dreams, longing, despair, "
+         "compassion, surrender, prayer, fragrance, song, courage, "
+         "music, wonder, awe, devotion, and only at the very end of all "
+         "this digression does the word mafia surface again."),
         # Metadata paragraphs (should be filtered from display hits)
         (22, "e3", 0, "Vigyan Bhairav Tantra ~ 12"),
         (23, "e3", 2,

@@ -119,6 +119,37 @@ def test_politicians_mafia_proximity(app_client):
     )
 
 
+def test_politicians_mafia_cross_paragraph_match(app_client):
+    """When the two terms straddle a paragraph break but are within
+    `near_dist` actual tokens of each other, the discourse should still
+    match — FTS5's in-row NEAR cannot find this on its own.
+
+    e2 has 'politicians' at the tail of seq 4 and 'mafia' at the head of
+    seq 5; neither paragraph contains both words, so this event is only
+    reachable via the cross-paragraph augmentation."""
+    r = app_client.get("/api/search?q=NEAR(politicians mafia, 30)")
+    data = r.json()
+    titles = [e["title"] for e in data["events"]]
+    assert "The Mustard Seed ~ 04" in titles, (
+        "Cross-paragraph NEAR match should be returned via augmentation"
+    )
+    # p1 has both words in the same paragraph — FTS5 must still find it.
+    assert "Light on the Path ~ 29" in titles
+
+
+def test_politicians_mafia_cross_paragraph_no_false_positive(app_client):
+    """A discourse where both words exist in adjacent paragraphs but are
+    far apart in *tokens* must NOT match a tight NEAR. Regression guard
+    for the old paragraph-index heuristic (commit 8c69841)."""
+    r = app_client.get("/api/search?q=NEAR(politicians mafia, 30)")
+    data = r.json()
+    titles = [e["title"] for e in data["events"]]
+    assert "Zen: The Quantum Leap ~ 02" not in titles, (
+        "Discourse with both words in adjacent paragraphs but far apart "
+        "in token distance should not match NEAR/30"
+    )
+
+
 def test_near_tight_distance_filters(app_client):
     """Distance 0 (adjacent) should be more restrictive."""
     r = app_client.get("/api/search?q=NEAR(politicians mafia, 0)")
