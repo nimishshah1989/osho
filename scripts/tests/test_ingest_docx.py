@@ -64,51 +64,22 @@ def test_normalise_role(style_name, expected):
 
 # ── End-to-end: docx → DB → role round-trips ──────────────────────────────
 
-def _make_docx(path: str) -> None:
-    """Build a small .docx with @-headers and a mix of ctp- styles."""
-    from docx import Document
-    from docx.shared import Pt
+from _helpers import make_docx  # noqa: E402 — keeps the import near use
 
-    doc = Document()
-    # Define the styles we'll use so python-docx doesn't fall back to Normal.
-    for name in (
-        "ctp - Event Info",
-        "ctp - Osho Talking",
-        "ctp - Other Talking 1",
-        "ctp - Sutra/Question",
-        "ctp - Poem",
-    ):
-        if name not in [s.name for s in doc.styles]:
-            from docx.enum.style import WD_STYLE_TYPE
-            s = doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-            s.font.size = Pt(12)
 
-    # Header lines — Event Info style, exactly the convention Antar uses
-    for line in (
-        "@title=Sample Discourse ~ 01",
-        "@language=EN",
-        "@translatedFrom=none",
-        "@time=1987-03-08-xm",
-        "@eventText=",
-    ):
-        p = doc.add_paragraph(line, style="ctp - Event Info")
-
-    # Body — mixed roles
-    doc.add_paragraph(
-        "INTERVIEWER: Why are you saying this?", style="ctp - Other Talking 1"
+def _make_mixed_role_docx(path: str) -> None:
+    """A .docx with one paragraph per body style we care about, plus one
+    paragraph with no `ctp -` style (role=None — the "plain body" path)."""
+    make_docx(
+        path,
+        body=[
+            ("INTERVIEWER: Why are you saying this?", "ctp - Other Talking 1"),
+            ("OSHO: Because the question itself reveals the answer.", "ctp - Osho Talking"),
+            ("Sutra to be commented upon today.", "ctp - Sutra/Question"),
+            ("A short verse for the moment.", "ctp - Poem"),
+            ("A bare paragraph with no ctp style.", None),
+        ],
     )
-    doc.add_paragraph(
-        "OSHO: Because the question itself reveals the answer.",
-        style="ctp - Osho Talking",
-    )
-    doc.add_paragraph(
-        "Sutra to be commented upon today.", style="ctp - Sutra/Question"
-    )
-    doc.add_paragraph("A short verse for the moment.", style="ctp - Poem")
-    # An untyped paragraph — should become role=None
-    doc.add_paragraph("A bare paragraph with no ctp style.")
-
-    doc.save(path)
 
 
 def _seed_minimal_db(path: str) -> None:
@@ -143,7 +114,7 @@ def _seed_minimal_db(path: str) -> None:
 def test_ingest_round_trips_role_to_db(tmp_path):
     docx_path = tmp_path / "sample.docx"
     db_path = tmp_path / "test.db"
-    _make_docx(str(docx_path))
+    _make_mixed_role_docx(str(docx_path))
     _seed_minimal_db(str(db_path))
 
     talk = parse_docx(docx_path)
