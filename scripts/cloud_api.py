@@ -193,6 +193,12 @@ def _normalize_devanagari(text: str) -> str:
 # ─── Query rewriting ─────────────────────────────────────────────────────────
 
 _TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
+# Matches a query consisting of exactly one quoted phrase ("…") and nothing
+# else. Used to decide whether a query is a literal phrase the user wants
+# matched against everything (titles included), versus a bag-of-words / NEAR
+# query where matching the title would just inflate the count with the
+# discourse-series name (Sugit 2026-05-16: "Satyam Shivam").
+_PHRASE_ONLY_RE = re.compile(r'^\s*"[^"]+"\s*$')
 
 
 def _rewrite_query(user_query: str, exact: bool = False) -> str:
@@ -202,9 +208,27 @@ def _rewrite_query(user_query: str, exact: bool = False) -> str:
     anusvara collapsing so अनन्त and अनंत find each other. When `exact`
     is True we leave the text alone so the reviewer can find the literal
     spelling they typed — the paragraphs_fts_exact index they're hitting
-    in that mode was built with the same hands-off policy."""
+    in that mode was built with the same hands-off policy.
+
+    Also restricts the search to the `content` column unless the user
+    asked for either a literal phrase or an explicit `title:` filter.
+    Otherwise a multi-word query like `Satyam Shivam` matches every
+    discourse in the `Satyam Shivam Sundaram ~ NN` series via the
+    indexed title column and the hit count balloons with results that
+    don't help the reader. Phrase mode (`"…"`) still matches both
+    columns so the user can still find the series by its title."""
     q = _TITLE_FILTER_RE.sub('title_search:', user_query).strip()
-    return q if exact else _normalize_devanagari(q)
+    if not exact:
+        q = _normalize_devanagari(q)
+    if not q:
+        return q
+    # Leave alone if the user is already filtering by column (title:foo)
+    # or if the entire query is a single quoted phrase.
+    if 'title_search:' in q or _PHRASE_ONLY_RE.match(q):
+        return q
+    # Otherwise scope to the content column. FTS5 column-filter syntax:
+    #   {colname} : (subquery)
+    return f'{{content}} : ({q})'
 
 
 # ─── Cross-paragraph NEAR support ────────────────────────────────────────────
@@ -213,10 +237,22 @@ _NEAR_RE = re.compile(
     r'^NEAR\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)\s*$',
     re.IGNORECASE,
 )
+# `_rewrite_query` may have wrapped the user's NEAR(…) in a column-scope
+# filter (e.g. `{content} : (NEAR(politicians mafia, 30))`). Peel that
+# wrapper off before pattern-matching so the augmentation paths still
+# fire after the title-exclusion change (Sugit 2026-05-16).
+_COLUMN_FILTER_WRAP_RE = re.compile(
+    r'^\s*\{[^}]+\}\s*:\s*\((?P<inner>.+)\)\s*$',
+    re.DOTALL,
+)
 
 
 def _parse_near(fts_query: str):
-    m = _NEAR_RE.match(fts_query.strip())
+    q = fts_query.strip()
+    wrap = _COLUMN_FILTER_WRAP_RE.match(q)
+    if wrap:
+        q = wrap.group('inner').strip()
+    m = _NEAR_RE.match(q)
     if not m:
         return None
     words_raw, dist_str = m.group(1), m.group(2)
@@ -318,7 +354,11 @@ def _augment_near_adjacent_strict(
 
     per_word: list[dict[str, dict[int, dict]]] = []
     for word in words:
-        word_fts = word_norm(word)
+        # Restrict to the content column for the same reason as
+        # _rewrite_query — augmentation should not pick up title-only
+        # word matches that wouldn't survive the cross-paragraph check
+        # in the first place.
+        word_fts = f'{{content}} : ({word_norm(word)})'
         try:
             wrows = conn.execute(
                 f"""
@@ -436,7 +476,11 @@ def _augment_near_cross_paragraph(
 
     per_word: list[dict[int, list[int]]] = []
     for word in words:
-        word_fts = word_norm(word)
+        # Restrict to the content column for the same reason as
+        # _rewrite_query — augmentation should not pick up title-only
+        # word matches that wouldn't survive the cross-paragraph check
+        # in the first place.
+        word_fts = f'{{content}} : ({word_norm(word)})'
         try:
             wrows = conn.execute(
                 f"""

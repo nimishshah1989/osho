@@ -81,6 +81,12 @@ def _seed_db(path: str) -> None:
         ("h3", "Ek Omkar Satnam ~ 05",        "1975-02-20", "Bombay",  "Hindi",   "none"),
         # Translated event — English translation of a Hindi original
         ("t1", "The Path of Meditation (Translation)", "1980-01-01", "Pune", "English", "Hindi"),
+        # Series-title test events (Sugit 2026-05-16): the words "Satyam"
+        # and "Shivam" appear in the title but NOT in the content. A bag-
+        # of-words search for those words should not match these — only
+        # an explicit `title:` search or a literal phrase should.
+        ("ss1", "Satyam Shivam Sundaram ~ 01", "1980-11-11", "Pune", "Hindi", "none"),
+        ("ss2", "Satyam Shivam Sundaram ~ 02", "1980-11-12", "Pune", "Hindi", "none"),
         # Event for proximity search testing
         ("p1", "Light on the Path ~ 29",      "1986-02-25", "Pune",    "English", "none"),
         ("p2", "The Messiah Vol 1 ~ 15",      "1987-01-10", "Pune",    "English", "none"),
@@ -154,6 +160,13 @@ def _seed_db(path: str) -> None:
         (22, "e3", 0, "Vigyan Bhairav Tantra ~ 12"),
         (23, "e3", 2,
          "event page in sannyas.wiki: Vigyan Bhairav Tantra ~ 12."),
+        # Body paragraphs for the Satyam Shivam Sundaram seed events. The
+        # content deliberately does NOT contain "Satyam" or "Shivam" so
+        # a bag-of-words search for those words only matches these rows
+        # via the title — exactly the case Sugit reported as a problem.
+        (40, "ss1", 1, "Truth is a state of being, not a doctrine to be believed."),
+        (41, "ss1", 2, "Listen to the heart, and the path opens by itself."),
+        (42, "ss2", 1, "Beauty without truth is decoration; truth without beauty is austerity."),
         # Stemmed vs exact coverage:
         #   "teaching" appears only as the inflected form — stemmed search
         #   for "teach" should find it, exact should not.
