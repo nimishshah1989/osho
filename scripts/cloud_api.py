@@ -526,6 +526,21 @@ def _ensure_paragraph_role_column(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _ensure_events_translated_from_column(conn: sqlite3.Connection) -> None:
+    """Idempotent migration. The `original=true` search filter references
+    `events.translated_from`; on a prod DB built before the ingester
+    introduced that column, the bare SELECT raises OperationalError and
+    the API returns "Invalid search syntax." This adds the column on
+    startup so the filter works against legacy DBs without a reingest.
+    Existing rows get NULL, which the filter treats as "Original" — the
+    only sensible default for records that pre-date the translated_from
+    metadata."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "translated_from" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN translated_from TEXT")
+        conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not os.path.exists(DB_PATH):
@@ -534,6 +549,7 @@ async def lifespan(app: FastAPI):
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
             has_fts = _table_exists(conn, 'paragraphs_fts')
             _ensure_paragraph_role_column(conn)
+            _ensure_events_translated_from_column(conn)
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:

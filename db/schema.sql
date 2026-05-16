@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS events (
     date TEXT,                     -- The date the discourse was given (e.g. YYYY-MM-DD or raw string)
     location TEXT,                 -- e.g., "Pune", "Rajneeshpuram"
     language TEXT,                 -- "English" or "Hindi"
+    translated_from TEXT,          -- Source language for translated records; NULL or 'none' = original
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
