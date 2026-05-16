@@ -608,6 +608,13 @@ def search(
     language: Optional[str] = Query(
         None, description="Filter by language: English, Hindi"
     ),
+    original: bool = Query(
+        False,
+        description=(
+            "When true, return only records Osho originally gave in their "
+            "language (translated_from is NULL or 'none')."
+        ),
+    ),
     date_from: Optional[str] = Query(None, description="Start date YYYY or YYYY-MM-DD"),
     date_to: Optional[str] = Query(None, description="End date YYYY or YYYY-MM-DD"),
 ):
@@ -629,6 +636,12 @@ def search(
     if language:
         filters.append("LOWER(e.language) = LOWER(?)")
         filter_params.append(language)
+    if original:
+        # Originals: either the column isn't present (legacy rows) or its
+        # value is the explicit "none" Antar writes into the @-headers.
+        filters.append(
+            "(e.translated_from IS NULL OR LOWER(e.translated_from) = 'none')"
+        )
     if date_from:
         padded_from = date_from if len(date_from) > 4 else f"{date_from}-01-01"
         filters.append("e.date >= ?")

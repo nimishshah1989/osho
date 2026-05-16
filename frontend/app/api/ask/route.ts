@@ -21,6 +21,8 @@ export async function GET(req: Request) {
 
   const language = searchParams.get('language');
   if (language) params.set('language', language);
+  const original = searchParams.get('original');
+  if (original) params.set('original', original);
   const dateFrom = searchParams.get('date_from');
   if (dateFrom) params.set('date_from', dateFrom);
   const dateTo = searchParams.get('date_to');

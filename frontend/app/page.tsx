@@ -313,7 +313,15 @@ function SearchPageInner() {
       setError(null);
       try {
         const params = new URLSearchParams({ q: fts, sort: s });
-        if (langFilter) params.set('language', langFilter);
+        // langFilter is a single mutually-exclusive pill. 'original' selects
+        // records Osho gave originally in their language (translated_from
+        // is none/NULL) regardless of language. Everything else is a literal
+        // language filter (English, Hindi, …).
+        if (langFilter === 'original') {
+          params.set('original', 'true');
+        } else if (langFilter) {
+          params.set('language', langFilter);
+        }
         if (dateFrom) params.set('date_from', dateFrom);
         if (dateTo) params.set('date_to', dateTo);
         const r = await fetch(`/api/ask?${params.toString()}`);
@@ -696,23 +704,31 @@ function SearchPageInner() {
                 </button>
               </div>
 
-              {/* Language filter */}
+              {/* Language filter — All / Original / EN / HI (Sugit 2026-05).
+                  "Original" is a sibling option, not orthogonal: selecting it
+                  filters to records Osho gave originally in their language
+                  regardless of which language that was. */}
               <div className="flex items-center gap-3">
                 <span className="text-stone-500 dark:text-ivory/60">
                   {locale === 'hi' ? 'भाषा' : 'Lang'}:
                 </span>
-                {(['', ...availableLanguages.length ? availableLanguages : ['English', 'Hindi']]).map((lang) => (
+                {([
+                  { value: '', label: t('search.lang.all') },
+                  { value: 'original', label: t('search.lang.original'), title: t('search.lang.original.tooltip') },
+                  ...(availableLanguages.length ? availableLanguages : ['English', 'Hindi']).map((l) => ({ value: l, label: l })),
+                ] as { value: string; label: string; title?: string }[]).map(({ value, label, title }) => (
                   <button
-                    key={lang}
+                    key={value || 'all'}
                     type="button"
-                    onClick={() => handleLangFilterChange(lang)}
+                    onClick={() => handleLangFilterChange(value)}
+                    title={title}
                     className={
-                      langFilter === lang
+                      langFilter === value
                         ? 'text-gold font-bold underline underline-offset-4 decoration-2'
                         : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
                     }
                   >
-                    {lang === '' ? (locale === 'hi' ? 'सभी' : 'All') : lang}
+                    {label}
                   </button>
                 ))}
               </div>

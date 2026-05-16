@@ -229,6 +229,43 @@ def test_language_filter_no_match(app_client):
     assert data["total"] == 0
 
 
+# ── translated_from / Original filter ────────────────────
+
+def test_original_filter_excludes_translations(app_client):
+    """`original=true` excludes records whose translated_from points at
+    another language. In seed data, t1 (The Path of Meditation) is an
+    English translation of a Hindi original and the only translated row."""
+    r = app_client.get("/api/search?q=meditation&original=true")
+    data = r.json()
+    titles = [e["title"] for e in data["events"]]
+    assert "The Path of Meditation (Translation)" not in titles, (
+        "Translated record leaked through the original=true filter"
+    )
+    # Originals should still come through.
+    assert any("Meditation" in t for t in titles)
+
+
+def test_original_filter_combines_with_language(app_client):
+    """`original=true&language=English` returns only English originals —
+    no Hindi-originated translations into English."""
+    r = app_client.get(
+        "/api/search?q=meditation&language=English&original=true"
+    )
+    data = r.json()
+    for ev in data["events"]:
+        assert ev["language"] == "English"
+    titles = [e["title"] for e in data["events"]]
+    assert "The Path of Meditation (Translation)" not in titles
+
+
+def test_original_filter_default_off(app_client):
+    """Without the original flag, translated records appear normally —
+    guards against silently flipping the default."""
+    r = app_client.get("/api/search?q=meditation")
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Path of Meditation (Translation)" in titles
+
+
 # ── Date range filter ────────────────────────────────────
 
 def test_date_from_filter(app_client):

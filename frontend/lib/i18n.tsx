@@ -40,25 +40,32 @@ const EN: Dict = {
   'search.sort': 'Sort',
   'search.sort.rank': 'Rank',
   'search.sort.title': 'Title',
-  'search.results.one': '{n} discourse matched',
-  'search.results.many': '{n} discourses matched',
+  // Sugit (2026-05) — "record" is the (event + language) tuple that the
+  // database is actually keyed on. "Event" stays as the abstract talk
+  // regardless of translation; we don't surface that word in the UI.
+  'search.results.one': '{n} record matched',
+  'search.results.many': '{n} records matched',
   'search.empty.pristine':
-    'Search for a word or phrase to see every discourse where Osho spoke it.',
-  'search.empty.none': 'No discourses match this query.',
+    'Search for a word or phrase to see every record where Osho spoke it.',
+  'search.empty.none': 'No records match this query.',
   'search.searching': 'searching…',
-  'search.col.discourse': 'Discourse',
+  'search.col.discourse': 'Record',
   'search.col.rankShort': 'Rank',
   'search.col.az': 'A→Z',
   'search.detail.emptyWithResults':
-    'Select a discourse on the left to read the matched passages.',
+    'Select a record on the left to read the matched passages.',
   'search.detail.emptyPristine':
     "Matched passages — in Osho's own words — will appear here.",
-  'search.detail.full': 'Full discourse',
+  'search.detail.full': 'Full record',
   'search.detail.back': 'Back',
   'search.detail.topMatches': 'Top matches',
   'search.detail.para': 'Para',
-  'search.detail.loadingFull': 'loading full discourse…',
-  'search.detail.showAll': 'Show entire discourse with matches highlighted ({n} paragraphs)',
+  'search.detail.loadingFull': 'loading full record…',
+  'search.detail.showAll': 'Show entire record with matches highlighted ({n} paragraphs)',
+  'search.lang.all': 'All',
+  'search.lang.original': 'Original',
+  'search.lang.original.tooltip':
+    'Only records Osho originally gave in their language (excludes translations).',
   'search.translit.toggle': 'Type in Roman (phonetic)',
   'search.translit.preview': 'Hindi preview',
 
@@ -166,6 +173,10 @@ const HI: Dict = {
   'search.detail.para': 'Para',
   'search.detail.loadingFull': 'पूरा प्रवचन खुल रहा है…',
   'search.detail.showAll': 'पूरा प्रवचन देखो — हर मिलान हाईलाइट ({n} अनुच्छेद)',
+  'search.lang.all': 'सभी',
+  'search.lang.original': 'मूल',
+  'search.lang.original.tooltip':
+    'सिर्फ़ वे प्रवचन जो ओशो ने मूल रूप से इसी भाषा में दिए (अनुवाद नहीं)।',
   'search.translit.toggle': 'रोमन में लिखो (उच्चारण से)',
   'search.translit.preview': 'हिंदी में',
 
