@@ -8,6 +8,8 @@ import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
 import { paragraphRoleClass, isMetadataRole, cx } from '../../lib/paragraphRole';
+import { useOfflineEngine } from '../../lib/search/OfflineProvider';
+import { discourseApi } from '../../lib/search/searchApi';
 
 interface Paragraph {
   sequence_number: number;
@@ -31,6 +33,7 @@ function ReaderInner() {
   const searchParams = useSearchParams();
   const title = searchParams?.get('title') ?? '';
   const eventId = searchParams?.get('event_id') ?? '';
+  const offlineEngine = useOfflineEngine();
 
   const [data, setData] = useState<DiscourseResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,16 +47,9 @@ function ReaderInner() {
     }
 
     let cancelled = false;
-    const qs = new URLSearchParams();
-    if (eventId) qs.set('event_id', eventId);
-    else if (title) qs.set('title', title);
-
-    fetch(`/api/discourse?${qs.toString()}`)
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((body && body.error) || `Upstream status ${res.status}`);
-        return body as DiscourseResponse;
-      })
+    // Local engine when offline corpus is ready, /api/discourse otherwise.
+    discourseApi({ eventId: eventId || undefined, title: eventId ? undefined : title }, offlineEngine)
+      .then((body) => body as DiscourseResponse)
       .then((body) => {
         if (!cancelled) {
           setData(body);
@@ -71,7 +67,7 @@ function ReaderInner() {
     return () => {
       cancelled = true;
     };
-  }, [title, eventId]);
+  }, [title, eventId, offlineEngine]);
 
   const headerTitle = data?.event.title ?? title ?? t('read.discourse');
 
