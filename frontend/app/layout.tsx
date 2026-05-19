@@ -5,6 +5,7 @@ import "../styles/globals.css";
 import { LocaleProvider } from "../lib/i18n";
 import { ThemeProvider } from "../lib/theme";
 import { GA_ID } from "../lib/analytics";
+import { PwaRegistrar } from "../components/PwaRegistrar";
 
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
 
@@ -23,6 +24,20 @@ const notoDevanagari = Noto_Sans_Devanagari({
 export const metadata: Metadata = {
   title: "Osho Discourse Search — Every Word, Verbatim",
   description: "Search and explore the complete discourses of Osho. Every word in Osho's own voice — no paraphrasing, no AI.",
+  manifest: "/manifest.webmanifest",
+  themeColor: "#1a1410",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Osho",
+  },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/icons/apple-touch-icon.png",
+  },
 };
 
 // Inline script runs before React hydration to avoid flash of wrong theme.
@@ -64,6 +79,7 @@ export default function RootLayout({
         <ThemeProvider>
           <LocaleProvider>{children}</LocaleProvider>
         </ThemeProvider>
+        <PwaRegistrar />
       </body>
     </html>
   );
