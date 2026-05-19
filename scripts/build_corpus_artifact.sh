@@ -26,7 +26,19 @@ ART_DIR="${ART_DIR:-${REPO_DIR}/data/artifacts}"
 PY="${PY:-${REPO_DIR}/.venv/bin/python3}"
 
 mkdir -p "$ART_DIR"
-tmp_db="$(mktemp --tmpdir=/var/tmp osho.db.XXXXXX)"
+
+# Fail fast on a missing / unreadable source. sqlite3.connect() will
+# happily create an empty database at $DB_PATH, which would silently
+# publish an empty corpus to every offline user.
+if [ ! -f "$DB_PATH" ]; then
+  echo "ERROR: source DB not found at $DB_PATH" >&2
+  exit 2
+fi
+
+# Place temp files inside the same target directory so the final mv is
+# a true rename (atomic on the same filesystem). mktemp in /var/tmp can
+# land on a different mount and silently degrade to a copy.
+tmp_db="$(mktemp --tmpdir="$ART_DIR" osho.db.XXXXXX)"
 tmp_zst="${tmp_db}.zst"
 
 cleanup() { rm -f "$tmp_db" "${tmp_db}-journal" "${tmp_db}-wal" "${tmp_db}-shm" "$tmp_zst"; }
@@ -35,7 +47,10 @@ trap cleanup EXIT
 echo "==> Online backup → $tmp_db"
 "$PY" - <<PY
 import sqlite3
-src = sqlite3.connect("$DB_PATH")
+# `mode=ro` opens read-only and refuses to create. Paired with the
+# existence check above this means a typo'd $DB_PATH errors loudly
+# instead of producing an empty artifact.
+src = sqlite3.connect("file:$DB_PATH?mode=ro", uri=True)
 dst = sqlite3.connect("$tmp_db")
 try:
     src.backup(dst, pages=-1)
