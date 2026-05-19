@@ -64,14 +64,15 @@ export function InstallPrompt() {
   const handleClick = useCallback(async () => {
     if (!deferredPrompt) return;
     await deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice;
-    if (choice.outcome === 'accepted') {
-      // The browser will fire `appinstalled` shortly; the listener
-      // above updates state. Clear the deferred prompt now so a
-      // re-click doesn't error.
-      deferredPrompt = null;
-      setAvailable(false);
-    }
+    // The deferred event can only be used once per browser — whether
+    // the user accepted OR dismissed — so clear it in both cases. On
+    // accept the `appinstalled` listener above flips installed=true;
+    // on dismiss we just hide the button until the browser sends
+    // another `beforeinstallprompt` (some browsers re-fire after a
+    // cooldown).
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    setAvailable(false);
   }, []);
 
   if (installed) return null;
