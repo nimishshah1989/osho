@@ -38,11 +38,14 @@ timedatectl set-timezone UTC
 
 echo "==> apt update + upgrade"
 export DEBIAN_FRONTEND=noninteractive
+APT_OPTS='-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef'
 apt-get update -y
-apt-get upgrade -y
+# shellcheck disable=SC2086
+apt-get $APT_OPTS upgrade -y
 
 echo "==> Installing baseline packages"
-apt-get install -y --no-install-recommends \
+# shellcheck disable=SC2086
+apt-get $APT_OPTS install -y --no-install-recommends \
   ufw fail2ban unattended-upgrades \
   curl wget git ca-certificates gnupg \
   htop iotop ncdu \
