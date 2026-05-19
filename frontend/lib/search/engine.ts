@@ -388,7 +388,6 @@ function augmentNearAdjacentStrict(
         paragraph_id: info.pid,
         sequence_number: seq,
         content,
-        hl: null,
       };
       if (info.role) hit.role = info.role;
       hits.push(hit);
@@ -493,7 +492,6 @@ function augmentNearCrossParagraph(
         paragraph_id: para.id,
         sequence_number: seq,
         content,
-        hl: null,
       });
     }
 
@@ -612,6 +610,90 @@ export function discourse(db: Database, opts: DiscourseOptions): DiscourseRespon
     },
     paragraphs,
   };
+}
+
+
+// ─── catalog() / languages() / dateRange() ──────────────────────────────
+
+export interface CatalogEvent {
+  id: string;
+  title: string | null;
+  date: string | null;
+  location: string | null;
+  language: string | null;
+  tags: string[];
+}
+
+export interface CatalogResponse {
+  events: CatalogEvent[];
+}
+
+export function catalog(db: Database): CatalogResponse {
+  const rows = db.all<{
+    id: string;
+    title: string | null;
+    date: string | null;
+    location: string | null;
+    language: string | null;
+  }>(
+    "SELECT id, title, date, location, language FROM events"
+    + " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title",
+  );
+
+  // event_tags is optional — older DBs don't have it. Probe before
+  // querying so the call doesn't throw on legacy archives.
+  const hasTags = !!db.get<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='event_tags'",
+  );
+
+  const tagsByEvent = new Map<string, string[]>();
+  if (hasTags) {
+    const tagRows = db.all<{ event_id: string; tag: string }>(
+      'SELECT event_id, tag FROM event_tags',
+    );
+    for (const r of tagRows) {
+      const arr = tagsByEvent.get(r.event_id);
+      if (arr) arr.push(r.tag);
+      else tagsByEvent.set(r.event_id, [r.tag]);
+    }
+    for (const arr of tagsByEvent.values()) arr.sort();
+  }
+
+  return {
+    events: rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      date: r.date,
+      location: r.location,
+      language: r.language,
+      tags: tagsByEvent.get(r.id) ?? [],
+    })),
+  };
+}
+
+
+export interface LanguagesResponse { languages: string[] }
+
+export function languages(db: Database): LanguagesResponse {
+  const rows = db.all<{ language: string }>(
+    'SELECT DISTINCT language FROM events'
+    + ' WHERE language IS NOT NULL ORDER BY language',
+  );
+  return { languages: rows.map((r) => r.language) };
+}
+
+
+export interface DateRangeResponse {
+  min_year: string | null;
+  max_year: string | null;
+}
+
+export function dateRange(db: Database): DateRangeResponse {
+  const row = db.get<{ min: string | null; max: string | null }>(
+    'SELECT MIN(SUBSTR(date,1,4)) AS min, MAX(SUBSTR(date,1,4)) AS max'
+    + ' FROM events WHERE date IS NOT NULL AND LENGTH(date) >= 4',
+  );
+  return { min_year: row?.min ?? null, max_year: row?.max ?? null };
 }
 
 

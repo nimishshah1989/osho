@@ -8,6 +8,8 @@ import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
 import { paragraphRoleClass, isMetadataRole, cx } from '../../lib/paragraphRole';
+import { useOfflineEngine } from '../../lib/search/OfflineProvider';
+import { discourseApi } from '../../lib/search/searchApi';
 
 interface Paragraph {
   sequence_number: number;
@@ -31,11 +33,17 @@ function ReaderInner() {
   const searchParams = useSearchParams();
   const title = searchParams?.get('title') ?? '';
   const eventId = searchParams?.get('event_id') ?? '';
+  const offlineEngine = useOfflineEngine();
 
   const [data, setData] = useState<DiscourseResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Data fetch. Re-runs when the user navigates to a different
+  // discourse OR when the offline engine becomes available (so the
+  // currently-open discourse transparently re-fetches from the local
+  // DB once it's ready). Analytics tracking lives in a separate
+  // effect below so we don't double-fire it across engine swaps.
   useEffect(() => {
     if (!title && !eventId) {
       setError('No discourse selected.');
@@ -44,22 +52,11 @@ function ReaderInner() {
     }
 
     let cancelled = false;
-    const qs = new URLSearchParams();
-    if (eventId) qs.set('event_id', eventId);
-    else if (title) qs.set('title', title);
-
-    fetch(`/api/discourse?${qs.toString()}`)
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error((body && body.error) || `Upstream status ${res.status}`);
-        return body as DiscourseResponse;
-      })
+    // Local engine when offline corpus is ready, /api/discourse otherwise.
+    discourseApi({ eventId: eventId || undefined, title: eventId ? undefined : title }, offlineEngine)
+      .then((body) => body as DiscourseResponse)
       .then((body) => {
-        if (!cancelled) {
-          setData(body);
-          trackDiscourseOpen(body.event.id, body.event.title ?? body.event.id, 'direct');
-          trackPageView(window.location.pathname + window.location.search);
-        }
+        if (!cancelled) setData(body);
       })
       .catch((err: Error) => {
         if (!cancelled) setError(err.message || 'The discourse could not be retrieved.');
@@ -71,7 +68,21 @@ function ReaderInner() {
     return () => {
       cancelled = true;
     };
-  }, [title, eventId]);
+  }, [title, eventId, offlineEngine]);
+
+  // Analytics — fire exactly once per discourse load, not on engine
+  // swap. Keyed by event.id (or title fallback) so re-fetching the
+  // same discourse via the local engine after the online fetch
+  // doesn't double-count.
+  const lastTrackedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (!data?.event) return;
+    const key = data.event.id ?? data.event.title ?? '';
+    if (!key || lastTrackedRef.current === key) return;
+    lastTrackedRef.current = key;
+    trackDiscourseOpen(data.event.id, data.event.title ?? data.event.id, 'direct');
+    trackPageView(window.location.pathname + window.location.search);
+  }, [data]);
 
   const headerTitle = data?.event.title ?? title ?? t('read.discourse');
 

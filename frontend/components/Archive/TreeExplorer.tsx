@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLocale } from '../../lib/i18n';
+import { useOfflineEngine } from '../../lib/search/OfflineProvider';
+import { catalogApi } from '../../lib/search/searchApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,6 +257,7 @@ export default function TreeExplorer() {
   const [rawEvents, setRawEvents]   = useState<Event[]>([]);
   const [loading,   setLoading]     = useState(true);
   const [error,     setError]       = useState<string | null>(null);
+  const offlineEngine = useOfflineEngine();
 
   // Navigation state is persisted in the URL so the browser-back button
   // (after opening a record in /read) lands the user back on the same
@@ -276,12 +279,20 @@ export default function TreeExplorer() {
   const [filterLang,  setFilterLang]  = useState('');
 
   useEffect(() => {
-    fetch('/api/catalog', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d: { events: Event[] }) => { setRawEvents(d.events ?? []); setLoading(false); })
+    // Catalog comes from the local engine if the offline corpus has
+    // landed, otherwise from /api/catalog. Re-runs when the engine
+    // becomes available so the Archive populates immediately after
+    // first-launch download completes.
+    // Clear any prior failure before retrying — otherwise a successful
+    // refetch (e.g. after the engine flips from null → ready) would
+    // still render the old "Archive unreachable" screen.
+    setLoading(true);
+    setError(null);
+    catalogApi(offlineEngine)
+      .then((d) => { setRawEvents((d.events ?? []) as Event[]); setLoading(false); })
       .catch(() => { setError(t('archive.unreachable')); setLoading(false); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [offlineEngine]);
 
   // Mirror groupDim + selected into the URL whenever they change. Using
   // `replace` (not `push`) so each Archive interaction doesn't add an

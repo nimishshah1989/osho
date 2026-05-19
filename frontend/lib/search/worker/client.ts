@@ -23,7 +23,12 @@ import type {
   SearchOptions,
   SearchResponse,
 } from '../types';
-import type { DiscourseOptions } from '../engine';
+import type {
+  CatalogResponse,
+  DateRangeResponse,
+  DiscourseOptions,
+  LanguagesResponse,
+} from '../engine';
 import type {
   ProgressUpdate,
   WorkerReply,
@@ -37,6 +42,9 @@ export type { ProgressUpdate };
 export interface OfflineEngine {
   search(opts: SearchOptions): Promise<SearchResponse>;
   discourse(opts: DiscourseOptions): Promise<DiscourseResponse>;
+  catalog(): Promise<CatalogResponse>;
+  languages(): Promise<LanguagesResponse>;
+  dateRange(): Promise<DateRangeResponse>;
   close(): Promise<void>;
 }
 
@@ -166,8 +174,11 @@ export async function openOfflineEngine(filename: string): Promise<OfflineState>
     if (!exists) return { kind: 'needs-download' };
     await rpc<void>({ cmd: 'open', filename });
     const engine: OfflineEngine = {
-      search:    (opts) => rpc<SearchResponse>({ cmd: 'search', opts }),
-      discourse: (opts) => rpc<DiscourseResponse>({ cmd: 'discourse', opts }),
+      search:    (opts) => rpc<SearchResponse>({ cmd: 'search', opts: opts as unknown as Record<string, unknown> }),
+      discourse: (opts) => rpc<DiscourseResponse>({ cmd: 'discourse', opts: opts as unknown as Record<string, unknown> }),
+      catalog:   () => rpc<CatalogResponse>({ cmd: 'catalog' }),
+      languages: () => rpc<LanguagesResponse>({ cmd: 'languages' }),
+      dateRange: () => rpc<DateRangeResponse>({ cmd: 'date-range' }),
       close:     () => rpc<void>({ cmd: 'close' }),
     };
     return { kind: 'ready', engine };

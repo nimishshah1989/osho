@@ -32,9 +32,13 @@
  */
 import { Decompress } from 'fzstd';
 import sqlite3InitModule from '@sqlite.org/sqlite-wasm';
-import { discourse, search } from '../engine';
-import type { Database, DiscourseResponse, SearchResponse, SearchOptions } from '../types';
-import type { DiscourseOptions } from '../engine';
+import {
+  catalog, dateRange, discourse, languages, search,
+} from '../engine';
+import type {
+  CatalogResponse, DateRangeResponse, DiscourseOptions, LanguagesResponse,
+} from '../engine';
+import type { Database, DiscourseResponse, SearchOptions, SearchResponse } from '../types';
 
 
 // ─── Reply / request shapes ──────────────────────────────────────────────
@@ -53,6 +57,9 @@ export type WorkerRequest =
   | { id: number; cmd: 'open'; filename: string }
   | { id: number; cmd: 'search'; opts: SearchOptions }
   | { id: number; cmd: 'discourse'; opts: DiscourseOptions }
+  | { id: number; cmd: 'catalog' }
+  | { id: number; cmd: 'languages' }
+  | { id: number; cmd: 'date-range' }
   | { id: number; cmd: 'close' };
 
 export type WorkerReply =
@@ -382,6 +389,15 @@ async function handle(req: WorkerRequest): Promise<void> {
         return;
       case 'discourse':
         reply({ id: req.id, ok: true, data: runDiscourse(req.opts) });
+        return;
+      case 'catalog':
+        reply({ id: req.id, ok: true, data: catalog(requireDb()) });
+        return;
+      case 'languages':
+        reply({ id: req.id, ok: true, data: languages(requireDb()) });
+        return;
+      case 'date-range':
+        reply({ id: req.id, ok: true, data: dateRange(requireDb()) });
         return;
       case 'close':
         closeDb();
