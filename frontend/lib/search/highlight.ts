@@ -27,7 +27,14 @@ export function hlTokenPositions(hl: string): readonly [number[], number] {
     .replace(new RegExp(HL_OPEN, 'g'), ` ${HL_OPEN} `)
     .replace(new RegExp(HL_CLOSE, 'g'), ` ${HL_CLOSE} `)
     .toLowerCase();
-  const parts = padded.match(new RegExp(`${HL_OPEN}|${HL_CLOSE}|[\\p{L}\\p{N}]+`, 'gu'));
+  // Letters + Numbers + Marks (Mn / Mc / Me) so Devanagari syllables
+  // stay whole. The FTS5 tokenizer is configured with `categories
+  // 'L* N* Co Mn Mc'` exactly so combining marks (virama / anusvara /
+  // matras) live inside tokens; if we split on them here, token-
+  // distance math in the cross-paragraph NEAR augmentation falls out
+  // of sync with the index — अनन्त would tokenise here as
+  // [अनन, त] (split on virama) while FTS5 sees one token.
+  const parts = padded.match(new RegExp(`${HL_OPEN}|${HL_CLOSE}|[\\p{L}\\p{N}\\p{M}]+`, 'gu'));
   if (!parts) return [[], 0];
 
   const positions: number[] = [];
