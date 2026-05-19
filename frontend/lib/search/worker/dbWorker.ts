@@ -179,6 +179,12 @@ async function installCorpus(url: string, filename: string, emit: InstallProgres
       try {
         decoder.push(value);
       } catch (e) {
+        // The decoder callback writes straight to OPFS, so a thrown
+        // error here can be a corrupt-archive failure from fzstd OR
+        // an out-of-space failure we threw inside the SAH write loop.
+        // Preserve any `__kind` we already set so storage errors don't
+        // get mislabeled as decode errors.
+        if (isErr(e)) throw e;
         throw makeErr('decode', `Corrupt archive: ${(e as Error).message}`);
       }
       if (bytesReceived - lastEmit > 256 * 1024) {
@@ -285,8 +291,15 @@ async function openDb(filename: string): Promise<void> {
   if (!sq.oo1?.OpfsDb) {
     throw makeErr('unsupported', 'sqlite-wasm built without OPFS support.');
   }
+  // Close any previously-open handle first — repeated `open` calls
+  // (e.g. after the user re-installs the corpus) would otherwise leak
+  // an OPFS file lock and the new open would fail with SQLITE_BUSY.
+  closeDb();
   try {
-    db = new sq.oo1.OpfsDb(`/${filename}`, 'ct') as Sqlite3Db;
+    // Flags: 'c' = create-if-missing. We deliberately drop the 't' the
+    // first cut had — that flag enables SQL trace logging on every
+    // statement, which we don't want in a production worker.
+    db = new sq.oo1.OpfsDb(`/${filename}`, 'c') as Sqlite3Db;
   } catch (e) {
     throw makeErr('storage', `Could not open OPFS DB: ${(e as Error).message}`);
   }
