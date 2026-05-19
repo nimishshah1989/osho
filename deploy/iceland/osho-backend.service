@@ -1,0 +1,41 @@
+[Unit]
+Description=Osho FastAPI backend (uvicorn)
+After=network.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=osho
+Group=osho
+WorkingDirectory=/home/osho/osho
+
+# Secrets loaded from /etc/osho/backend.env — file is mode 600, owned by osho.
+# Must contain: ADMIN_KEY, ALLOWED_ORIGINS, OSHO_ENV, PORT
+EnvironmentFile=/etc/osho/backend.env
+
+# Bind only to loopback — nginx fronts us on :80/:443.
+ExecStart=/home/osho/osho/.venv/bin/python3 -m uvicorn scripts.cloud_api:app \
+    --host 127.0.0.1 \
+    --port ${PORT} \
+    --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# Logs go to journald — view with: journalctl -u osho-backend -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=osho-backend
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/osho/osho/data /home/osho/osho/uvicorn.log
+
+[Install]
+WantedBy=multi-user.target
