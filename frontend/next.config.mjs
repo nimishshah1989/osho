@@ -1,23 +1,30 @@
+// Static-export bits are gated behind the `STATIC_EXPORT` env var so
+// the Vercel build keeps its serverless /api/* routes intact. The
+// Cloudflare Pages build sets `STATIC_EXPORT=true` via `npm run
+// build:static`; nothing else does.
+//
+// Vercel honours `output: 'export'` if it's set (cubic was right —
+// it doesn't silently ignore it), which would drop the API proxy
+// routes and break the production fallback path. So we leave the
+// option unset for normal builds.
+const STATIC_EXPORT = process.env.STATIC_EXPORT === 'true';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Cloudflare Pages serves static files only — no Node.js server, no
-  // /api routes. `output: 'export'` writes a fully-prerendered tree
-  // into `out/` so any static host (Cloudflare Pages, Netlify, S3+
-  // CloudFront, a plain nginx) can serve it.
-  //
-  // Vercel deploys are unaffected — they ignore `output: 'export'`
-  // automatically and run as before, including /api routes.
-  output: 'export',
+  ...(STATIC_EXPORT ? {
+    // Produces a fully-prerendered tree in `out/` for any static
+    // host (Cloudflare Pages, Netlify, S3 + CloudFront, plain nginx).
+    output: 'export',
+    // Cloudflare Pages serves `/foo` and `/foo/` interchangeably and
+    // expects `/foo/index.html` in the output.
+    trailingSlash: true,
+  } : {}),
 
-  // Next/Image needs the Node-side loader; with static export we either
-  // disable optimisation or use a custom remote loader. The app doesn't
-  // use Next/Image anywhere so we just unblock the build.
+  // Next/Image needs the Node-side loader; with static export we
+  // either disable optimisation or use a custom remote loader. The
+  // app doesn't actually use Next/Image so this is harmless on
+  // Vercel and required on static.
   images: { unoptimized: true },
-
-  // Cloudflare Pages serves `/foo` and `/foo/` interchangeably and
-  // expects `/foo/index.html` in the output. Trailing-slash mode makes
-  // that the default.
-  trailingSlash: true,
 };
 
 export default nextConfig;
