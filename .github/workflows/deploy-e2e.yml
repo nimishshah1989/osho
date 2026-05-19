@@ -1,0 +1,30 @@
+name: Deploy to E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'requirements.txt'
+      - 'data/**'
+      - 'frontend/**'
+      - '.github/workflows/deploy-e2e.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-e2e
+      cancel-in-progress: false
+    steps:
+      - name: SSH and run server-side deploy script
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.E2E_HOST }}
+          username: ${{ secrets.E2E_USER }}
+          key: ${{ secrets.E2E_SSH_KEY }}
+          port: ${{ secrets.E2E_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            cd /home/osho/osho
+            bash scripts/deploy-e2e.sh
