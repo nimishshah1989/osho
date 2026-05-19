@@ -153,7 +153,10 @@ is auto-provided by Actions.
 first run. If you want to test the publish flow manually on EC2:
 
 ```bash
-ssh -i ~/.ssh/jsl-wealth-key.pem ubuntu@13.206.34.214
+# Use whichever key / host you have configured in the BACKEND_SSH_KEY
+# and BACKEND_HOST repo secrets — they aren't checked in here so this
+# doc stays safe to publish.
+ssh -i PATH_TO_KEY ubuntu@BACKEND_HOST
 cd /home/ubuntu/osho-speaks
 # Authenticate gh with a PAT that has contents:write on the repo.
 gh auth login
