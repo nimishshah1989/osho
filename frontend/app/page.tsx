@@ -23,37 +23,19 @@ import HindiInput from '../components/HindiInput';
 import { useLocale } from '../lib/i18n';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
 import { paragraphRoleClass, cx } from '../lib/paragraphRole';
+import { useOfflineEngine } from '../lib/search/OfflineProvider';
+import { discourseApi, languagesApi, searchApi } from '../lib/search/searchApi';
+import type { SearchHit, SearchEvent, SearchResponse } from '../lib/search';
 import {
   trackSearch, trackSearchEmpty, trackResultClick, trackDiscourseOpen,
   trackModeChange, trackProxChange, trackLanguageFilter, trackSortChange,
   trackPageView,
 } from '../lib/analytics';
 
-interface Hit {
-  paragraph_id: number;
-  sequence_number: number;
-  content: string;
-  hl?: string;
-  role?: string;
-}
-
-interface EventHit {
-  event_id: string;
-  title: string | null;
-  date: string | null;
-  location: string | null;
-  language: string | null;
-  rank: number;
-  hit_count: number;
-  hits: Hit[];
-}
-
-interface SearchResponse {
-  query: string;
-  total: number;
-  total_hits: number;
-  events: EventHit[];
-}
+// Search-result types come from the engine layer — same shape whether
+// the search ran locally via sqlite-wasm or via the FastAPI proxy.
+type Hit = SearchHit;
+type EventHit = SearchEvent;
 
 interface Paragraph {
   sequence_number: number;
@@ -181,6 +163,12 @@ function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern
 
 function SearchPageInner() {
   const { t, locale } = useLocale();
+  // When the offline corpus is loaded, every search/discourse call
+  // routes through the local sqlite-wasm worker instead of the
+  // FastAPI proxy. While the download is pending the engine is null
+  // and the same calls fall through to /api/* — same JSON shape
+  // either way, so this page doesn't need to care.
+  const offlineEngine = useOfflineEngine();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -333,26 +321,20 @@ function SearchPageInner() {
       setLoading(true);
       setError(null);
       try {
-        const params = new URLSearchParams({ q: fts, sort: s });
         // langFilter is a single mutually-exclusive pill. 'original' selects
         // records Osho gave originally in their language (translated_from
         // is none/NULL) regardless of language. Everything else is a literal
         // language filter (English, Hindi, …).
-        if (langFilter === 'original') {
-          params.set('original', 'true');
-        } else if (langFilter) {
-          params.set('language', langFilter);
-        }
-        if (exactMatch) params.set('exact', 'true');
-        if (dateFrom) params.set('date_from', dateFrom);
-        if (dateTo) params.set('date_to', dateTo);
-        const r = await fetch(`/api/ask?${params.toString()}`);
-        const body = (await r.json().catch(() => null)) as SearchResponse | { error?: string } | null;
-        if (!r.ok) {
-          throw new Error((body && 'error' in body && body.error) || 'Archive unreachable.');
-        }
+        const sr = await searchApi({
+          q: fts,
+          sort: s,
+          original: langFilter === 'original',
+          language: langFilter && langFilter !== 'original' ? langFilter : undefined,
+          exact: exactMatch || undefined,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
+        }, offlineEngine);
         setSubmittedQuery(fts);
-        const sr = body as SearchResponse;
         setResults(sr);
         trackSearch({
           query: rawQ,
@@ -370,7 +352,7 @@ function SearchPageInner() {
         setLoading(false);
       }
     },
-    [langFilter, dateFrom, dateTo, exactMatch],
+    [langFilter, dateFrom, dateTo, exactMatch, offlineEngine],
   );
 
   useEffect(() => {
@@ -383,11 +365,13 @@ function SearchPageInner() {
   }, []);
 
   useEffect(() => {
-    fetch('/api/languages')
-      .then((r) => r.json())
+    // Languages list — when offline engine is ready, this comes from
+    // the local DB; otherwise from /api/languages. Re-runs whenever
+    // the engine becomes available so the pill list updates seamlessly.
+    languagesApi(offlineEngine)
       .then((d) => { if (Array.isArray(d.languages)) setAvailableLanguages(d.languages); })
       .catch(() => {});
-  }, []);
+  }, [offlineEngine]);
 
   useEffect(() => {
     if (!selectedEventId) {
@@ -398,11 +382,11 @@ function SearchPageInner() {
     let cancelled = false;
     setDiscourseLoading(true);
     setDiscourseError(null);
-    const qParam = submittedQuery ? `&q=${encodeURIComponent(submittedQuery)}` : '';
-    fetch(`/api/discourse?event_id=${encodeURIComponent(selectedEventId)}${qParam}`)
-      .then(async (r) => {
-        const body = await r.json().catch(() => null);
-        if (!r.ok) throw new Error((body && body.error) || `Status ${r.status}`);
+    discourseApi(
+      { eventId: selectedEventId, q: submittedQuery || undefined },
+      offlineEngine,
+    )
+      .then((body) => {
         if (!cancelled) setDiscourse(body as DiscourseResponse);
       })
       .catch((err) => {
@@ -417,7 +401,7 @@ function SearchPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [selectedEventId, submittedQuery]);
+  }, [selectedEventId, submittedQuery, offlineEngine]);
 
   const doSearch = useCallback(
     (rawQ: string) => {
