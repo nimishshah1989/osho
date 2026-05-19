@@ -93,7 +93,15 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     } else if (result.kind === 'unsupported') {
       setState({ kind: 'unsupported', reason: result.reason });
     } else {
-      setState({ kind: 'unknown' });
+      // `needs-download` here means we tried to open just after a
+      // supposedly-successful install but the file still isn't visible
+      // in OPFS — treat as a real failure so the UI surfaces the
+      // Retry button. Silently dropping back to 'unknown' would hide
+      // the recovery path and leave offline setup stuck forever.
+      setState({
+        kind: 'failed',
+        reason: 'Corpus not present in OPFS after install — try again.',
+      });
     }
   }, []);
 

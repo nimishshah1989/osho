@@ -25,12 +25,23 @@ const DISMISS_KEY = 'osho:offline-banner-dismissed';
 export function OfflineBanner() {
   const { state, progress, startDownload } = useOfflineStatus();
   const [dismissed, setDismissed] = useState<boolean>(() => {
+    // Wrap the storage read — Safari private mode and some embedded
+    // webviews throw SecurityError just by touching sessionStorage,
+    // which would otherwise crash the first render.
     if (typeof window === 'undefined') return false;
-    return sessionStorage.getItem(DISMISS_KEY) === '1';
+    try {
+      return sessionStorage.getItem(DISMISS_KEY) === '1';
+    } catch {
+      return false;
+    }
   });
 
   if (state.kind === 'unsupported' || state.kind === 'unknown') return null;
-  if (dismissed && state.kind !== 'failed') return null;
+  // Dismiss works for every state. The earlier version excepted
+  // 'failed' so a user couldn't hide the failure banner at all — the
+  // X button silently no-op'd. Now dismiss is honoured; the Retry
+  // button on the failure banner stays the recovery path.
+  if (dismissed) return null;
 
   const dismiss = () => {
     setDismissed(true);

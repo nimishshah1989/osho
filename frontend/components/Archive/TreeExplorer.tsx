@@ -283,7 +283,11 @@ export default function TreeExplorer() {
     // landed, otherwise from /api/catalog. Re-runs when the engine
     // becomes available so the Archive populates immediately after
     // first-launch download completes.
+    // Clear any prior failure before retrying — otherwise a successful
+    // refetch (e.g. after the engine flips from null → ready) would
+    // still render the old "Archive unreachable" screen.
     setLoading(true);
+    setError(null);
     catalogApi(offlineEngine)
       .then((d) => { setRawEvents((d.events ?? []) as Event[]); setLoading(false); })
       .catch(() => { setError(t('archive.unreachable')); setLoading(false); });
