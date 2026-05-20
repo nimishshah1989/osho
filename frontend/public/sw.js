@@ -2,15 +2,15 @@
  * Osho Archives — service worker
  * ───────────────────────────────
  *
- * Two-tier cache strategy:
+ * Cache strategy:
  *
  *   STATIC_CACHE  — the app shell (HTML, JS, CSS, icons, fonts, the
  *                   sqlite-wasm runtime). Stable per release; we
  *                   bump CACHE_VERSION when shipping a new build.
  *
- *   CORPUS_CACHE  — `osho.db.zst` once it's been downloaded. Stays
- *                   put across releases because the DB is large and
- *                   the user already paid the download cost.
+ * The compressed corpus (`osho.db.zst`) is NOT cached here — the
+ * dbWorker streams it straight into OPFS, which is its permanent
+ * home. The SW lets that request pass through untouched.
  *
  * Routing rules:
  *
@@ -29,19 +29,18 @@
  *                    ready it stops issuing these entirely; while it
  *                    isn't, we let them fall through unmodified.
  *
- *   osho.db.zst    → cache-first, lives in its own cache so a
- *                    release bump doesn't blow it away.
+ *   osho.db.zst    → never intercepted; streamed to OPFS by the
+ *                    dbWorker, not the SW.
  *
  * Update flow:
- *   1. Push to main → Vercel rebuilds → new SW with new CACHE_VERSION.
+ *   1. main is rebuilt + redeployed → new SW with new CACHE_VERSION.
  *   2. New SW is detected next time the user opens the app; installs
  *      in parallel, takes over on next navigation.
  *   3. Old caches with mismatched CACHE_VERSION are deleted in
  *      `activate`.
  */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const STATIC_CACHE = `osho-static-${CACHE_VERSION}`;
-const CORPUS_CACHE = `osho-corpus-v1`; // intentionally version-independent
 
 // Pre-warm the shell so the very first offline navigation works even
 // before the user has clicked around.
@@ -92,11 +91,12 @@ self.addEventListener('fetch', (event) => {
   // proxy to keep serving.
   if (url.pathname.startsWith('/api/')) return;
 
-  // Compressed corpus — cache-first, separate cache bucket.
-  if (url.pathname.endsWith('/osho.db.zst') || url.pathname.includes('osho.db.zst')) {
-    event.respondWith(cacheFirst(req, CORPUS_CACHE));
-    return;
-  }
+  // Compressed corpus — never intercept. The dbWorker streams it
+  // straight into OPFS, its permanent home. If the SW also cached it,
+  // the ~550 MB file would be stored a second time (Cache Storage on
+  // top of OPFS) and cache.put() would buffer the whole stream. Let
+  // it hit the network untouched.
+  if (url.pathname.includes('osho.db.zst')) return;
 
   // _next/static — content-hashed, safe to cache forever.
   if (url.pathname.startsWith('/_next/static/')) {
