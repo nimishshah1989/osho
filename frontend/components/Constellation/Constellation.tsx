@@ -541,11 +541,27 @@ export default function Constellation() {
     // ready, otherwise from /api/catalog. Re-runs when the engine flips
     // from null → ready so the constellation populates right after the
     // first-launch download finishes.
+    //
+    // `cancelled` guards against the engine swap: the API request kicked
+    // off while the engine was null can still be in flight when the
+    // engine-backed request resolves. Without the guard the slower
+    // (stale) response could land last and overwrite fresh data — or
+    // show a false error.
+    let cancelled = false;
     setLoading(true);
     setError(null);
     catalogApi(offlineEngine)
-      .then((d) => { setEvents((d.events ?? []) as Event[]); setLoading(false); })
-      .catch(() => { setError('Could not load archive.'); setLoading(false); });
+      .then((d) => {
+        if (cancelled) return;
+        setEvents((d.events ?? []) as Event[]);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError('Could not load archive.');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [offlineEngine]);
 
   const allSeries = useMemo(() => buildSeries(events), [events]);
