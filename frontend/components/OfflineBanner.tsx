@@ -3,19 +3,25 @@
 /**
  * Top-of-page banner that shows what the offline subsystem is doing.
  *
- *   downloading  — "Downloading offline corpus… 24 / 400 MB"
- *   failed       — "Couldn't download. Retry" with a button
- *   ready        — small "offline" badge so the user knows their next
- *                  query won't need the network
- *   unsupported  — nothing (silently fall back to API)
+ *   needs-download — "Read offline?" with Download + Load-from-file
+ *   downloading    — progress bar ("142 / 552 MB · 26%")
+ *   failed         — "Couldn't download" + Retry + Load-from-file
+ *   ready          — small "offline" badge so the user knows their next
+ *                    query won't need the network
+ *   unsupported    — nothing (silently fall back to API)
+ *
+ * Two ways to install the corpus: download it from
+ * `NEXT_PUBLIC_CORPUS_URL`, or load a `.zst` archive the user already
+ * has on disk (shared over WhatsApp, a USB stick, etc.). Both run the
+ * same decompress-into-OPFS path.
  *
  * The banner is dismissable per-tab (sessionStorage) so a user who
- * doesn't care about offline can hide the progress bar without
- * stopping the download. Their next visit re-shows it if download is
- * still ongoing.
+ * doesn't care about offline can hide it.
  */
-import { useState } from 'react';
-import { Cloud, CloudOff, Loader2, RefreshCw, X } from 'lucide-react';
+import { useRef, useState, type ChangeEvent } from 'react';
+import {
+  Cloud, CloudOff, Download, FolderOpen, Loader2, RefreshCw, X,
+} from 'lucide-react';
 import { useOfflineStatus } from '../lib/search/OfflineProvider';
 
 
@@ -23,7 +29,8 @@ const DISMISS_KEY = 'osho:offline-banner-dismissed';
 
 
 export function OfflineBanner() {
-  const { state, progress, startDownload } = useOfflineStatus();
+  const { state, progress, startDownload, installFromFile } = useOfflineStatus();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dismissed, setDismissed] = useState<boolean>(() => {
     // Wrap the storage read — Safari private mode and some embedded
     // webviews throw SecurityError just by touching sessionStorage,
@@ -37,10 +44,6 @@ export function OfflineBanner() {
   });
 
   if (state.kind === 'unsupported' || state.kind === 'unknown') return null;
-  // Dismiss works for every state. The earlier version excepted
-  // 'failed' so a user couldn't hide the failure banner at all — the
-  // X button silently no-op'd. Now dismiss is honoured; the Retry
-  // button on the failure banner stays the recovery path.
   if (dismissed) return null;
 
   const dismiss = () => {
@@ -48,24 +51,86 @@ export function OfflineBanner() {
     try { sessionStorage.setItem(DISMISS_KEY, '1'); } catch { /* noop */ }
   };
 
+  const pickFile = () => fileInputRef.current?.click();
+  const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Clear the value so picking the same file again still fires change.
+    e.target.value = '';
+    if (file) installFromFile(file);
+  };
+
+  // Hidden picker — included in every render path that offers a file
+  // load so the ref is always mounted when `pickFile` runs.
+  //
+  // Deliberately no `accept` filter: mobile file pickers grey out files
+  // whose extension / MIME type they don't recognise, and `.zst` is
+  // often unknown — which would make the corpus file unselectable on a
+  // phone. The worker validates the pick by attempting decompression.
+  const filePicker = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      onChange={onFilePicked}
+      style={{ display: 'none' }}
+    />
+  );
+
+  const dismissBtn = (
+    <button
+      type="button"
+      onClick={dismiss}
+      className="text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]"
+      aria-label="Dismiss"
+    >
+      <X size={14} />
+    </button>
+  );
+
+  if (state.kind === 'needs-download') {
+    return (
+      <BannerShell colour="text-gold">
+        {filePicker}
+        <Cloud size={14} />
+        <span>Read offline?</span>
+        <button
+          type="button"
+          onClick={() => startDownload()}
+          className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
+        >
+          <Download size={12} /> Download
+        </button>
+        <span className="opacity-30">·</span>
+        <button
+          type="button"
+          onClick={pickFile}
+          className="inline-flex items-center gap-1 text-gold hover:underline"
+        >
+          <FolderOpen size={12} /> Load from file
+        </button>
+        <span className="ml-auto">{dismissBtn}</span>
+      </BannerShell>
+    );
+  }
+
   if (state.kind === 'downloading') {
-    const wrote = progress?.bytesWritten ?? 0;
-    // Estimate total decompressed size from the compressed size + a
-    // conservative 4× ratio. Once we know the actual written total,
-    // we'll show the real number.
-    const compressed = progress?.bytesTotal ?? 0;
-    const estTotal = compressed * 4;
-    const pct = estTotal > 0 ? Math.min(99, Math.round((wrote / estTotal) * 100)) : null;
+    // Show the actual transfer: bytes received / total. For a URL
+    // download `bytesTotal` is the Content-Length; for a file import
+    // it's the exact file size. Either way it's accurate — unlike the
+    // decompressed size, which can't be known until the stream ends.
+    const received = progress?.bytesReceived ?? 0;
+    const total = progress?.bytesTotal ?? 0;
+    const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
+    const finishing = progress?.phase === 'writing' || progress?.phase === 'done';
     return (
       <BannerShell colour="text-gold">
         <Loader2 size={14} className="animate-spin" />
         <span>
-          Downloading offline corpus
-          {progress && (
+          {finishing ? 'Unpacking offline archive' : 'Downloading offline archive'}
+          {progress && !finishing && (
             <span className="opacity-70 ml-2 tabular-nums">
-              {fmtMb(wrote)}
-              {estTotal > 0 && ` / ~${fmtMb(estTotal)}`}
-              {pct !== null && ` (${pct}%)`}
+              {fmtMb(received)}
+              {total > 0 && ` / ${fmtMb(total)}`}
+              {pct !== null && ` · ${pct}%`}
             </span>
           )}
         </span>
@@ -73,7 +138,7 @@ export function OfflineBanner() {
           type="button"
           onClick={dismiss}
           className="ml-auto text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]"
-          aria-label="Hide download banner (download continues)"
+          aria-label="Hide banner (install continues)"
         >
           <X size={14} />
         </button>
@@ -84,8 +149,9 @@ export function OfflineBanner() {
   if (state.kind === 'failed') {
     return (
       <BannerShell colour="text-amber-400">
+        {filePicker}
         <CloudOff size={14} />
-        <span>Couldn&apos;t download for offline use.</span>
+        <span>Couldn&apos;t set up offline use.</span>
         <span className="opacity-70 ml-2 truncate">{state.reason}</span>
         <button
           type="button"
@@ -94,14 +160,15 @@ export function OfflineBanner() {
         >
           <RefreshCw size={12} /> Retry
         </button>
+        <span className="opacity-30">·</span>
         <button
           type="button"
-          onClick={dismiss}
-          className="text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]"
-          aria-label="Dismiss"
+          onClick={pickFile}
+          className="inline-flex items-center gap-1 text-gold hover:underline"
         >
-          <X size={14} />
+          <FolderOpen size={12} /> Load from file
         </button>
+        {dismissBtn}
       </BannerShell>
     );
   }
