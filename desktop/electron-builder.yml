@@ -12,11 +12,18 @@ directories:
   output: dist
   buildResources: build
 
-# `app/` is the bundled static frontend — CI copies frontend/out into
-# it before packaging. node_modules for runtime deps (serve-handler)
-# is included automatically.
+# `asar: false` — keep the app as plain files rather than an asar
+# archive. The bundled corpus is ~550 MB; serving it (and reading it
+# back) is simplest and most reliable straight off the filesystem.
+asar: false
+
+# `app/` is the bundled static frontend plus the corpus at
+# app/corpus/osho.db.zst — CI populates it before packaging.
+# node_modules for runtime deps (serve-handler) is included
+# automatically.
 files:
   - main.js
+  - preload.js
   - package.json
   - app/**/*
 

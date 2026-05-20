@@ -154,7 +154,7 @@ export function corpusExistsInOpfs(filename: string): Promise<boolean> {
  *  Works with no connectivity at all (file shared over WhatsApp, a USB
  *  stick, etc.). */
 export function installCorpusFromFile(
-  file: File,
+  file: Blob,
   filename: string,
   onProgress?: (p: ProgressUpdate) => void,
 ): Promise<void> {

@@ -1,18 +1,20 @@
 'use strict';
 
 /**
- * Osho Archives — desktop app, main process (Phase 2a).
+ * Osho Archives — desktop app, main process.
  *
- * The app ships a static copy of the frontend (CI copies
- * `frontend/out` → `desktop/app`). The main process serves that
- * directory from a local HTTP server on 127.0.0.1 and points the
- * window at it — so the renderer behaves exactly like the web app on
- * a real server (client routing, web workers, OPFS all work as
- * already tested in browsers).
+ * The installer bundles a static copy of the frontend *and* the
+ * compressed corpus (CI populates `desktop/app/`, with the corpus at
+ * `desktop/app/corpus/osho.db.zst`). The main process serves that
+ * whole directory from a local HTTP server on 127.0.0.1 and points the
+ * window at it — so the renderer behaves exactly like the web app on a
+ * real server (client routing, web workers, OPFS all work as already
+ * tested in browsers).
  *
- * Phase 2b will also serve the bundled corpus from this server and
- * auto-install it, so the app is fully offline from first launch with
- * no download step.
+ * `preload.js` tells the frontend it's running in the desktop app;
+ * OfflineProvider then fetches the bundled corpus from this local
+ * server and installs it on first launch — so the app is fully offline
+ * from the very first run, with no download step.
  */
 const { app, BrowserWindow, shell } = require('electron');
 const http = require('node:http');
@@ -54,6 +56,7 @@ function createWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 

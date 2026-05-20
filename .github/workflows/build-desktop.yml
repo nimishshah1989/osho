@@ -42,6 +42,18 @@ jobs:
           rm -rf desktop/app
           cp -r frontend/out desktop/app
 
+      # Bundle the offline corpus inside the installer. Pulled from the
+      # stable `corpus-latest` GitHub release (server-side download — no
+      # CORS in play). The app's local server serves it at /corpus/...
+      - name: Bundle the offline corpus
+        shell: bash
+        run: |
+          mkdir -p desktop/app/corpus
+          curl -fL --retry 3 --retry-delay 5 \
+            -o desktop/app/corpus/osho.db.zst \
+            "https://github.com/nimishshah1989/osho/releases/download/corpus-latest/osho.db.zst"
+          ls -lh desktop/app/corpus/osho.db.zst
+
       - name: Build installer
         shell: bash
         working-directory: desktop
