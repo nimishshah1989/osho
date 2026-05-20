@@ -6,7 +6,6 @@ import { LocaleProvider } from "../lib/i18n";
 import { ThemeProvider } from "../lib/theme";
 import { GA_ID } from "../lib/analytics";
 import { PwaRegistrar } from "../components/PwaRegistrar";
-import { OfflineBanner } from "../components/OfflineBanner";
 import { OfflineProvider } from "../lib/search/OfflineProvider";
 
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
@@ -81,7 +80,6 @@ export default function RootLayout({
         <ThemeProvider>
           <LocaleProvider>
             <OfflineProvider>
-              <OfflineBanner />
               {children}
             </OfflineProvider>
           </LocaleProvider>
