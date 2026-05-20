@@ -61,11 +61,15 @@ export function OfflineBanner() {
 
   // Hidden picker — included in every render path that offers a file
   // load so the ref is always mounted when `pickFile` runs.
+  //
+  // Deliberately no `accept` filter: mobile file pickers grey out files
+  // whose extension / MIME type they don't recognise, and `.zst` is
+  // often unknown — which would make the corpus file unselectable on a
+  // phone. The worker validates the pick by attempting decompression.
   const filePicker = (
     <input
       ref={fileInputRef}
       type="file"
-      accept=".zst,application/zstd"
       onChange={onFilePicked}
       style={{ display: 'none' }}
     />
