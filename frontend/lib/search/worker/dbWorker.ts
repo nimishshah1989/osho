@@ -19,9 +19,9 @@
  * Messages:
  *
  *   request                          → reply
- *   {cmd:'install', url, filename}   → {ok:true} | {ok:false,kind,message}
+ *   {cmd:'install-file', file, filename}
+ *                                    → {ok:true} | {ok:false,kind,message}
  *                                      + zero or more {progress:{...}}
- *   {cmd:'install-file', file, filename} → same replies as 'install'
  *   {cmd:'has',     filename}        → {ok:true, exists:boolean}
  *   {cmd:'open',    filename}        → {ok:true} | unsupported
  *   {cmd:'search',  opts}            → {ok:true, data:SearchResponse}
@@ -53,7 +53,6 @@ export type ProgressUpdate = {
 };
 
 export type WorkerRequest =
-  | { id: number; cmd: 'install'; url: string; filename: string }
   | { id: number; cmd: 'install-file'; file: Blob; filename: string }
   | { id: number; cmd: 'has'; filename: string }
   | { id: number; cmd: 'open'; filename: string }
@@ -133,32 +132,25 @@ async function corpusExists(filename: string): Promise<boolean> {
 
 interface InstallProgressEmit { (p: ProgressUpdate): void }
 
-async function installCorpus(url: string, filename: string, emit: InstallProgressEmit): Promise<void> {
-  const response = await fetch(url);
-  if (!response.ok) throw makeErr('network', `HTTP ${response.status} fetching ${url}`);
-  if (!response.body) throw makeErr('network', 'Response had no body.');
-  const bytesTotal = parseInt(response.headers.get('Content-Length') ?? '', 10) || null;
-  await streamIntoOpfs(response.body, bytesTotal, filename, emit);
-}
-
-
 async function installCorpusFromFile(
   file: Blob,
   filename: string,
   emit: InstallProgressEmit,
 ): Promise<void> {
-  // The picked file is the same compressed `.zst` archive the URL path
-  // downloads — just sourced from the user's disk instead of the
-  // network. `file.size` is exact, so progress is precise.
+  // The corpus is always installed from a file the user picked off
+  // disk — either the compressed `.zst` archive or an already-extracted
+  // `.db`. `file.size` is exact, so progress is precise.
   await streamIntoOpfs(file.stream(), file.size || null, filename, emit);
 }
 
 
 /**
- * Core installer: drain a stream of compressed bytes through fzstd into
- * a `.partial` OPFS file, then atomically swap it in as the corpus.
- * Shared by the URL download and the local-file import — they differ
- * only in where the byte stream is sourced from.
+ * Core installer: drain a stream into a `.partial` OPFS file, then
+ * atomically swap it in as the corpus. The input format is auto-
+ * detected from its first bytes — a zstd archive is decompressed on
+ * the way in; a raw SQLite database is copied verbatim. (Windows users
+ * routinely extract the `.zst` with WinRAR/7-Zip, so the raw `.db`
+ * must work too.)
  */
 async function streamIntoOpfs(
   stream: ReadableStream<Uint8Array>,
@@ -185,55 +177,87 @@ async function streamIntoOpfs(
     throw makeErr('storage', `OPFS sync-access-handle unavailable: ${(e as Error).message}`);
   }
 
-  // Stream-decompress: feed decoded chunks straight into OPFS. Track the
-  // *actual* number of bytes the SAH accepted (short writes are rare
-  // but valid per spec) and loop until the whole chunk is written.
-  const decoder = new Decompress((chunk) => {
+  // Writes raw (already-decompressed) bytes into the OPFS temp file.
+  // Tracks the *actual* number of bytes the SAH accepted — short writes
+  // are rare but valid per spec — and loops until the chunk is done.
+  const writeToSah = (chunk: Uint8Array) => {
     let offset = 0;
     while (offset < chunk.byteLength) {
-      const written = sah.write(
-        chunk.subarray(offset),
-        { at: bytesWritten + offset },
-      );
+      const written = sah.write(chunk.subarray(offset), { at: bytesWritten + offset });
       if (written <= 0) {
         throw makeErr('storage', `OPFS write returned ${written} — out of space?`);
       }
       offset += written;
     }
     bytesWritten += chunk.byteLength;
-  });
+  };
 
   emit({ phase: 'downloading', bytesReceived, bytesTotal, bytesWritten });
 
   const reader = stream.getReader();
   let lastEmit = 0;
   try {
-    while (true) {
+    // Read enough of the head to identify the format, then route it:
+    //   zstd archive    (28 B5 2F FD)         → decompress into OPFS
+    //   SQLite database ("SQLite format 3\0") → copy in verbatim
+    const ZSTD_MAGIC = [0x28, 0xb5, 0x2f, 0xfd];
+    const SQLITE_MAGIC = [
+      0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66,
+      0x6f, 0x72, 0x6d, 0x61, 0x74, 0x20, 0x33, 0x00,
+    ];
+    let head = new Uint8Array(0);
+    let streamDone = false;
+    while (head.byteLength < SQLITE_MAGIC.length) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) { streamDone = true; break; }
       bytesReceived += value.byteLength;
-      try {
-        decoder.push(value);
-      } catch (e) {
-        // The decoder callback writes straight to OPFS, so a thrown
-        // error here can be a corrupt-archive failure from fzstd OR
-        // an out-of-space failure we threw inside the SAH write loop.
-        // Preserve any `__kind` we already set so storage errors don't
-        // get mislabeled as decode errors.
-        if (isErr(e)) throw e;
-        throw makeErr('decode', `Corrupt archive: ${(e as Error).message}`);
-      }
-      if (bytesReceived - lastEmit > 256 * 1024) {
-        emit({ phase: 'downloading', bytesReceived, bytesTotal, bytesWritten });
-        lastEmit = bytesReceived;
-      }
+      const merged = new Uint8Array(head.byteLength + value.byteLength);
+      merged.set(head);
+      merged.set(value, head.byteLength);
+      head = merged;
     }
-    // Final flush — wrap separately so a corrupt tail-block doesn't get
-    // reported as a network error.
+
+    const isZstd = ZSTD_MAGIC.every((b, i) => head[i] === b);
+    const isSqlite = SQLITE_MAGIC.every((b, i) => head[i] === b);
+    if (!isZstd && !isSqlite) {
+      throw makeErr(
+        'decode',
+        'Unrecognised file — pick the Osho corpus archive (osho.db.zst) or database (osho.db).',
+      );
+    }
+
+    // `feed` consumes one input chunk; `finish` flushes at end of stream.
+    // zstd → stream through fzstd; raw DB → straight to OPFS.
+    let feed: (c: Uint8Array) => void;
+    let finish: () => void;
+    if (isZstd) {
+      const decoder = new Decompress(writeToSah);
+      feed = (c) => decoder.push(c);
+      finish = () => decoder.push(new Uint8Array(0), true);
+    } else {
+      feed = writeToSah;
+      finish = () => { /* raw copy — nothing to flush */ };
+    }
+
     try {
-      decoder.push(new Uint8Array(0), true);
+      feed(head);
+      while (!streamDone) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        bytesReceived += value.byteLength;
+        feed(value);
+        if (bytesReceived - lastEmit > 256 * 1024) {
+          emit({ phase: 'downloading', bytesReceived, bytesTotal, bytesWritten });
+          lastEmit = bytesReceived;
+        }
+      }
+      finish();
     } catch (e) {
-      throw makeErr('decode', `Corrupt archive at end: ${(e as Error).message}`);
+      // A throw here is either a corrupt archive (from fzstd) or an
+      // out-of-space failure raised inside writeToSah. Preserve any
+      // `__kind` already set so storage errors aren't mislabeled.
+      if (isErr(e)) throw e;
+      throw makeErr('decode', `Corrupt archive: ${(e as Error).message}`);
     }
     emit({ phase: 'writing', bytesReceived, bytesTotal, bytesWritten });
   } catch (e) {
@@ -404,10 +428,6 @@ async function handle(req: WorkerRequest): Promise<void> {
     switch (req.cmd) {
       case 'has':
         reply({ id: req.id, ok: true, data: await corpusExists(req.filename) });
-        return;
-      case 'install':
-        await installCorpus(req.url, req.filename, (p) => reply({ id: req.id, progress: p }));
-        reply({ id: req.id, ok: true });
         return;
       case 'install-file':
         await installCorpusFromFile(req.file, req.filename, (p) => reply({ id: req.id, progress: p }));

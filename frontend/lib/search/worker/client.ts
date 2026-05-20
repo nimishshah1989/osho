@@ -148,21 +148,11 @@ export function corpusExistsInOpfs(filename: string): Promise<boolean> {
 }
 
 
-/** Download + decompress the corpus into OPFS. `onProgress` fires
- *  multiple times during the download and once with `phase:'done'`. */
-export function installCorpus(
-  url: string,
-  filename: string,
-  onProgress?: (p: ProgressUpdate) => void,
-): Promise<void> {
-  return rpc<void>({ cmd: 'install', url, filename }, onProgress);
-}
-
-
-/** Decompress a corpus archive the user picked from disk into OPFS.
- *  Same destination and progress reporting as `installCorpus`, just
- *  sourced from a local file instead of the network — so it works with
- *  no connectivity at all (file shared over WhatsApp, a USB stick…). */
+/** Install the corpus into OPFS from a file the user picked off disk —
+ *  either the compressed `.zst` archive or an already-extracted `.db`.
+ *  `onProgress` fires repeatedly and once more with `phase:'done'`.
+ *  Works with no connectivity at all (file shared over WhatsApp, a USB
+ *  stick, etc.). */
 export function installCorpusFromFile(
   file: File,
   filename: string,

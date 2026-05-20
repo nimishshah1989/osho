@@ -34,7 +34,7 @@ export { hlTokenPositions, markersToGuillemets } from './highlight';
 // sqlite-wasm + OPFS worker).
 export {
   corpusExistsInOpfs,
-  installCorpus,
+  installCorpusFromFile,
   openOfflineEngine,
 } from './worker/client';
 export type {
