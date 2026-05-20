@@ -1,21 +1,20 @@
 name: Publish offline corpus
 
-# Builds the compressed SQLite corpus on the EC2 backend host and
-# replaces the asset attached to the `corpus-latest` release. The
-# PWA's `NEXT_PUBLIC_CORPUS_URL` points at that asset, so this
-# workflow is what keeps the offline corpus in lockstep with the
-# live API DB.
+# Builds the compressed SQLite corpus on the E2E VPS and replaces the
+# asset attached to the `corpus-latest` release. The PWA's
+# `NEXT_PUBLIC_CORPUS_URL` points at that asset, so this workflow is
+# what keeps the offline corpus in lockstep with the live API DB.
 #
 # Triggers:
 #   - Manual via Actions UI (workflow_dispatch). Used after a big
 #     archival edit when you want the offline copy refreshed
 #     immediately.
 #   - Nightly at 02:00 UTC. The build takes ~1-2 min and the
-#     upload depends on the link between EC2 and GitHub.
+#     upload depends on the link between the VPS and GitHub.
 #
 # Secrets required on the repo:
-#   BACKEND_HOST, BACKEND_USER, BACKEND_SSH_KEY (already used by
-#   deploy-backend.yml).
+#   BACKEND_SSH_KEY — its public half must be in `osho`'s
+#   authorized_keys on the VPS (also used by deploy-backend.yml).
 #   GITHUB_TOKEN — provided by Actions automatically and has
 #   contents:write on this repo when permissions are set below.
 on:
@@ -30,7 +29,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Build + publish corpus from EC2
+      - name: Build + publish corpus from the VPS
         uses: appleboy/ssh-action@v1.0.3
         env:
           # Forwarded into the remote shell via the action's
@@ -38,14 +37,15 @@ jobs:
           # know which repo to publish to.
           GH_TOKEN_FOR_RELEASE: ${{ secrets.GITHUB_TOKEN }}
         with:
-          host: ${{ secrets.BACKEND_HOST }}
-          username: ${{ secrets.BACKEND_USER }}
+          # Host + user are not secrets (public infra, see CLAUDE.md);
+          # only the SSH key is.
+          host: 151.185.42.16
+          username: osho
           key: ${{ secrets.BACKEND_SSH_KEY }}
-          port: ${{ secrets.BACKEND_PORT || 22 }}
           envs: GH_TOKEN_FOR_RELEASE
           script: |
             set -euo pipefail
-            cd /home/ubuntu/osho-speaks
+            cd /home/osho/osho
             git fetch origin main
             git reset --hard origin/main
 

@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useOfflineEngine } from '../../lib/search/OfflineProvider';
+import { catalogApi } from '../../lib/search/searchApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -532,12 +534,35 @@ export default function Constellation() {
   const [sort, setSort] = useState<'date' | 'name' | 'size'>('date');
   const [openSeries, setOpenSeries] = useState<string | null>(null);
 
+  const offlineEngine = useOfflineEngine();
+
   useEffect(() => {
-    fetch('/api/catalog', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d: { events: Event[] }) => { setEvents(d.events); setLoading(false); })
-      .catch(() => { setError('Could not load archive.'); setLoading(false); });
-  }, []);
+    // Catalog comes from the local engine when the offline corpus is
+    // ready, otherwise from /api/catalog. Re-runs when the engine flips
+    // from null → ready so the constellation populates right after the
+    // first-launch download finishes.
+    //
+    // `cancelled` guards against the engine swap: the API request kicked
+    // off while the engine was null can still be in flight when the
+    // engine-backed request resolves. Without the guard the slower
+    // (stale) response could land last and overwrite fresh data — or
+    // show a false error.
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    catalogApi(offlineEngine)
+      .then((d) => {
+        if (cancelled) return;
+        setEvents((d.events ?? []) as Event[]);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError('Could not load archive.');
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [offlineEngine]);
 
   const allSeries = useMemo(() => buildSeries(events), [events]);
 

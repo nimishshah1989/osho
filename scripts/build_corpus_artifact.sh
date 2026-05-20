@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the compressed SQLite corpus the offline PWA downloads on first
-# launch. Runs on the same EC2 box that hosts the live DB — designed to
-# be cheap enough to schedule nightly (cron).
+# launch. Runs on the E2E VPS that hosts the live DB — designed to be
+# cheap enough to schedule nightly (cron).
 #
 # Output: data/artifacts/osho.db.zst
 #
@@ -20,7 +20,7 @@
 # later PR) a content hash before opening the file.
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-/home/ubuntu/osho-speaks}"
+REPO_DIR="${REPO_DIR:-/home/osho/osho}"
 DB_PATH="${DB_PATH:-${REPO_DIR}/data/osho.db}"
 ART_DIR="${ART_DIR:-${REPO_DIR}/data/artifacts}"
 PY="${PY:-${REPO_DIR}/.venv/bin/python3}"

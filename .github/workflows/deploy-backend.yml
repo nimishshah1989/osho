@@ -19,18 +19,21 @@ jobs:
       - name: SSH and run server-side deploy script
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.BACKEND_HOST }}
-          username: ${{ secrets.BACKEND_USER }}
+          # The E2E VPS. Host + user are not secrets (the IP is public
+          # infra, documented in CLAUDE.md); only the SSH key is. The
+          # box's authorized_keys must hold the public half of
+          # BACKEND_SSH_KEY for user `osho`.
+          host: 151.185.42.16
+          username: osho
           key: ${{ secrets.BACKEND_SSH_KEY }}
-          port: ${{ secrets.BACKEND_PORT || 22 }}
           # All deploy logic lives in scripts/deploy.sh on the server so we
           # never need to re-edit this workflow. The script:
           #   1. git pull
           #   2. pip install (if requirements.txt changed)
           #   3. rebuild FTS index (if build_fts.py or data/** changed)
-          #   4. restart uvicorn
+          #   4. restart osho-backend.service (systemd)
           #   5. curl /health and exit non-zero if it doesn't return 200
           script: |
             set -euo pipefail
-            cd /home/ubuntu/osho-speaks
+            cd /home/osho/osho
             bash scripts/deploy.sh
