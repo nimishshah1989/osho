@@ -24,13 +24,42 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        working-directory: desktop
-        run: npm install
+      # Build the frontend as a static export. `shell: bash` so the
+      # rm / env-var syntax works on the Windows runner too.
+      - name: Build frontend (static export)
+        shell: bash
+        working-directory: frontend
+        run: |
+          npm install
+          rm -rf app/api app/ask
+          DESKTOP_BUILD=true npx next build
+
+      # Stage the static frontend inside the desktop project so
+      # electron-builder bundles it.
+      - name: Stage frontend into desktop app
+        shell: bash
+        run: |
+          rm -rf desktop/app
+          cp -r frontend/out desktop/app
+
+      # Bundle the offline corpus inside the installer. Pulled from the
+      # stable `corpus-latest` GitHub release (server-side download — no
+      # CORS in play). The app's local server serves it at /corpus/...
+      - name: Bundle the offline corpus
+        shell: bash
+        run: |
+          mkdir -p desktop/app/corpus
+          curl -fL --retry 3 --retry-delay 5 \
+            -o desktop/app/corpus/osho.db.zst \
+            "https://github.com/nimishshah1989/osho/releases/download/corpus-latest/osho.db.zst"
+          ls -lh desktop/app/corpus/osho.db.zst
 
       - name: Build installer
+        shell: bash
         working-directory: desktop
-        run: npm run dist
+        run: |
+          npm install
+          npm run dist
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

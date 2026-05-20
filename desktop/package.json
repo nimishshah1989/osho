@@ -1,7 +1,7 @@
 {
   "name": "osho-archives-desktop",
   "productName": "Osho Archives",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Osho Archives — desktop app for searching Osho's complete discourses",
   "author": "Osho Archives",
   "license": "UNLICENSED",
@@ -10,6 +10,9 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder"
+  },
+  "dependencies": {
+    "serve-handler": "^6.1.6"
   },
   "devDependencies": {
     "electron": "^33.2.0",

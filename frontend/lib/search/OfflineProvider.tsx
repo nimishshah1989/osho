@@ -43,7 +43,7 @@ export interface OfflineContextValue {
   progress: ProgressUpdate | null;
   /** Install the corpus from a file the user picked off disk — the
    *  compressed `.zst` archive or an already-extracted `.db`. */
-  installFromFile: (file: File) => void;
+  installFromFile: (file: Blob) => void;
 }
 
 
@@ -59,6 +59,11 @@ export type OfflineRuntimeState =
 // Tunables ---------------------------------------------------------------
 
 const OPFS_FILENAME = 'osho.db';
+
+// The Electron desktop app's preload script sets `window.oshoDesktop`
+// with the local URL of the corpus bundled inside the installer. On the
+// plain website this is undefined.
+type DesktopWindow = Window & { oshoDesktop?: { corpusUrl?: string } };
 
 
 const Ctx = createContext<OfflineContextValue>({
@@ -99,9 +104,11 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Install the corpus from a file the user picked off disk. The worker
-  // auto-detects the format — compressed `.zst` or raw `.db`.
-  const installFromFile = useCallback(async (file: File) => {
+  // Install the corpus from a `Blob` — a file the user picked off disk
+  // (the compressed `.zst` or an already-extracted `.db`), or the
+  // bundled corpus the desktop app fetches from its local server. The
+  // worker auto-detects the format.
+  const installBlob = useCallback(async (file: Blob) => {
     if (downloadingRef.current) return;
     downloadingRef.current = true;
     setState({ kind: 'downloading' });
@@ -116,6 +123,18 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
   }, [tryOpen]);
 
+  // Desktop app only: fetch the corpus bundled inside the installer
+  // (served by the app's local HTTP server) and install it.
+  const installFromUrl = useCallback(async (url: string) => {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`Bundled corpus unavailable (HTTP ${resp.status}).`);
+      await installBlob(await resp.blob());
+    } catch (e) {
+      setState({ kind: 'failed', reason: e instanceof Error ? e.message : String(e) });
+    }
+  }, [installBlob]);
+
   useEffect(() => {
     let cancelled = false;
     async function probe() {
@@ -126,19 +145,26 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
         setEngine(result.engine);
         setState({ kind: 'ready' });
       } else if (result.kind === 'needs-download') {
-        // No corpus yet. The banner prompts the user to load a corpus
-        // file from disk; there is no automatic network download.
-        setState({ kind: 'needs-download' });
+        // In the desktop app the corpus is bundled in the installer and
+        // served by the local server — install it automatically. On the
+        // web there's no bundled corpus, so wait for the user (the
+        // /downloadapp page drives the file import).
+        const corpusUrl = (window as DesktopWindow).oshoDesktop?.corpusUrl;
+        if (corpusUrl) {
+          void installFromUrl(corpusUrl);
+        } else {
+          setState({ kind: 'needs-download' });
+        }
       } else {
         setState({ kind: 'unsupported', reason: result.reason });
       }
     }
     void probe();
     return () => { cancelled = true; };
-  }, []);
+  }, [installFromUrl]);
 
   return (
-    <Ctx.Provider value={{ state, engine, progress, installFromFile }}>
+    <Ctx.Provider value={{ state, engine, progress, installFromFile: installBlob }}>
       {children}
     </Ctx.Provider>
   );
