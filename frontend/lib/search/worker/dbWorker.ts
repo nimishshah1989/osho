@@ -21,6 +21,7 @@
  *   request                          → reply
  *   {cmd:'install', url, filename}   → {ok:true} | {ok:false,kind,message}
  *                                      + zero or more {progress:{...}}
+ *   {cmd:'install-file', file, filename} → same replies as 'install'
  *   {cmd:'has',     filename}        → {ok:true, exists:boolean}
  *   {cmd:'open',    filename}        → {ok:true} | unsupported
  *   {cmd:'search',  opts}            → {ok:true, data:SearchResponse}
@@ -53,6 +54,7 @@ export type ProgressUpdate = {
 
 export type WorkerRequest =
   | { id: number; cmd: 'install'; url: string; filename: string }
+  | { id: number; cmd: 'install-file'; file: Blob; filename: string }
   | { id: number; cmd: 'has'; filename: string }
   | { id: number; cmd: 'open'; filename: string }
   | { id: number; cmd: 'search'; opts: SearchOptions }
@@ -132,17 +134,44 @@ async function corpusExists(filename: string): Promise<boolean> {
 interface InstallProgressEmit { (p: ProgressUpdate): void }
 
 async function installCorpus(url: string, filename: string, emit: InstallProgressEmit): Promise<void> {
+  const response = await fetch(url);
+  if (!response.ok) throw makeErr('network', `HTTP ${response.status} fetching ${url}`);
+  if (!response.body) throw makeErr('network', 'Response had no body.');
+  const bytesTotal = parseInt(response.headers.get('Content-Length') ?? '', 10) || null;
+  await streamIntoOpfs(response.body, bytesTotal, filename, emit);
+}
+
+
+async function installCorpusFromFile(
+  file: Blob,
+  filename: string,
+  emit: InstallProgressEmit,
+): Promise<void> {
+  // The picked file is the same compressed `.zst` archive the URL path
+  // downloads — just sourced from the user's disk instead of the
+  // network. `file.size` is exact, so progress is precise.
+  await streamIntoOpfs(file.stream(), file.size || null, filename, emit);
+}
+
+
+/**
+ * Core installer: drain a stream of compressed bytes through fzstd into
+ * a `.partial` OPFS file, then atomically swap it in as the corpus.
+ * Shared by the URL download and the local-file import — they differ
+ * only in where the byte stream is sourced from.
+ */
+async function streamIntoOpfs(
+  stream: ReadableStream<Uint8Array>,
+  bytesTotal: number | null,
+  filename: string,
+  emit: InstallProgressEmit,
+): Promise<void> {
   const root = await navigator.storage.getDirectory();
   const tempName = `${filename}.partial`;
   // Drop any leftover .partial from a previous attempt so we start
   // from a clean slate.
   try { await root.removeEntry(tempName); } catch { /* not there, fine */ }
 
-  const response = await fetch(url);
-  if (!response.ok) throw makeErr('network', `HTTP ${response.status} fetching ${url}`);
-  if (!response.body) throw makeErr('network', 'Response had no body.');
-
-  const bytesTotal = parseInt(response.headers.get('Content-Length') ?? '', 10) || null;
   let bytesReceived = 0;
   let bytesWritten = 0;
 
@@ -176,7 +205,7 @@ async function installCorpus(url: string, filename: string, emit: InstallProgres
 
   emit({ phase: 'downloading', bytesReceived, bytesTotal, bytesWritten });
 
-  const reader = response.body.getReader();
+  const reader = stream.getReader();
   let lastEmit = 0;
   try {
     while (true) {
@@ -378,6 +407,10 @@ async function handle(req: WorkerRequest): Promise<void> {
         return;
       case 'install':
         await installCorpus(req.url, req.filename, (p) => reply({ id: req.id, progress: p }));
+        reply({ id: req.id, ok: true });
+        return;
+      case 'install-file':
+        await installCorpusFromFile(req.file, req.filename, (p) => reply({ id: req.id, progress: p }));
         reply({ id: req.id, ok: true });
         return;
       case 'open':

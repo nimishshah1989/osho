@@ -159,6 +159,19 @@ export function installCorpus(
 }
 
 
+/** Decompress a corpus archive the user picked from disk into OPFS.
+ *  Same destination and progress reporting as `installCorpus`, just
+ *  sourced from a local file instead of the network — so it works with
+ *  no connectivity at all (file shared over WhatsApp, a USB stick…). */
+export function installCorpusFromFile(
+  file: File,
+  filename: string,
+  onProgress?: (p: ProgressUpdate) => void,
+): Promise<void> {
+  return rpc<void>({ cmd: 'install-file', file, filename }, onProgress);
+}
+
+
 /** Decide what state the offline DB is in for this user. Cheap call —
  *  use it on app open to decide whether to render the download screen
  *  or jump straight into search. */

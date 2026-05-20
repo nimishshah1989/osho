@@ -8,24 +8,24 @@
  *   2. If yes → open it and expose the engine. Subsequent calls to
  *      `useOfflineEngine()` return it; `searchApi(...)` will route
  *      every query through the local DB.
- *   3. If no → start downloading in the background. The UI keeps
- *      working against the API proxy while the download happens —
- *      the engine just isn't available yet. When the download
- *      finishes, the engine becomes available and the next search
- *      goes local.
+ *   3. If no → state is `needs-download`. The UI offers two ways in:
+ *      `startDownload()` (fetch from `NEXT_PUBLIC_CORPUS_URL`) or
+ *      `installFromFile()` (a corpus archive the user already has on
+ *      disk — shared over WhatsApp, a USB stick, etc.). The download
+ *      is deliberately *not* auto-started: it's hundreds of MB, so
+ *      the user opts in. Until then the UI works against the API.
  *   4. If the browser doesn't support OPFS / workers → stay
  *      unsupported forever. UI sticks to the API. No banner shown,
  *      no spam.
  *
- * Configured via `NEXT_PUBLIC_CORPUS_URL`. When unset, the provider
- * stays in "unsupported" (no automatic download attempt) so a local
- * dev environment without a CDN doesn't fail loudly.
+ * The download URL is `NEXT_PUBLIC_CORPUS_URL`. When unset, the
+ * `needs-download` prompt offers only the file-import path.
  */
 import {
   createContext, useCallback, useContext, useEffect, useRef, useState,
 } from 'react';
 import {
-  installCorpus, openOfflineEngine,
+  installCorpus, installCorpusFromFile, openOfflineEngine,
 } from './worker/client';
 import type {
   OfflineEngine, OfflineState, ProgressUpdate,
@@ -44,15 +44,16 @@ export interface OfflineContextValue {
   engine: OfflineEngine | null;
   /** Most recent download-progress event, when a download is active. */
   progress: ProgressUpdate | null;
-  /** Trigger / re-trigger the download. UI rarely needs to call this
-   *  manually — it auto-runs on mount when state is needs-download.
-   *  Exposed so a "retry" button works after a failure. */
+  /** Start (or retry) the corpus download from `NEXT_PUBLIC_CORPUS_URL`. */
   startDownload: () => void;
+  /** Install the corpus from a `.zst` archive the user picked off disk. */
+  installFromFile: (file: File) => void;
 }
 
 
 export type OfflineRuntimeState =
   | { kind: 'unknown' }            // before the first probe
+  | { kind: 'needs-download' }     // no corpus yet — awaiting user choice
   | { kind: 'downloading' }        // corpus install in progress
   | { kind: 'ready' }              // engine available
   | { kind: 'unsupported'; reason: string }
@@ -72,6 +73,7 @@ const Ctx = createContext<OfflineContextValue>({
   engine: null,
   progress: null,
   startDownload: () => {},
+  installFromFile: () => {},
 });
 
 
@@ -108,7 +110,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   const startDownload = useCallback(async () => {
     if (downloadingRef.current) return;
     if (!CORPUS_URL) {
-      setState({ kind: 'unsupported', reason: 'No corpus URL configured.' });
+      setState({ kind: 'failed', reason: 'No download URL configured.' });
       return;
     }
     downloadingRef.current = true;
@@ -124,36 +126,47 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
   }, [tryOpen]);
 
+  // Same install path as `startDownload`, but the compressed corpus
+  // comes from a file the user picked off disk rather than the network.
+  const installFromFile = useCallback(async (file: File) => {
+    if (downloadingRef.current) return;
+    downloadingRef.current = true;
+    setState({ kind: 'downloading' });
+    setProgress(null);
+    try {
+      await installCorpusFromFile(file, OPFS_FILENAME, (p) => setProgress(p));
+      await tryOpen();
+    } catch (e) {
+      setState({ kind: 'failed', reason: e instanceof Error ? e.message : String(e) });
+    } finally {
+      downloadingRef.current = false;
+    }
+  }, [tryOpen]);
+
   useEffect(() => {
     let cancelled = false;
     async function probe() {
       if (typeof window === 'undefined') return;
-      // No CDN configured → don't bother trying. The UI silently falls
-      // back to the API proxy.
-      if (!CORPUS_URL) {
-        if (!cancelled) setState({ kind: 'unsupported', reason: 'No corpus URL configured.' });
-        return;
-      }
       const result = await openOfflineEngine(OPFS_FILENAME);
       if (cancelled) return;
       if (result.kind === 'ready') {
         setEngine(result.engine);
         setState({ kind: 'ready' });
       } else if (result.kind === 'needs-download') {
-        // Auto-start the first-launch download. User can dismiss the
-        // banner if they don't want offline (handled by the banner
-        // component, not here).
-        void startDownload();
+        // Deliberately do NOT auto-download — the corpus is hundreds of
+        // MB. The banner prompts the user to choose: download from the
+        // URL, or load a corpus file they already have.
+        setState({ kind: 'needs-download' });
       } else {
         setState({ kind: 'unsupported', reason: result.reason });
       }
     }
     void probe();
     return () => { cancelled = true; };
-  }, [startDownload]);
+  }, []);
 
   return (
-    <Ctx.Provider value={{ state, engine, progress, startDownload }}>
+    <Ctx.Provider value={{ state, engine, progress, startDownload, installFromFile }}>
       {children}
     </Ctx.Provider>
   );
