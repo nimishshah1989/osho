@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the compressed corpus + publish it to a GitHub Release asset.
-# Runs on the EC2 box. The release tag is stable (`corpus-latest`) so
+# Runs on the E2E VPS. The release tag is stable (`corpus-latest`) so
 # the PWA's `NEXT_PUBLIC_CORPUS_URL` never changes — every nightly run
 # replaces the asset under the same tag.
 #
@@ -14,7 +14,9 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="${REPO_DIR:-$(dirname "$HERE")}"
+# Export REPO_DIR so the child build_corpus_artifact.sh resolves the
+# same repo root instead of falling back to its own hardcoded default.
+export REPO_DIR="${REPO_DIR:-$(dirname "$HERE")}"
 ART_DIR="${ART_DIR:-${REPO_DIR}/data/artifacts}"
 GH_REPO="${GH_REPO:-nimishshah1989/osho}"
 TAG="${TAG:-corpus-latest}"
