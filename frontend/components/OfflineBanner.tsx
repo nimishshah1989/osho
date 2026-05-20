@@ -27,6 +27,13 @@ import { useOfflineStatus } from '../lib/search/OfflineProvider';
 
 const DISMISS_KEY = 'osho:offline-banner-dismissed';
 
+// Whether a URL download is even possible. In the file-distribution
+// model NEXT_PUBLIC_CORPUS_URL is unset, so there is nothing to
+// download — the banner then offers only "Load from file" and hides
+// the Download / Retry buttons (clicking them would just fail with
+// "no download URL configured").
+const CAN_DOWNLOAD = !!process.env.NEXT_PUBLIC_CORPUS_URL;
+
 
 export function OfflineBanner() {
   const { state, progress, startDownload, installFromFile } = useOfflineStatus();
@@ -92,18 +99,22 @@ export function OfflineBanner() {
         {filePicker}
         <Cloud size={14} />
         <span>Read offline?</span>
-        <button
-          type="button"
-          onClick={() => startDownload()}
-          className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
-        >
-          <Download size={12} /> Download
-        </button>
-        <span className="opacity-30">·</span>
+        {CAN_DOWNLOAD && (
+          <>
+            <button
+              type="button"
+              onClick={() => startDownload()}
+              className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
+            >
+              <Download size={12} /> Download
+            </button>
+            <span className="opacity-30">·</span>
+          </>
+        )}
         <button
           type="button"
           onClick={pickFile}
-          className="inline-flex items-center gap-1 text-gold hover:underline"
+          className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
         >
           <FolderOpen size={12} /> Load from file
         </button>
@@ -153,18 +164,22 @@ export function OfflineBanner() {
         <CloudOff size={14} />
         <span>Couldn&apos;t set up offline use.</span>
         <span className="opacity-70 ml-2 truncate">{state.reason}</span>
-        <button
-          type="button"
-          onClick={() => startDownload()}
-          className="ml-auto inline-flex items-center gap-1 text-gold hover:underline"
-        >
-          <RefreshCw size={12} /> Retry
-        </button>
-        <span className="opacity-30">·</span>
+        {CAN_DOWNLOAD && (
+          <>
+            <button
+              type="button"
+              onClick={() => startDownload()}
+              className="ml-auto inline-flex items-center gap-1 text-gold hover:underline"
+            >
+              <RefreshCw size={12} /> Retry
+            </button>
+            <span className="opacity-30">·</span>
+          </>
+        )}
         <button
           type="button"
           onClick={pickFile}
-          className="inline-flex items-center gap-1 text-gold hover:underline"
+          className={`inline-flex items-center gap-1 text-gold hover:underline${CAN_DOWNLOAD ? '' : ' ml-auto'}`}
         >
           <FolderOpen size={12} /> Load from file
         </button>
