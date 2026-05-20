@@ -1,0 +1,42 @@
+name: Build desktop app
+
+# Builds the Osho Archives desktop installers (.dmg for macOS, .exe
+# for Windows) on GitHub's native runners — desktop installers can
+# only be built on their target OS.
+#
+# Manual trigger only. After a run finishes, download the installers
+# from the run's "Artifacts" section.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Build installer
+        working-directory: desktop
+        run: npm run dist
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: osho-archives-${{ matrix.os }}
+          path: |
+            desktop/dist/*.dmg
+            desktop/dist/*.exe
+          if-no-files-found: error

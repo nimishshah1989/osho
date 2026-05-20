@@ -1,0 +1,30 @@
+# electron-builder packaging config — see https://www.electron.build/
+#
+# Produces unsigned installers. Code-signing needs paid Apple /
+# Microsoft developer accounts; until then users get a one-time
+# "unidentified developer" prompt (Right-click → Open on macOS;
+# "More info → Run anyway" on Windows).
+appId: com.oshoarchives.app
+productName: Osho Archives
+copyright: Osho Archives
+
+directories:
+  output: dist
+  buildResources: build
+
+# Phase 1 loads the live site, so only the Electron entry points need
+# to ship. Phase 2 will add the static frontend + corpus here.
+files:
+  - main.js
+  - package.json
+
+mac:
+  target: dmg
+  category: public.app-category.reference
+
+win:
+  target: nsis
+
+linux:
+  target: AppImage
+  category: Education
