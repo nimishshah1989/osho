@@ -26,11 +26,17 @@ jobs:
 
       # Build the frontend as a static export. `shell: bash` so the
       # rm / env-var syntax works on the Windows runner too.
+      #
+      # `--ignore-scripts`: the frontend has `better-sqlite3` as a *test*
+      # devDependency, whose install script compiles a native module via
+      # node-gyp — which fails on the Windows runner. The static export
+      # never uses better-sqlite3, so skipping all install scripts is
+      # both safe and what unblocks the Windows build.
       - name: Build frontend (static export)
         shell: bash
         working-directory: frontend
         run: |
-          npm install
+          npm install --ignore-scripts
           rm -rf app/api app/ask
           DESKTOP_BUILD=true npx next build
 
