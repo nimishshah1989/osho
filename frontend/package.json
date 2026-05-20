@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:desktop": "rm -rf app/api app/ask && DESKTOP_BUILD=true next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",

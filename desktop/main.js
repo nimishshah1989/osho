@@ -1,21 +1,46 @@
 'use strict';
 
 /**
- * Osho Archives — desktop app, main process.
+ * Osho Archives — desktop app, main process (Phase 2a).
  *
- * Phase 1: a dedicated window onto the live Osho Archives app. This
- * intentionally keeps the surface tiny — it exists to prove out the
- * Electron build + packaging + CI pipeline before Phase 2 adds the
- * bundled-offline corpus.
+ * The app ships a static copy of the frontend (CI copies
+ * `frontend/out` → `desktop/app`). The main process serves that
+ * directory from a local HTTP server on 127.0.0.1 and points the
+ * window at it — so the renderer behaves exactly like the web app on
+ * a real server (client routing, web workers, OPFS all work as
+ * already tested in browsers).
  *
- * Phase 2 (planned): ship a static copy of the frontend and the
- * compressed corpus inside the installer, served over a local
- * `app://` protocol, so the app works fully offline from first launch
- * with no download and no file-load step.
+ * Phase 2b will also serve the bundled corpus from this server and
+ * auto-install it, so the app is fully offline from first launch with
+ * no download step.
  */
 const { app, BrowserWindow, shell } = require('electron');
+const http = require('node:http');
+const path = require('node:path');
+const handler = require('serve-handler');
 
-const SITE_URL = 'https://oshoarchives.com';
+// The bundled static frontend (populated by CI before packaging).
+const APP_DIR = path.join(__dirname, 'app');
+
+let origin = null;
+
+function startServer() {
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((req, res) => {
+      handler(req, res, {
+        public: APP_DIR,
+        cleanUrls: false,
+        trailingSlash: true,
+        directoryListing: false,
+      });
+    });
+    server.on('error', reject);
+    // Port 0 → the OS assigns a free local port.
+    server.listen(0, '127.0.0.1', () => {
+      resolve(`http://127.0.0.1:${server.address().port}`);
+    });
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -23,22 +48,20 @@ function createWindow() {
     height: 860,
     minWidth: 880,
     minHeight: 600,
-    backgroundColor: '#0c0a09',
+    backgroundColor: '#1a1410',
     title: 'Osho Archives',
     autoHideMenuBar: true,
     webPreferences: {
-      // No Node in the renderer — it's just loading the web app.
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
-  win.loadURL(SITE_URL);
+  win.loadURL(origin);
 
-  // Links to other sites (sannyas.wiki, etc.) open in the user's real
-  // browser rather than trapping them inside the app window.
+  // Links to other sites open in the user's real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (!url.startsWith(SITE_URL)) {
+    if (!url.startsWith(origin)) {
       shell.openExternal(url);
       return { action: 'deny' };
     }
@@ -46,16 +69,14 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  origin = await startServer();
   createWindow();
-  // macOS: re-open a window when the dock icon is clicked and none are open.
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
-// Quit when all windows are closed, except on macOS where apps
-// conventionally stay running until explicitly quit.
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });

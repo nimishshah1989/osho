@@ -2,7 +2,7 @@
 #
 # Produces unsigned installers. Code-signing needs paid Apple /
 # Microsoft developer accounts; until then users get a one-time
-# "unidentified developer" prompt (Right-click → Open on macOS;
+# "unidentified developer" prompt (right-click → Open on macOS;
 # "More info → Run anyway" on Windows).
 appId: com.oshoarchives.app
 productName: Osho Archives
@@ -12,11 +12,13 @@ directories:
   output: dist
   buildResources: build
 
-# Phase 1 loads the live site, so only the Electron entry points need
-# to ship. Phase 2 will add the static frontend + corpus here.
+# `app/` is the bundled static frontend — CI copies frontend/out into
+# it before packaging. node_modules for runtime deps (serve-handler)
+# is included automatically.
 files:
   - main.js
   - package.json
+  - app/**/*
 
 mac:
   target: dmg
