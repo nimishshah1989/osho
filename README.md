@@ -29,15 +29,19 @@ recurring bugs, deployment runbook — read [`CLAUDE.md`](./CLAUDE.md).
 ```
 Browser
   │
-  ├── oshoarchives.com  →  Vercel (Next.js 14 app router)
-  │     ├── Pages:    /, /archive, /constellation, /read, /help, /admin
-  │     └── /api/*    server-side proxies → EC2 backend (IP hidden)
+Cloudflare (DNS, edge TLS, proxy — only allowed ingress)
   │
-  └── 13.206.34.214:8000  →  EC2 (uvicorn + FastAPI + SQLite FTS5)
+E2E VPS 151.185.42.16  (single box, Ubuntu 24.04)
+  │
+  ├── oshoarchives.com  →  Next.js 14 app router  (PM2, :3000)
+  │     ├── Pages:    /, /archive, /constellation, /read, /help, /admin
+  │     └── /api/*    server-side proxies → FastAPI over loopback
+  │
+  └── 127.0.0.1:8000   →  FastAPI + SQLite FTS5  (systemd, uvicorn)
         ├── /api/search, /api/discourse, /api/catalog, /api/tags, …
         └── /admin/*  (gated by x-admin-key header)
 
-      Data: /home/ubuntu/osho-speaks/data/osho.db  (~1.6 GB)
+      Data: /home/osho/osho/data/osho.db  (~1.6 GB)
         ├── events            (id, title, date, location, language, translated_from)
         ├── paragraphs        (id, event_id, sequence_number, content)
         ├── paragraphs_fts    (FTS5 virtual table — see tokenizer below)
@@ -88,10 +92,11 @@ substring vs. matching it as a whole word. See `CLAUDE.md` for full history.
 
 | Variable | Where | Required | Description |
 |---|---|---|---|
-| `API_URL` | Vercel | yes | Backend URL e.g. `http://13.206.34.214:8000`. Keeps the IP server-side. |
-| `ADMIN_KEY` | EC2 | yes in prod | Password for `/admin/*` endpoints. Backend hard-fails on startup if `OSHO_ENV=production` and this is unset or equals the default `osho-admin`. |
-| `OSHO_ENV` | EC2 | yes in prod | Set to `production` on EC2 to enable the ADMIN_KEY hard-fail. |
-| `ALLOWED_ORIGINS` | EC2 | optional | Comma-separated CORS origins (default `https://osho-zeta.vercel.app`). |
+| `API_URL` | frontend | optional | Backend base for the `/api/*` proxy. Defaults to `http://127.0.0.1:8000` (FastAPI on the same VPS). |
+| `NEXT_PUBLIC_CORPUS_URL` | frontend | optional | GitHub Release asset the offline PWA downloads. Unset → online-only. |
+| `ADMIN_KEY` | backend | yes in prod | Password for `/admin/*` endpoints. Backend hard-fails on startup if `OSHO_ENV=production` and this is unset or equals the default `osho-admin`. |
+| `OSHO_ENV` | backend | yes in prod | Set to `production` to enable the ADMIN_KEY hard-fail. |
+| `ALLOWED_ORIGINS` | backend | optional | Comma-separated CORS origins (default `https://oshoarchives.com`). |
 
 ---
 
@@ -102,7 +107,7 @@ substring vs. matching it as a whole word. See `CLAUDE.md` for full history.
 ```bash
 pip install -r requirements.txt
 
-# place data/osho.db in the repo root (copy from EC2 or rebuild)
+# place data/osho.db in the repo root (copy from the VPS or rebuild)
 python3 scripts/build_fts.py        # one-time index build (~5–10 min)
 
 ADMIN_KEY=dev-secret python3 -m uvicorn scripts.cloud_api:app --reload --port 8000
@@ -160,31 +165,36 @@ for one-off corrections; not designed for bulk import.
 
 ## Deployment
 
-### Frontend (Vercel — fully automated)
+Frontend and backend share one E2E VPS (`151.185.42.16`) behind
+Cloudflare. See `CLAUDE.md` → **Deployment** for the full layout.
 
-Push to `main` → Vercel builds and deploys within ~2 min. If the deploy seems
-to silently skip, hit "Redeploy" in the Vercel dashboard.
+### Frontend (manual)
+
+```bash
+ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+cd /home/osho/osho && git pull origin main
+cd frontend && npm install && npm run build
+pm2 restart osho-frontend
+```
 
 ### Backend (GitHub Actions — fully automated)
 
 Any push to `main` touching `scripts/cloud_api.py`, `scripts/build_fts.py`,
 `scripts/ingest_docx.py`, `scripts/deploy.sh`, `requirements.txt`, or `data/**`
-runs the `Deploy Backend` workflow, which SSHes into EC2 and runs
+runs the `Deploy Backend` workflow, which SSHes into the VPS and runs
 `scripts/deploy.sh`. The script:
 
 1. `git pull` (fast-forward only)
 2. `pip install -r requirements.txt` if requirements changed
 3. Rebuilds the FTS index if `build_fts.py` or `data/**` changed
-4. Restarts uvicorn
+4. Restarts `osho-backend.service` (systemd)
 5. Curls `/health` and exits non-zero if it doesn't come back 200
 
-No manual SSH needed for normal deploys.
-
-### Manual SSH (only for one-time setup / debugging)
+### Manual backend deploy (one-time setup / debugging)
 
 ```bash
-ssh -i ~/.ssh/jsl-wealth-key.pem ubuntu@13.206.34.214
-cd /home/ubuntu/osho-speaks
+ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+cd /home/osho/osho
 bash scripts/deploy.sh
 ```
 
@@ -233,7 +243,7 @@ matching paragraphs so the frontend can highlight proximity-aware matches.
 osho/
 ├── CLAUDE.md                project memory — read first
 ├── README.md                this file
-├── data/                    SQLite database (gitignored — lives on EC2)
+├── data/                    SQLite database (gitignored — lives on the VPS)
 │   └── osho.db
 ├── db/
 │   └── schema.sql           base table definitions

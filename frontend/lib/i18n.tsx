@@ -133,21 +133,6 @@ const EN: Dict = {
   // Help page
   'help.title': 'Search Guide',
   'help.kicker': 'Osho Discourse Search',
-
-  // Offline first-run setup (offline-only PWA build)
-  'offline.setup.title': 'Preparing your offline archive',
-  'offline.setup.subtitle':
-    "Downloading Osho's complete discourses to this device.",
-  'offline.setup.note':
-    'A one-time download. After this, the archive opens instantly and works fully offline — no internet needed.',
-  'offline.setup.preparing': 'Preparing…',
-  'offline.setup.opening': 'Opening the archive…',
-  'offline.failed.title': 'Download interrupted',
-  'offline.failed.note': "Your offline copy didn't finish downloading.",
-  'offline.failed.retry': 'Try again',
-  'offline.unsupported.title': "This browser can't run the offline archive",
-  'offline.unsupported.note':
-    'The offline archive needs a modern browser with local storage support. Try the latest Chrome, Edge, Firefox, or Safari.',
 };
 
 const HI: Dict = {
@@ -267,21 +252,6 @@ const HI: Dict = {
   // Help page
   'help.title': 'खोज की पुस्तिका',
   'help.kicker': 'ओशो प्रवचन खोज',
-
-  // Offline first-run setup (offline-only PWA build)
-  'offline.setup.title': 'आपका ऑफ़लाइन संग्रह तैयार हो रहा है',
-  'offline.setup.subtitle':
-    'ओशो के सम्पूर्ण प्रवचन इस डिवाइस पर उतर रहे हैं।',
-  'offline.setup.note':
-    'यह सिर्फ़ एक बार होने वाला डाउनलोड है। इसके बाद संग्रह तुरंत खुलेगा और पूरी तरह ऑफ़लाइन काम करेगा — इंटरनेट की ज़रूरत नहीं।',
-  'offline.setup.preparing': 'तैयारी हो रही है…',
-  'offline.setup.opening': 'संग्रह खुल रहा है…',
-  'offline.failed.title': 'डाउनलोड बीच में रुक गया',
-  'offline.failed.note': 'आपकी ऑफ़लाइन प्रति पूरी डाउनलोड नहीं हो पाई।',
-  'offline.failed.retry': 'फिर कोशिश करो',
-  'offline.unsupported.title': 'यह ब्राउज़र ऑफ़लाइन संग्रह नहीं चला सकता',
-  'offline.unsupported.note':
-    'ऑफ़लाइन संग्रह के लिए स्थानीय स्टोरेज वाला आधुनिक ब्राउज़र चाहिए। नया Chrome, Edge, Firefox या Safari आज़माएँ।',
 };
 
 const DICTS: Record<Locale, Dict> = { en: EN, hi: HI };

@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:static": "rm -rf app/api && STATIC_EXPORT=true NEXT_PUBLIC_OFFLINE_ONLY=true next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",

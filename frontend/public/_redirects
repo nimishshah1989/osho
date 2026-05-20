@@ -1,8 +1,0 @@
-# Cloudflare Pages reads this file from the deploy output root. It
-# fires before the static asset lookup, so old `/ask` URLs are
-# redirected at the edge — the no-JS / crawler fallback the meta-
-# refresh used to provide, but reliable and head-level by virtue of
-# being a real 301.
-
-/ask        /  301
-/ask/*      /  301
