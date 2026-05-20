@@ -20,8 +20,17 @@ Two user audiences:
 
 ## Architecture at a glance
 
+> **Hosting moved 2026-05-19**: off Vercel + EC2 onto a single E2E
+> Networks VPS (Chennai). Cloudflare sits in front as DNS + edge TLS +
+> proxy. See **Deployment** below for the full layout. The old
+> `13.206.34.214` EC2 box is retired.
+
 ```
-oshoarchives.com (Vercel)
+Cloudflare (DNS, edge TLS, proxy — ingress is Cloudflare-only)
+  │
+oshoarchives.com / api.oshoarchives.com
+  │
+E2E VPS 151.185.42.16  (osho-server, Ubuntu 24.04)
   └── Next.js 14 app router  (frontend/)
         ├── /            — search                    (app/page.tsx)
         ├── /archive     — tree explorer             (components/Archive/TreeExplorer.tsx)
@@ -37,7 +46,7 @@ oshoarchives.com (Vercel)
         ├── /api/languages
         └── /api/admin/*   — admin ops (forwards x-admin-key header)
 
-13.206.34.214:8000 (EC2, /home/ubuntu/osho-speaks)
+127.0.0.1:8000 (FastAPI on the same VPS, /home/osho/osho)
   └── uvicorn scripts.cloud_api:app
         ├── /api/search      — BM25-ranked FTS5 search
         ├── /api/discourse   — paragraphs w/ FTS5 highlight markers \x02 \x03 → «»
@@ -128,39 +137,61 @@ narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
 
 ## Deployment
 
-### Frontend (auto)
-Push to `main` → Vercel builds and deploys within ~2-3 min. **Caveat:** Vercel
-sometimes silently skips builds — if production behaviour doesn't update 5 min after
-merge, manually click "Redeploy" in the Vercel dashboard.
+Everything runs on **one E2E Networks VPS** (`151.185.42.16`,
+`osho-server`, Ubuntu 24.04, Chennai). Cloudflare is the only allowed
+ingress — nginx returns 403 to any non-Cloudflare source IP.
 
-### Backend (auto via GitHub Actions — verify secrets exist)
-PR #34 (2026-05-11) rewrote the workflow. `deploy-backend.yml` SSHes into
-EC2 and runs `scripts/deploy.sh`, which does: git pull → `pip install`
-(only when `requirements.txt` changed) → FTS rebuild (only when
-`build_fts.py` or `data/**` changed) → uvicorn restart → `/health` probe
-(fails CI loudly if not 200). Trigger paths in the workflow's `on.push.paths`
-gate which commits actually fire it.
+```
+SSH:   ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+repo:  /home/osho/osho        (Python venv at .venv/, runs as user `osho`)
 
-The only remaining failure mode is missing/stale repo secrets:
-`BACKEND_HOST`, `BACKEND_USER`, `BACKEND_SSH_KEY`, and the optional
-`BACKEND_PORT` (defaults to 22). If a merge to main touches a backend
-path but no run appears in the Actions tab, the secrets need attention.
+nginx :80/:443  — /etc/nginx/sites-available/osho, Cloudflare-only ingress
+  ├── oshoarchives.com  (+ www)  → 127.0.0.1:3000  (Next.js)
+  └── api.oshoarchives.com       → 127.0.0.1:8000  (FastAPI)
+       TLS via Certbot (/etc/letsencrypt/live/oshoarchives.com/)
 
-### Manual backend redeploy (fallback when the auto-deploy hasn't run)
+Frontend  — PM2 app `osho-frontend`, runs `next start` on :3000
+Backend   — systemd unit `osho-backend.service`, uvicorn
+            `scripts.cloud_api:app` on 127.0.0.1:8000
+            (--proxy-headers --forwarded-allow-ips=127.0.0.1)
+```
+
+Because frontend and backend share the box, the Next.js `/api/*`
+proxy talks to FastAPI over **loopback** (`127.0.0.1:8000`) — never
+the public IP or `api.oshoarchives.com` (the latter would 403, being
+non-Cloudflare).
+
+### Frontend redeploy
 ```bash
-ssh -i ~/.ssh/jsl-wealth-key.pem ubuntu@13.206.34.214
-cd /home/ubuntu/osho-speaks
-git pull origin main
+ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+cd /home/osho/osho && git pull origin main
+cd frontend && npm install && npm run build
+pm2 restart osho-frontend
+```
+
+### Backend redeploy
+```bash
+ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+cd /home/osho/osho && git pull origin main
 # only when scripts/build_fts.py or data/** changed:
 .venv/bin/python3 scripts/build_fts.py
-# restart uvicorn:
-pkill -f 'uvicorn scripts.cloud_api' || sudo fuser -k 8000/tcp
-sleep 2
-nohup /home/ubuntu/osho-speaks/.venv/bin/python3 -m uvicorn scripts.cloud_api:app \
-  --host 0.0.0.0 --port 8000 > uvicorn.log 2>&1 &
-sleep 3
-curl -s http://localhost:8000/health
+sudo systemctl restart osho-backend.service
+curl -s http://127.0.0.1:8000/health
 ```
+
+> **STALE — needs rework for the E2E box.** `scripts/deploy.sh` and the
+> `deploy-backend.yml` / `publish-corpus.yml` workflows were written
+> for the retired EC2 host (`pkill uvicorn`, `/home/ubuntu/osho-speaks`,
+> `nohup`). They must be rewritten to use `systemctl restart
+> osho-backend.service`, the `/home/osho/osho` path, and an SSH key
+> that's actually on the new box. Until then, deploy by hand with the
+> blocks above. The repo secrets `BACKEND_HOST`/`BACKEND_USER`/
+> `BACKEND_SSH_KEY` also need repointing to `151.185.42.16` / `osho`.
+
+### Provisioning scripts (live on the box, not yet in the repo)
+`02-setup-single-vps.sh` and `refresh-cloudflare-ips.sh` configured
+nginx + the Cloudflare IP allowlist. Worth pulling into the repo so
+the box is reproducible.
 
 ---
 
