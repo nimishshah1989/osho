@@ -3,40 +3,27 @@
 /**
  * Top-of-page banner that shows what the offline subsystem is doing.
  *
- *   needs-download — "Read offline?" with Download + Load-from-file
- *   downloading    — progress bar ("142 / 552 MB · 26%")
- *   failed         — "Couldn't download" + Retry + Load-from-file
+ *   needs-download — "Read offline?" with a Load-from-file button
+ *   downloading    — install progress ("142 / 552 MB · 26%")
+ *   failed         — error + Load-from-file (re-pick to retry)
  *   ready          — small "offline" badge so the user knows their next
  *                    query won't need the network
  *   unsupported    — nothing (silently fall back to API)
  *
- * Two ways to install the corpus: download it from
- * `NEXT_PUBLIC_CORPUS_URL`, or load a `.zst` archive the user already
- * has on disk (shared over WhatsApp, a USB stick, etc.). Both run the
- * same decompress-into-OPFS path.
- *
- * The banner is dismissable per-tab (sessionStorage) so a user who
- * doesn't care about offline can hide it.
+ * The corpus is installed from a file the user picked off disk — the
+ * compressed `osho.db.zst` or an already-extracted `osho.db`. There is
+ * no network download path. Dismissable per-tab (sessionStorage).
  */
 import { useRef, useState, type ChangeEvent } from 'react';
-import {
-  Cloud, CloudOff, Download, FolderOpen, Loader2, RefreshCw, X,
-} from 'lucide-react';
+import { Cloud, CloudOff, FolderOpen, Loader2, X } from 'lucide-react';
 import { useOfflineStatus } from '../lib/search/OfflineProvider';
 
 
 const DISMISS_KEY = 'osho:offline-banner-dismissed';
 
-// Whether a URL download is even possible. In the file-distribution
-// model NEXT_PUBLIC_CORPUS_URL is unset, so there is nothing to
-// download — the banner then offers only "Load from file" and hides
-// the Download / Retry buttons (clicking them would just fail with
-// "no download URL configured").
-const CAN_DOWNLOAD = !!process.env.NEXT_PUBLIC_CORPUS_URL;
-
 
 export function OfflineBanner() {
-  const { state, progress, startDownload, installFromFile } = useOfflineStatus();
+  const { state, progress, installFromFile } = useOfflineStatus();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dismissed, setDismissed] = useState<boolean>(() => {
     // Wrap the storage read — Safari private mode and some embedded
@@ -66,13 +53,10 @@ export function OfflineBanner() {
     if (file) installFromFile(file);
   };
 
-  // Hidden picker — included in every render path that offers a file
-  // load so the ref is always mounted when `pickFile` runs.
-  //
-  // Deliberately no `accept` filter: mobile file pickers grey out files
-  // whose extension / MIME type they don't recognise, and `.zst` is
-  // often unknown — which would make the corpus file unselectable on a
-  // phone. The worker validates the pick by attempting decompression.
+  // Hidden picker. Deliberately no `accept` filter: mobile pickers grey
+  // out files whose extension they don't recognise (`.zst` is often
+  // unknown), which would make the corpus unselectable on a phone. The
+  // worker validates the pick by inspecting its magic bytes.
   const filePicker = (
     <input
       ref={fileInputRef}
@@ -80,6 +64,16 @@ export function OfflineBanner() {
       onChange={onFilePicked}
       style={{ display: 'none' }}
     />
+  );
+
+  const loadButton = (
+    <button
+      type="button"
+      onClick={pickFile}
+      className="inline-flex items-center gap-1 text-gold hover:underline"
+    >
+      <FolderOpen size={12} /> Load from file
+    </button>
   );
 
   const dismissBtn = (
@@ -99,35 +93,16 @@ export function OfflineBanner() {
         {filePicker}
         <Cloud size={14} />
         <span>Read offline?</span>
-        {CAN_DOWNLOAD && (
-          <>
-            <button
-              type="button"
-              onClick={() => startDownload()}
-              className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
-            >
-              <Download size={12} /> Download
-            </button>
-            <span className="opacity-30">·</span>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={pickFile}
-          className="ml-2 inline-flex items-center gap-1 text-gold hover:underline"
-        >
-          <FolderOpen size={12} /> Load from file
-        </button>
+        {loadButton}
         <span className="ml-auto">{dismissBtn}</span>
       </BannerShell>
     );
   }
 
   if (state.kind === 'downloading') {
-    // Show the actual transfer: bytes received / total. For a URL
-    // download `bytesTotal` is the Content-Length; for a file import
-    // it's the exact file size. Either way it's accurate — unlike the
-    // decompressed size, which can't be known until the stream ends.
+    // Show the actual transfer: bytes read from the file / total size.
+    // Accurate — unlike the decompressed size, which isn't known until
+    // the stream ends.
     const received = progress?.bytesReceived ?? 0;
     const total = progress?.bytesTotal ?? 0;
     const pct = total > 0 ? Math.min(100, Math.round((received / total) * 100)) : null;
@@ -136,7 +111,7 @@ export function OfflineBanner() {
       <BannerShell colour="text-gold">
         <Loader2 size={14} className="animate-spin" />
         <span>
-          {finishing ? 'Unpacking offline archive' : 'Downloading offline archive'}
+          {finishing ? 'Unpacking offline archive' : 'Installing offline archive'}
           {progress && !finishing && (
             <span className="opacity-70 ml-2 tabular-nums">
               {fmtMb(received)}
@@ -164,25 +139,7 @@ export function OfflineBanner() {
         <CloudOff size={14} />
         <span>Couldn&apos;t set up offline use.</span>
         <span className="opacity-70 ml-2 truncate">{state.reason}</span>
-        {CAN_DOWNLOAD && (
-          <>
-            <button
-              type="button"
-              onClick={() => startDownload()}
-              className="ml-auto inline-flex items-center gap-1 text-gold hover:underline"
-            >
-              <RefreshCw size={12} /> Retry
-            </button>
-            <span className="opacity-30">·</span>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={pickFile}
-          className={`inline-flex items-center gap-1 text-gold hover:underline${CAN_DOWNLOAD ? '' : ' ml-auto'}`}
-        >
-          <FolderOpen size={12} /> Load from file
-        </button>
+        <span className="ml-auto">{loadButton}</span>
         {dismissBtn}
       </BannerShell>
     );

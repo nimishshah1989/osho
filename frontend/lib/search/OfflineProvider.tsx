@@ -8,24 +8,21 @@
  *   2. If yes → open it and expose the engine. Subsequent calls to
  *      `useOfflineEngine()` return it; `searchApi(...)` will route
  *      every query through the local DB.
- *   3. If no → state is `needs-download`. The UI offers two ways in:
- *      `startDownload()` (fetch from `NEXT_PUBLIC_CORPUS_URL`) or
- *      `installFromFile()` (a corpus archive the user already has on
- *      disk — shared over WhatsApp, a USB stick, etc.). The download
- *      is deliberately *not* auto-started: it's hundreds of MB, so
- *      the user opts in. Until then the UI works against the API.
+ *   3. If no → state is `needs-download`. The user installs the corpus
+ *      via `installFromFile()` — a corpus file they already have on
+ *      disk (downloaded from the /downloadapp link, shared over
+ *      WhatsApp, a USB stick…). There is deliberately NO network
+ *      download path; until the corpus is loaded the UI works against
+ *      the API.
  *   4. If the browser doesn't support OPFS / workers → stay
  *      unsupported forever. UI sticks to the API. No banner shown,
  *      no spam.
- *
- * The download URL is `NEXT_PUBLIC_CORPUS_URL`. When unset, the
- * `needs-download` prompt offers only the file-import path.
  */
 import {
   createContext, useCallback, useContext, useEffect, useRef, useState,
 } from 'react';
 import {
-  installCorpus, installCorpusFromFile, openOfflineEngine,
+  installCorpusFromFile, openOfflineEngine,
 } from './worker/client';
 import type {
   OfflineEngine, OfflineState, ProgressUpdate,
@@ -42,37 +39,32 @@ export interface OfflineContextValue {
   /** The ready engine, or null when not yet available. `searchApi`
    *  takes this directly. */
   engine: OfflineEngine | null;
-  /** Most recent download-progress event, when a download is active. */
+  /** Most recent install-progress event, while an install is active. */
   progress: ProgressUpdate | null;
-  /** Start (or retry) the corpus download from `NEXT_PUBLIC_CORPUS_URL`. */
-  startDownload: () => void;
-  /** Install the corpus from a `.zst` archive the user picked off disk. */
+  /** Install the corpus from a file the user picked off disk — the
+   *  compressed `.zst` archive or an already-extracted `.db`. */
   installFromFile: (file: File) => void;
 }
 
 
 export type OfflineRuntimeState =
   | { kind: 'unknown' }            // before the first probe
-  | { kind: 'needs-download' }     // no corpus yet — awaiting user choice
+  | { kind: 'needs-download' }     // no corpus yet — awaiting the user
   | { kind: 'downloading' }        // corpus install in progress
   | { kind: 'ready' }              // engine available
   | { kind: 'unsupported'; reason: string }
-  | { kind: 'failed';     reason: string };  // download or open failed
+  | { kind: 'failed';     reason: string };  // install or open failed
 
 
 // Tunables ---------------------------------------------------------------
 
 const OPFS_FILENAME = 'osho.db';
-// User-overridable via env so deploying against the staging CDN
-// doesn't need a code change.
-const CORPUS_URL = process.env.NEXT_PUBLIC_CORPUS_URL ?? '';
 
 
 const Ctx = createContext<OfflineContextValue>({
   state: { kind: 'unknown' },
   engine: null,
   progress: null,
-  startDownload: () => {},
   installFromFile: () => {},
 });
 
@@ -107,27 +99,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const startDownload = useCallback(async () => {
-    if (downloadingRef.current) return;
-    if (!CORPUS_URL) {
-      setState({ kind: 'failed', reason: 'No download URL configured.' });
-      return;
-    }
-    downloadingRef.current = true;
-    setState({ kind: 'downloading' });
-    setProgress(null);
-    try {
-      await installCorpus(CORPUS_URL, OPFS_FILENAME, (p) => setProgress(p));
-      await tryOpen();
-    } catch (e) {
-      setState({ kind: 'failed', reason: e instanceof Error ? e.message : String(e) });
-    } finally {
-      downloadingRef.current = false;
-    }
-  }, [tryOpen]);
-
-  // Same install path as `startDownload`, but the compressed corpus
-  // comes from a file the user picked off disk rather than the network.
+  // Install the corpus from a file the user picked off disk. The worker
+  // auto-detects the format — compressed `.zst` or raw `.db`.
   const installFromFile = useCallback(async (file: File) => {
     if (downloadingRef.current) return;
     downloadingRef.current = true;
@@ -153,9 +126,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
         setEngine(result.engine);
         setState({ kind: 'ready' });
       } else if (result.kind === 'needs-download') {
-        // Deliberately do NOT auto-download — the corpus is hundreds of
-        // MB. The banner prompts the user to choose: download from the
-        // URL, or load a corpus file they already have.
+        // No corpus yet. The banner prompts the user to load a corpus
+        // file from disk; there is no automatic network download.
         setState({ kind: 'needs-download' });
       } else {
         setState({ kind: 'unsupported', reason: result.reason });
@@ -166,7 +138,7 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ state, engine, progress, startDownload, installFromFile }}>
+    <Ctx.Provider value={{ state, engine, progress, installFromFile }}>
       {children}
     </Ctx.Provider>
   );
