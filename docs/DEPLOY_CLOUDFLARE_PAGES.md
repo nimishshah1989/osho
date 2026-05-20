@@ -67,19 +67,26 @@ the production URL (e.g. `osho-archives.pages.dev`).
 ## What `npm run build:static` does
 
 ```
-rm -rf app/api && next build
+rm -rf app/api && STATIC_EXPORT=true NEXT_PUBLIC_OFFLINE_ONLY=true next build
 ```
 
-The `app/api/*` routes are server-side proxies that depend on a
-Node runtime — they don't exist on a static host. Stripping them
-before `next build` keeps the build clean. `next.config.mjs` has
-`output: 'export'` so the build emits a fully-prerendered tree in
-`frontend/out/` (about 6 MB).
+Three things differ from the normal `npm run build` (which is what
+Vercel runs, unchanged):
 
-`next.config.mjs` also sets `trailingSlash: true` so the URLs
-Cloudflare serves match what the build emits, and
-`images: { unoptimized: true }` so the static export doesn't need a
-runtime image loader.
+- **`rm -rf app/api`** — the `app/api/*` routes are server-side
+  proxies that need a Node runtime. A static host has none, so they
+  are stripped before the build.
+- **`STATIC_EXPORT=true`** — flips `next.config.mjs` into
+  `output: 'export'` + `trailingSlash: true`, emitting a fully-
+  prerendered tree in `frontend/out/` (~6 MB). The flag is gated so
+  Vercel builds keep their serverless API routes.
+- **`NEXT_PUBLIC_OFFLINE_ONLY=true`** — tells the app there is no
+  API to fall back on. Without an API, the first-run window (while
+  the ~400 MB corpus downloads) would otherwise show fetch errors
+  on every page. Instead the app renders a branded **setup screen**
+  with a progress bar, and only reveals search / archive / read
+  once the corpus is in place. Every later launch skips straight
+  past it because the corpus is already in OPFS.
 
 The script is destructive in your working tree (removes
 `app/api/`), so don't run it locally without committing first.

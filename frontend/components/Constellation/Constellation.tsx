@@ -2,6 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useOfflineEngine } from '../../lib/search/OfflineProvider';
+import { catalogApi } from '../../lib/search/searchApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -532,12 +534,19 @@ export default function Constellation() {
   const [sort, setSort] = useState<'date' | 'name' | 'size'>('date');
   const [openSeries, setOpenSeries] = useState<string | null>(null);
 
+  const offlineEngine = useOfflineEngine();
+
   useEffect(() => {
-    fetch('/api/catalog', { cache: 'no-store' })
-      .then((r) => r.json())
-      .then((d: { events: Event[] }) => { setEvents(d.events); setLoading(false); })
+    // Catalog comes from the local engine when the offline corpus is
+    // ready, otherwise from /api/catalog. Re-runs when the engine flips
+    // from null → ready so the constellation populates right after the
+    // first-launch download finishes.
+    setLoading(true);
+    setError(null);
+    catalogApi(offlineEngine)
+      .then((d) => { setEvents((d.events ?? []) as Event[]); setLoading(false); })
       .catch(() => { setError('Could not load archive.'); setLoading(false); });
-  }, []);
+  }, [offlineEngine]);
 
   const allSeries = useMemo(() => buildSeries(events), [events]);
 
