@@ -40,6 +40,7 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
         ├── /constellation — clustered visualization (components/Constellation/Constellation.tsx)
         ├── /read        — full discourse reader     (app/read/page.tsx)
         ├── /help        — search guide              (app/help/page.tsx)
+        ├── /downloadapp — offline / desktop setup    (app/downloadapp/page.tsx)
         └── /admin       — ADMIN_KEY-protected ops   (app/admin/page.tsx)
 
         API proxies → upstream backend:
@@ -138,6 +139,30 @@ narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
 
 ---
 
+## Offline PWA & desktop app
+
+Beyond the hosted site, the corpus ships in two offline forms:
+
+- **PWA** — `frontend/lib/search/` is a full TypeScript port of the FastAPI
+  search engine running on sqlite-wasm + OPFS in a web worker. On first run the
+  browser downloads a compressed corpus (`NEXT_PUBLIC_CORPUS_URL` → a GitHub
+  Release asset) and search runs entirely client-side. Manifest, icons, and
+  service worker live in `frontend/public/`. `/downloadapp` is the install page.
+- **Desktop app** — `desktop/` is an Electron shell that bundles the built
+  frontend and the corpus, offline from first launch. Installers are built in CI
+  by `.github/workflows/build-desktop.yml`.
+- **Corpus publishing** — `.github/workflows/publish-corpus.yml` (nightly +
+  manual) rebuilds the compressed `.zst` corpus on the VPS and replaces the
+  `corpus-latest` release asset, keeping the offline copy in sync with the live
+  DB. See `docs/OFFLINE_APP.md` for the full runbook.
+
+The TS engine in `frontend/lib/search/` must stay behaviour-compatible with
+`scripts/cloud_api.py` — tokenizer, Devanagari normalisation, BM25 ranking, and
+NEAR semantics are all duplicated and covered by tests in
+`frontend/lib/search/__tests__/`.
+
+---
+
 ## Deployment
 
 Everything runs on **one sponsor-owned E2E Networks VPS**
@@ -229,10 +254,11 @@ the box is reproducible.
 
 ## Security posture
 
-- **`ADMIN_KEY`** — env var on EC2 (`ADMIN_KEY=...`). The default `"osho-admin"` in
-  `cloud_api.py:26` MUST never be live in production. Backend now hard-fails on
-  startup if `OSHO_ENV=production` and the key is default/missing.
-- CORS: `ALLOWED_ORIGINS` env var (defaults to `https://osho-zeta.vercel.app`).
+- **`ADMIN_KEY`** — env var on the VPS, read from `/home/osho/osho/.env` (see
+  `cloud_api.py` `load_dotenv`). The default `"osho-admin"` MUST never be live in
+  production. Backend hard-fails on startup if `OSHO_ENV=production` and the key
+  is default/missing.
+- CORS: `ALLOWED_ORIGINS` env var (code default `https://oshoarchives.com`).
 - All admin endpoints are gated by `_check_admin` which compares the `x-admin-key`
   header to `ADMIN_KEY` env var.
 
@@ -240,13 +266,21 @@ the box is reproducible.
 
 ## Data freshness
 
-Currently no repeatable bulk-ingestion pipeline. Adding a new talk:
+Adding new talks:
 
-**Preferred** (when docx pipeline is built): drop `*.docx` files with `@field=` headers
-into the import directory, run `python3 scripts/ingest_docx.py <dir>`.
+**Preferred — bulk `.docx`**: drop `*.docx` files with `@field=` headers into a
+directory and run `python3 scripts/ingest_docx.py <dir>` (walks recursively;
+`--dry-run` to parse-only). Upserts by `(title, language)`. The
+Add/Modify/Delete folder pipeline (`scripts/word_update.py`,
+`scripts/make_staging.py`, `scripts/diff_db.py`) supports transactional,
+reviewable batch updates with a staging snapshot + per-record diff.
 
-**Stopgap (today)**: paste the talk into `/admin/` → New event form. The admin ingest
-applies `_normalize_devanagari` to both title and content before FTS insert.
+**Quick fixes — admin UI**: paste the talk into `/admin/` → New event form. The
+admin ingest applies `_normalize_devanagari` to both title and content before
+FTS insert.
+
+The data lives only on the VPS (`/home/osho/osho/data/osho.db`) and is
+gitignored — moved between machines by rsync, never committed.
 
 ---
 
@@ -278,15 +312,21 @@ applies `_normalize_devanagari` to both title and content before FTS insert.
 
 ---
 
-## Open known-issues backlog (audited 2026-05-11)
+## Open known-issues backlog (audited 2026-05-22)
 
-Tracked separately in this branch's PR; high-impact items first:
+Resolved since the 2026-05-11 audit:
+- ADMIN_KEY production hard-fail (was CRITICAL #1)
+- Deploy workflow now E2E-ready / automated (was CRITICAL #2)
+- `.docx` ingestion pipeline built (was CRITICAL #3)
 
-1. CRITICAL — ADMIN_KEY default in production (security)
-2. CRITICAL — Deploy workflow broken (forces manual SSH every time)
-3. CRITICAL — No docx ingestion pipeline
-4. MODERATE — Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
-5. MODERATE — Archive / Constellation / Help skip `t(...)` (English-only in Hindi locale)
-6. MODERATE — Date range inputs don't auto-refresh
-7. MINOR — Dead routes: `/ask`, `/nebula`, `/zen-tree`
-8. MINOR — `total_hits` over-reports for narrow NEAR queries
+Still open, high-impact first:
+
+1. MODERATE — Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
+2. MODERATE — Archive / Constellation / Help skip `t(...)` (English-only in Hindi locale)
+3. MODERATE — Date range inputs don't auto-refresh
+4. MINOR — Dead routes: `/ask`, `/nebula`, `/zen-tree`
+5. MINOR — `total_hits` over-reports for narrow NEAR queries
+6. OPS — Frontend has no automated deploy; redeploy is still manual SSH +
+   `npm run build` + `pm2 restart` (backend deploys automatically on push to
+   `main`). Provisioning scripts (`02-setup-single-vps.sh`,
+   `refresh-cloudflare-ips.sh`) live only on the box, not in the repo.
