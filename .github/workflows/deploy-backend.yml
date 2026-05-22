@@ -23,7 +23,7 @@ jobs:
           # infra, documented in CLAUDE.md); only the SSH key is. The
           # box's authorized_keys must hold the public half of
           # BACKEND_SSH_KEY for user `osho`.
-          host: 151.185.42.16
+          host: 164.52.223.241
           username: osho
           key: ${{ secrets.BACKEND_SSH_KEY }}
           # All deploy logic lives in scripts/deploy.sh on the server so we
