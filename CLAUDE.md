@@ -8,8 +8,8 @@ codebase. Read top to bottom before suggesting changes.
 ## Product
 
 Search engine + archive for Osho's complete discourses (~75K paragraphs, ~10K events).
-Production: **oshoarchives.com** (Next.js on Vercel) → **EC2 13.206.34.214:8000**
-(FastAPI + SQLite + FTS5).
+Production: **oshoarchives.com** — a single sponsor-owned E2E Networks VPS
+(`164.52.223.241`) running Next.js + FastAPI + SQLite/FTS5, behind Cloudflare.
 
 Two user audiences:
 - **Sannyasins worldwide** — search/read Osho's words verbatim, English + Hindi
@@ -20,17 +20,20 @@ Two user audiences:
 
 ## Architecture at a glance
 
-> **Hosting moved 2026-05-19**: off Vercel + EC2 onto a single E2E
-> Networks VPS (Chennai). Cloudflare sits in front as DNS + edge TLS +
-> proxy. See **Deployment** below for the full layout. The old
-> `13.206.34.214` EC2 box is retired.
+> **Hosting history**: originally Vercel + EC2 (`13.206.34.214`).
+> Moved 2026-05-19 to an E2E Networks VPS (`151.185.42.16`). Migrated
+> again 2026-05-22 to a **sponsor-owned** E2E Networks VPS
+> (`164.52.223.241`) so the project lives under the sponsor's account
+> for long-term continuity. Both earlier boxes are retired. Cloudflare
+> sits in front as DNS + edge TLS + proxy. See **Deployment** below for
+> the full layout.
 
 ```
 Cloudflare (DNS, edge TLS, proxy — ingress is Cloudflare-only)
   │
 oshoarchives.com / api.oshoarchives.com
   │
-E2E VPS 151.185.42.16  (osho-server, Ubuntu 24.04)
+E2E VPS 164.52.223.241  (Ubuntu 24.04)
   └── Next.js 14 app router  (frontend/)
         ├── /            — search                    (app/page.tsx)
         ├── /archive     — tree explorer             (components/Archive/TreeExplorer.tsx)
@@ -137,12 +140,31 @@ narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
 
 ## Deployment
 
-Everything runs on **one E2E Networks VPS** (`151.185.42.16`,
-`osho-server`, Ubuntu 24.04, Chennai). Cloudflare is the only allowed
-ingress — nginx returns 403 to any non-Cloudflare source IP.
+Everything runs on **one sponsor-owned E2E Networks VPS**
+(`164.52.223.241`, Ubuntu 24.04). Cloudflare fronts it as DNS + edge
+TLS + proxy.
+
+Cloudflare is the only allowed ingress — the two HTTPS server blocks
+`include /etc/nginx/snippets/cloudflare-allow.conf`, an `allow` list of
+Cloudflare's published IP ranges ending in `deny all`, so any direct-IP
+request returns 403. Regenerate that snippet when Cloudflare's ranges
+change:
+
+```bash
+{ curl -s https://www.cloudflare.com/ips-v4; echo; \
+  curl -s https://www.cloudflare.com/ips-v6; } \
+  | grep -v '^[[:space:]]*$' | sed 's/^/allow /; s/$/;/' \
+  > /etc/nginx/snippets/cloudflare-allow.conf
+echo 'deny all;' >> /etc/nginx/snippets/cloudflare-allow.conf
+nginx -t && systemctl reload nginx
+```
+
+> **SSH access**: key-based auth for the `osho` user. The private key
+> is `~/.ssh/osho_e2e` (ed25519, `osho-e2e`); its public half is in
+> `/home/osho/.ssh/authorized_keys` on the box.
 
 ```
-SSH:   ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+SSH:   ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 repo:  /home/osho/osho        (Python venv at .venv/, runs as user `osho`)
 
 nginx :80/:443  — /etc/nginx/sites-available/osho, Cloudflare-only ingress
@@ -163,7 +185,7 @@ non-Cloudflare).
 
 ### Frontend redeploy
 ```bash
-ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 cd /home/osho/osho && git pull origin main
 cd frontend && npm install && npm run build
 pm2 restart osho-frontend
@@ -171,7 +193,7 @@ pm2 restart osho-frontend
 
 ### Backend redeploy
 ```bash
-ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 cd /home/osho/osho && git pull origin main
 # only when scripts/build_fts.py or data/** changed:
 .venv/bin/python3 scripts/build_fts.py
@@ -179,14 +201,24 @@ sudo systemctl restart osho-backend.service
 curl -s http://127.0.0.1:8000/health
 ```
 
-> **STALE — needs rework for the E2E box.** `scripts/deploy.sh` and the
-> `deploy-backend.yml` / `publish-corpus.yml` workflows were written
-> for the retired EC2 host (`pkill uvicorn`, `/home/ubuntu/osho-speaks`,
-> `nohup`). They must be rewritten to use `systemctl restart
-> osho-backend.service`, the `/home/osho/osho` path, and an SSH key
-> that's actually on the new box. Until then, deploy by hand with the
-> blocks above. The repo secrets `BACKEND_HOST`/`BACKEND_USER`/
-> `BACKEND_SSH_KEY` also need repointing to `151.185.42.16` / `osho`.
+### Automated deploy (GitHub Actions)
+
+`scripts/deploy.sh` and the `deploy-backend.yml` / `publish-corpus.yml`
+workflows are E2E-ready: they SSH in as `osho`, use `systemctl restart
+osho-backend.service` and the `/home/osho/osho` path. The host
+(`164.52.223.241`) is hardcoded in the workflows; no `BACKEND_HOST` /
+`BACKEND_USER` secrets are used. For these to run on the new box:
+
+1. **Repo secret `BACKEND_SSH_KEY`** — a private key whose public half
+   is in `/home/osho/.ssh/authorized_keys` on the new box.
+2. **Passwordless sudo** for the restart — add to
+   `/etc/sudoers.d/osho` on the box:
+   `osho ALL=(root) NOPASSWD: /usr/bin/systemctl restart osho-backend.service`
+3. `publish-corpus.yml` also needs `gh` + `zstd` on the box (the
+   workflow installs them on first run).
+
+Until the `BACKEND_SSH_KEY` secret points at the new box, deploy by
+hand with the blocks above.
 
 ### Provisioning scripts (live on the box, not yet in the repo)
 `02-setup-single-vps.sh` and `refresh-cloudflare-ips.sh` configured

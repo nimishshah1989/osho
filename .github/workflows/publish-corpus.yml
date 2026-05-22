@@ -39,7 +39,7 @@ jobs:
         with:
           # Host + user are not secrets (public infra, see CLAUDE.md);
           # only the SSH key is.
-          host: 151.185.42.16
+          host: 164.52.223.241
           username: osho
           key: ${{ secrets.BACKEND_SSH_KEY }}
           envs: GH_TOKEN_FOR_RELEASE

@@ -31,7 +31,7 @@ Browser
   │
 Cloudflare (DNS, edge TLS, proxy — only allowed ingress)
   │
-E2E VPS 151.185.42.16  (single box, Ubuntu 24.04)
+E2E VPS 164.52.223.241  (single box, Ubuntu 24.04)
   │
   ├── oshoarchives.com  →  Next.js 14 app router  (PM2, :3000)
   │     ├── Pages:    /, /archive, /constellation, /read, /help, /admin
@@ -165,13 +165,13 @@ for one-off corrections; not designed for bulk import.
 
 ## Deployment
 
-Frontend and backend share one E2E VPS (`151.185.42.16`) behind
+Frontend and backend share one E2E VPS (`164.52.223.241`) behind
 Cloudflare. See `CLAUDE.md` → **Deployment** for the full layout.
 
 ### Frontend (manual)
 
 ```bash
-ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+ssh osho@164.52.223.241
 cd /home/osho/osho && git pull origin main
 cd frontend && npm install && npm run build
 pm2 restart osho-frontend
@@ -193,7 +193,7 @@ runs the `Deploy Backend` workflow, which SSHes into the VPS and runs
 ### Manual backend deploy (one-time setup / debugging)
 
 ```bash
-ssh -i ~/.ssh/osho_iceland osho@151.185.42.16
+ssh osho@164.52.223.241
 cd /home/osho/osho
 bash scripts/deploy.sh
 ```
