@@ -168,14 +168,18 @@ for one-off corrections; not designed for bulk import.
 Frontend and backend share one E2E VPS (`164.52.223.241`) behind
 Cloudflare. See `CLAUDE.md` → **Deployment** for the full layout.
 
-### Frontend (manual)
+Both halves deploy automatically via GitHub Actions on push to `main`.
 
-```bash
-ssh osho@164.52.223.241
-cd /home/osho/osho && git pull origin main
-cd frontend && npm install && npm run build
-pm2 restart osho-frontend
-```
+### Frontend (GitHub Actions — fully automated)
+
+Any push to `main` touching `frontend/**` runs the `Deploy Frontend`
+workflow, which SSHes into the VPS and runs `scripts/deploy-frontend.sh`:
+
+1. `git pull` (fast-forward only)
+2. `npm ci` if `frontend/package*.json` changed
+3. `npm run build`
+4. Restarts the `osho-frontend` PM2 app
+5. Curls `:3000` and exits non-zero if it doesn't answer
 
 ### Backend (GitHub Actions — fully automated)
 
@@ -190,12 +194,12 @@ runs the `Deploy Backend` workflow, which SSHes into the VPS and runs
 4. Restarts `osho-backend.service` (systemd)
 5. Curls `/health` and exits non-zero if it doesn't come back 200
 
-### Manual backend deploy (one-time setup / debugging)
+### Manual deploy (one-time setup / debugging)
 
 ```bash
 ssh osho@164.52.223.241
 cd /home/osho/osho
-bash scripts/deploy.sh
+bash scripts/deploy-frontend.sh   # or scripts/deploy.sh for the backend
 ```
 
 ---
@@ -252,14 +256,18 @@ osho/
 │   ├── build_fts.py         (re)build FTS5 index
 │   ├── build_tags.py        location/date inference + topic tagging
 │   ├── ingest_docx.py       bulk-ingest .docx with @-field headers
-│   └── deploy.sh            server-side deploy script (run by GH Actions)
+│   ├── deploy.sh            server-side backend deploy (run by GH Actions)
+│   └── deploy-frontend.sh   server-side frontend deploy (run by GH Actions)
 ├── frontend/                Next.js 14 app router
 │   ├── app/                 pages + /api/* proxy routes
 │   ├── components/          Nav, HindiInput, Archive, Constellation, …
 │   ├── lib/                 i18n, theme, analytics, transliterate
 │   └── styles/globals.css
 ├── .github/workflows/
-│   └── deploy-backend.yml   triggers deploy.sh over SSH
+│   ├── deploy-backend.yml   triggers deploy.sh over SSH
+│   ├── deploy-frontend.yml  triggers deploy-frontend.sh over SSH
+│   ├── build-desktop.yml    builds the Electron installers
+│   └── publish-corpus.yml   refreshes the offline corpus release asset
 ├── requirements.txt
 └── .env.example
 ```
