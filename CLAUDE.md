@@ -193,14 +193,24 @@ sudo systemctl restart osho-backend.service
 curl -s http://127.0.0.1:8000/health
 ```
 
-> **STALE — needs rework for the E2E box.** `scripts/deploy.sh` and the
-> `deploy-backend.yml` / `publish-corpus.yml` workflows were written
-> for the retired EC2 host (`pkill uvicorn`, `/home/ubuntu/osho-speaks`,
-> `nohup`). They must be rewritten to use `systemctl restart
-> osho-backend.service`, the `/home/osho/osho` path, and an SSH key
-> that's actually on the new box. Until then, deploy by hand with the
-> blocks above. The repo secrets `BACKEND_HOST`/`BACKEND_USER`/
-> `BACKEND_SSH_KEY` also need repointing to `164.52.223.241` / `osho`.
+### Automated deploy (GitHub Actions)
+
+`scripts/deploy.sh` and the `deploy-backend.yml` / `publish-corpus.yml`
+workflows are E2E-ready: they SSH in as `osho`, use `systemctl restart
+osho-backend.service` and the `/home/osho/osho` path. The host
+(`164.52.223.241`) is hardcoded in the workflows; no `BACKEND_HOST` /
+`BACKEND_USER` secrets are used. For these to run on the new box:
+
+1. **Repo secret `BACKEND_SSH_KEY`** — a private key whose public half
+   is in `/home/osho/.ssh/authorized_keys` on the new box.
+2. **Passwordless sudo** for the restart — add to
+   `/etc/sudoers.d/osho` on the box:
+   `osho ALL=(root) NOPASSWD: /usr/bin/systemctl restart osho-backend.service`
+3. `publish-corpus.yml` also needs `gh` + `zstd` on the box (the
+   workflow installs them on first run).
+
+Until the `BACKEND_SSH_KEY` secret points at the new box, deploy by
+hand with the blocks above.
 
 ### Provisioning scripts (live on the box, not yet in the repo)
 `02-setup-single-vps.sh` and `refresh-cloudflare-ips.sh` configured
