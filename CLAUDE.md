@@ -144,11 +144,20 @@ Everything runs on **one sponsor-owned E2E Networks VPS**
 (`164.52.223.241`, Ubuntu 24.04). Cloudflare fronts it as DNS + edge
 TLS + proxy.
 
-> **Pending hardening**: the Cloudflare-only nginx restriction (return
-> 403 to any non-Cloudflare source IP) that the previous box had has
-> not yet been re-applied on this box. Until it is, the origin is
-> reachable by direct IP. Re-add it from Cloudflare's published IP
-> ranges.
+Cloudflare is the only allowed ingress — the two HTTPS server blocks
+`include /etc/nginx/snippets/cloudflare-allow.conf`, an `allow` list of
+Cloudflare's published IP ranges ending in `deny all`, so any direct-IP
+request returns 403. Regenerate that snippet when Cloudflare's ranges
+change:
+
+```bash
+{ curl -s https://www.cloudflare.com/ips-v4; echo; \
+  curl -s https://www.cloudflare.com/ips-v6; } \
+  | grep -v '^[[:space:]]*$' | sed 's/^/allow /; s/$/;/' \
+  > /etc/nginx/snippets/cloudflare-allow.conf
+echo 'deny all;' >> /etc/nginx/snippets/cloudflare-allow.conf
+nginx -t && systemctl reload nginx
+```
 
 > **SSH access**: key-based auth for the `osho` user. The private key
 > is `~/.ssh/osho_e2e` (ed25519, `osho-e2e`); its public half is in
@@ -158,7 +167,7 @@ TLS + proxy.
 SSH:   ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 repo:  /home/osho/osho        (Python venv at .venv/, runs as user `osho`)
 
-nginx :80/:443  — /etc/nginx/sites-available/osho (Cloudflare-only ingress: pending — see above)
+nginx :80/:443  — /etc/nginx/sites-available/osho, Cloudflare-only ingress
   ├── oshoarchives.com  (+ www)  → 127.0.0.1:3000  (Next.js)
   └── api.oshoarchives.com       → 127.0.0.1:8000  (FastAPI)
        TLS via Certbot (/etc/letsencrypt/live/oshoarchives.com/)
