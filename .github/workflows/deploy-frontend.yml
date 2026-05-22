@@ -1,0 +1,43 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'scripts/deploy-frontend.sh'
+      - '.github/workflows/deploy-frontend.yml'
+
+# Serialise frontend deploys so two pushes can't build + restart PM2 at
+# the same time.
+concurrency:
+  group: deploy-frontend
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and run server-side frontend deploy script
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          # The E2E VPS. Host + user are not secrets (the IP is public
+          # infra, documented in CLAUDE.md); only the SSH key is. Reuses
+          # the same BACKEND_SSH_KEY secret as the backend workflow.
+          host: 164.52.223.241
+          username: osho
+          key: ${{ secrets.BACKEND_SSH_KEY }}
+          # A Next.js build (plus an occasional npm ci) can run several
+          # minutes — give it generous headroom over the 10m default.
+          command_timeout: 20m
+          # All deploy logic lives in scripts/deploy-frontend.sh on the
+          # server so we never need to re-edit this workflow. The script:
+          #   1. git pull
+          #   2. npm ci (only if package*.json changed)
+          #   3. npm run build
+          #   4. pm2 restart osho-frontend
+          #   5. curl :3000 and exit non-zero if it doesn't answer
+          script: |
+            set -euo pipefail
+            cd /home/osho/osho
+            bash scripts/deploy-frontend.sh

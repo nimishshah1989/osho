@@ -208,12 +208,11 @@ proxy talks to FastAPI over **loopback** (`127.0.0.1:8000`) — never
 the public IP or `api.oshoarchives.com` (the latter would 403, being
 non-Cloudflare).
 
-### Frontend redeploy
+### Frontend redeploy (manual — automated via GitHub Actions, see below)
 ```bash
 ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
-cd /home/osho/osho && git pull origin main
-cd frontend && npm install && npm run build
-pm2 restart osho-frontend
+cd /home/osho/osho
+bash scripts/deploy-frontend.sh
 ```
 
 ### Backend redeploy
@@ -228,11 +227,23 @@ curl -s http://127.0.0.1:8000/health
 
 ### Automated deploy (GitHub Actions)
 
-`scripts/deploy.sh` and the `deploy-backend.yml` / `publish-corpus.yml`
-workflows are E2E-ready: they SSH in as `osho`, use `systemctl restart
-osho-backend.service` and the `/home/osho/osho` path. The host
-(`164.52.223.241`) is hardcoded in the workflows; no `BACKEND_HOST` /
-`BACKEND_USER` secrets are used. For these to run on the new box:
+Both halves deploy on push to `main`:
+- **`deploy-frontend.yml`** → `scripts/deploy-frontend.sh` — fires on
+  `frontend/**` changes; runs `git pull` → `npm ci` (if package files
+  changed) → `npm run build` → `pm2 restart osho-frontend` → healthcheck
+  `:3000`.
+- **`deploy-backend.yml`** → `scripts/deploy.sh` — fires on backend
+  script / `requirements.txt` / `data/**` changes; pull → pip install →
+  FTS rebuild (conditional) → `systemctl restart osho-backend.service` →
+  healthcheck `/health`.
+
+`scripts/deploy.sh`, `scripts/deploy-frontend.sh` and the
+`deploy-backend.yml` / `deploy-frontend.yml` / `publish-corpus.yml`
+workflows are E2E-ready: they SSH in as `osho` and use the
+`/home/osho/osho` path. The host (`164.52.223.241`) is hardcoded in the
+workflows; no `BACKEND_HOST` / `BACKEND_USER` secrets are used. All three
+deploy workflows reuse the single `BACKEND_SSH_KEY` secret. For these to
+run on the new box:
 
 1. **Repo secret `BACKEND_SSH_KEY`** — a private key whose public half
    is in `/home/osho/.ssh/authorized_keys` on the new box.
@@ -326,7 +337,5 @@ Still open, high-impact first:
 3. MODERATE — Date range inputs don't auto-refresh
 4. MINOR — Dead routes: `/ask`, `/nebula`, `/zen-tree`
 5. MINOR — `total_hits` over-reports for narrow NEAR queries
-6. OPS — Frontend has no automated deploy; redeploy is still manual SSH +
-   `npm run build` + `pm2 restart` (backend deploys automatically on push to
-   `main`). Provisioning scripts (`02-setup-single-vps.sh`,
+6. OPS — Provisioning scripts (`02-setup-single-vps.sh`,
    `refresh-cloudflare-ips.sh`) live only on the box, not in the repo.
