@@ -28,7 +28,7 @@ DB_PATH = os.path.join(BASE_DIR, 'data/osho.db')
 
 ALLOWED_ORIGINS = [
     o.strip()
-    for o in os.getenv("ALLOWED_ORIGINS", "https://osho-zeta.vercel.app").split(",")
+    for o in os.getenv("ALLOWED_ORIGINS", "https://oshoarchives.com").split(",")
     if o.strip()
 ]
 

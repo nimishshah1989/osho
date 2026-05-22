@@ -163,6 +163,17 @@ export default function HelpPage() {
             </p>
           </Section>
 
+          {/* ── Offline / app ── */}
+          <Section title="Offline Use & Desktop App">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
+              The full archive can be used without an internet connection. Visit{' '}
+              <a href="/downloadapp" className="text-gold hover:underline">/downloadapp</a>{' '}
+              to install the site as an app or download the desktop application — both
+              bundle the complete corpus so search works entirely offline, with the same
+              modes, syntax, and Hindi support described above.
+            </p>
+          </Section>
+
           {/* ── sannyas.wiki ── */}
           <Section title="sannyas.wiki Links">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
