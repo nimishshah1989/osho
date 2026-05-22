@@ -150,13 +150,12 @@ TLS + proxy.
 > reachable by direct IP. Re-add it from Cloudflare's published IP
 > ranges.
 
-> **SSH access**: the box was provisioned with root-password login.
-> Set up key-based auth for the `osho` user and record the key path
-> here — the `~/.ssh/osho_iceland` key referenced below is from the
-> retired box and may not be installed on this one.
+> **SSH access**: key-based auth for the `osho` user. The private key
+> is `~/.ssh/osho_e2e` (ed25519, `osho-e2e`); its public half is in
+> `/home/osho/.ssh/authorized_keys` on the box.
 
 ```
-SSH:   ssh osho@164.52.223.241
+SSH:   ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 repo:  /home/osho/osho        (Python venv at .venv/, runs as user `osho`)
 
 nginx :80/:443  — /etc/nginx/sites-available/osho (Cloudflare-only ingress: pending — see above)
@@ -177,7 +176,7 @@ non-Cloudflare).
 
 ### Frontend redeploy
 ```bash
-ssh osho@164.52.223.241
+ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 cd /home/osho/osho && git pull origin main
 cd frontend && npm install && npm run build
 pm2 restart osho-frontend
@@ -185,7 +184,7 @@ pm2 restart osho-frontend
 
 ### Backend redeploy
 ```bash
-ssh osho@164.52.223.241
+ssh -i ~/.ssh/osho_e2e osho@164.52.223.241
 cd /home/osho/osho && git pull origin main
 # only when scripts/build_fts.py or data/** changed:
 .venv/bin/python3 scripts/build_fts.py
