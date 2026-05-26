@@ -423,7 +423,8 @@ def _augment_near_adjacent_strict(
 
         _, seq_a, seq_b, info_a, info_b = best
         ev_row = conn.execute(
-            "SELECT title, date, location, language FROM events WHERE id = ?",
+            "SELECT title, date, location, language, "
+            "translated_from, source_short FROM events WHERE id = ?",
             (ev_id,),
         ).fetchone()
         if not ev_row:
@@ -453,6 +454,8 @@ def _augment_near_adjacent_strict(
             'date': ev_row[1],
             'location': ev_row[2],
             'language': ev_row[3],
+            'translated_from': ev_row[4],
+            'source_short': ev_row[5],
             'rank': 0.0,
             'hit_count': 2,
             'hits': hits,
@@ -513,7 +516,8 @@ def _augment_near_cross_paragraph(
             continue
 
         ev_row = conn.execute(
-            "SELECT title, date, location, language FROM events WHERE id = ?",
+            "SELECT title, date, location, language, "
+            "translated_from, source_short FROM events WHERE id = ?",
             (ev_id,),
         ).fetchone()
         if not ev_row:
@@ -550,6 +554,8 @@ def _augment_near_cross_paragraph(
             "date": ev_row[1],
             "location": ev_row[2],
             "language": ev_row[3],
+            "translated_from": ev_row[4],
+            "source_short": ev_row[5],
             "rank": 0.0,
             "hit_count": len(all_seqs),
             "hits": hits,
@@ -585,6 +591,17 @@ def _ensure_events_translated_from_column(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _ensure_events_source_short_column(conn: sqlite3.Connection) -> None:
+    """Idempotent migration for `events.source_short` — the short book
+    title for translated records (Sugit's `@sourceShort=` Word header,
+    Anuragi's wish to display the published volume on translation hits).
+    Added 2026-05-26 alongside the locked-in @-field set."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "source_short" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN source_short TEXT")
+        conn.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not os.path.exists(DB_PATH):
@@ -594,6 +611,7 @@ async def lifespan(app: FastAPI):
             has_fts = _table_exists(conn, 'paragraphs_fts')
             _ensure_paragraph_role_column(conn)
             _ensure_events_translated_from_column(conn)
+            _ensure_events_source_short_column(conn)
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:
@@ -645,7 +663,8 @@ def catalog():
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, title, date, location, language FROM events"
+            "SELECT id, title, date, location, language, "
+            "translated_from, source_short FROM events"
             " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title"
         )
         rows = cur.fetchall()
@@ -659,12 +678,14 @@ def catalog():
 
         events = [
             {
-                "id":       r["id"],
-                "title":    r["title"],
-                "date":     r["date"],
-                "location": r["location"],
-                "language": r["language"],
-                "tags":     sorted(tags_map.get(r["id"], [])),
+                "id":              r["id"],
+                "title":           r["title"],
+                "date":            r["date"],
+                "location":        r["location"],
+                "language":        r["language"],
+                "translated_from": r["translated_from"],
+                "source_short":    r["source_short"],
+                "tags":            sorted(tags_map.get(r["id"], [])),
             }
             for r in rows
         ]
@@ -766,6 +787,8 @@ def search(
                     e.date,
                     e.location,
                     e.language,
+                    e.translated_from AS translated_from,
+                    e.source_short AS source_short,
                     p.role AS role,
                     bm25({fts_table}) AS rank
                 FROM {fts_table} f
@@ -791,6 +814,8 @@ def search(
                     "date": r["date"],
                     "location": r["location"],
                     "language": r["language"],
+                    "translated_from": r["translated_from"],
+                    "source_short": r["source_short"],
                     "best_rank": r["rank"],
                     "hit_count": 0,
                     "hits": [],
@@ -1013,12 +1038,14 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
 
         if event_id:
             cur.execute(
-                "SELECT id, title, date, location, language FROM events WHERE id = ?",
+                "SELECT id, title, date, location, language, "
+                "translated_from, source_short FROM events WHERE id = ?",
                 (event_id,),
             )
         else:
             cur.execute(
-                "SELECT id, title, date, location, language FROM events"
+                "SELECT id, title, date, location, language, "
+                "translated_from, source_short FROM events"
                 " WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
                 (title,),
             )
@@ -1072,6 +1099,8 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
             "date": ev["date"],
             "location": ev["location"],
             "language": ev["language"],
+            "translated_from": ev["translated_from"],
+            "source_short": ev["source_short"],
         },
         "paragraphs": paragraphs,
     }
@@ -1108,7 +1137,8 @@ def admin_events(
         where = " AND ".join(where_parts)
         total = cur.execute(f"SELECT COUNT(*) FROM events e WHERE {where}", params).fetchone()[0]
         rows = cur.execute(
-            f"SELECT e.id, e.title, e.date, e.location, e.language FROM events e WHERE {where}"
+            f"SELECT e.id, e.title, e.date, e.location, e.language,"
+            f" e.translated_from, e.source_short FROM events e WHERE {where}"
             f" ORDER BY COALESCE(e.date,''), e.title LIMIT ? OFFSET ?",
             params + [per_page, (page - 1) * per_page],
         ).fetchall()
@@ -1124,6 +1154,8 @@ def admin_events(
             {
                 "id": r["id"], "title": r["title"], "date": r["date"],
                 "location": r["location"], "language": r["language"],
+                "translated_from": r["translated_from"],
+                "source_short": r["source_short"],
                 "tags": sorted(tags_map.get(r["id"], [])),
             }
             for r in rows
@@ -1134,7 +1166,8 @@ def admin_events(
 @app.patch("/admin/events/{event_id}")
 async def admin_update_event(event_id: str, request: Request, body: dict = Body(...)):
     _check_admin(request)
-    allowed = {"title", "date", "location", "language"}
+    allowed = {"title", "date", "location", "language",
+               "translated_from", "source_short"}
     updates = {k: v for k, v in body.items() if k in allowed}
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields")

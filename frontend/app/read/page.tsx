@@ -6,6 +6,25 @@ import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
+
+/** "translated from <X> · <book>" line for translated records. Null for
+ *  originals (`translated_from` absent / "none"). Kept inline rather than
+ *  shared from page.tsx — that file is a 'use client' component too and
+ *  importing across two route entry-points hurts code-splitting more than
+ *  it saves; the helper is small enough to duplicate. */
+function translationLine(
+  translatedFrom: string | null | undefined,
+  sourceShort: string | null | undefined,
+  locale: 'en' | 'hi',
+): string | null {
+  const tf = (translatedFrom ?? '').trim();
+  if (!tf || tf.toLowerCase() === 'none') return null;
+  const book = (sourceShort ?? '').trim();
+  if (locale === 'hi') {
+    return book ? `${tf} से अनूदित · ${book}` : `${tf} से अनूदित`;
+  }
+  return book ? `translated from ${tf} · ${book}` : `translated from ${tf}`;
+}
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
 import { paragraphRoleClass, isMetadataRole, cx } from '../../lib/paragraphRole';
 import { useOfflineEngine } from '../../lib/search/OfflineProvider';
@@ -24,12 +43,14 @@ interface DiscourseResponse {
     date: string | null;
     location: string | null;
     language: string | null;
+    translated_from?: string | null;
+    source_short?: string | null;
   };
   paragraphs: Paragraph[];
 }
 
 function ReaderInner() {
-  const { t } = useLocale();
+  const { t, locale } = useLocale();
   const searchParams = useSearchParams();
   const title = searchParams?.get('title') ?? '';
   const eventId = searchParams?.get('event_id') ?? '';
@@ -123,6 +144,14 @@ function ReaderInner() {
                 )}
               </div>
             )}
+            {data?.event && (() => {
+              const tline = translationLine(data.event.translated_from, data.event.source_short, locale);
+              return tline ? (
+                <div className="italic text-[12px] tracking-[0.05em] text-stone-500 dark:text-ivory/75 mt-3">
+                  {tline}
+                </div>
+              ) : null;
+            })()}
             {sannyasWikiUrl && (
               <a
                 href={sannyasWikiUrl}

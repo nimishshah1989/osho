@@ -6,11 +6,15 @@ project root):
     @title=A New Vision of Women's Liberation ~ 01
     @language=EN
     @translatedFrom=none
+    @sourceShort=             (only when @translatedFrom != "none")
     @time=1987-03-08-xm
-    @theme=         (optional)
-    @place=         (optional)
+    @place=                   (optional)
     @eventText=
     <full paragraph 1>
+
+(The legacy `@theme=` header is still accepted for backward compatibility
+with Antar's pre-2026-05 documents; new Word files Sugit ships should
+omit it — themes are auto-classified from content.)
 
     <full paragraph 2>
 
@@ -56,9 +60,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "osho.db"
 
 # Whitelisted @-fields we read from the doc header.
+# `theme` is legacy (pre-2026-05) — still accepted so old docs ingest cleanly,
+# but new files from Sugit don't carry it.
 _HEADER_FIELDS = {
-    "title", "language", "translatedfrom", "time", "theme", "place",
-    "eventtext",
+    "title", "language", "translatedfrom", "sourceshort",
+    "time", "theme", "place", "eventtext",
 }
 
 # Match a header line like "@field=value" — the `=` is required; trailing
@@ -86,6 +92,10 @@ class TalkRecord:
     title: str
     language: str
     translated_from: str | None = None
+    # Short book title for translations — surfaced in search results so a
+    # reader who finds a translated talk can see which published volume
+    # it came from. Only meaningful when `translated_from` is not "none".
+    source_short: str | None = None
     time: str | None = None
     theme: str | None = None
     place: str | None = None
@@ -235,10 +245,23 @@ def parse_docx(path: Path) -> TalkRecord:
     if not body:
         raise ValueError(f"{path.name}: no body paragraphs after @eventText=")
 
+    translated_from = (header.get("translatedfrom") or "").strip() or None
+    source_short = (header.get("sourceshort") or "").strip() or None
+    # Sugit's convention: `@sourceShort` only carries meaning for translations.
+    # If it appears on an original-language record we drop it rather than
+    # storing a value that the UI would mis-display as a book-of-origin.
+    if source_short and (not translated_from or translated_from.lower() == "none"):
+        print(
+            f"  WARN  {path.name}: @sourceShort ignored — record is not a translation",
+            file=sys.stderr,
+        )
+        source_short = None
+
     return TalkRecord(
         title=header["title"].strip(),
         language=_language_from(header, path),
-        translated_from=(header.get("translatedfrom") or "").strip() or None,
+        translated_from=translated_from,
+        source_short=source_short,
         time=(header.get("time") or "").strip() or None,
         theme=(header.get("theme") or "").strip() or None,
         place=(header.get("place") or "").strip() or None,
@@ -253,6 +276,12 @@ def _ensure_translated_from_column(conn: sqlite3.Connection) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
     if "translated_from" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN translated_from TEXT")
+
+
+def _ensure_source_short_column(conn: sqlite3.Connection) -> None:
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
+    if "source_short" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN source_short TEXT")
 
 
 def _ensure_role_column(conn: sqlite3.Connection) -> None:
@@ -315,17 +344,24 @@ def upsert(conn: sqlite3.Connection, talk: TalkRecord) -> tuple[str, bool]:
         # external references (bookmarks, analytics) stay stable.
         conn.execute(
             "UPDATE events SET date = ?, location = ?, language = ?, "
-            "translated_from = ? WHERE id = ?",
-            (talk.time, talk.place, talk.language, talk.translated_from, existing_id),
+            "translated_from = ?, source_short = ? WHERE id = ?",
+            (
+                talk.time, talk.place, talk.language,
+                talk.translated_from, talk.source_short, existing_id,
+            ),
         )
         _delete_event_rows(conn, existing_id)
         event_id, created_new = existing_id, False
     else:
         event_id = str(uuid.uuid4())
         conn.execute(
-            "INSERT INTO events (id, title, date, location, language, translated_from) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (event_id, talk.title, talk.time, talk.place, talk.language, talk.translated_from),
+            "INSERT INTO events (id, title, date, location, language, "
+            "translated_from, source_short) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                event_id, talk.title, talk.time, talk.place, talk.language,
+                talk.translated_from, talk.source_short,
+            ),
         )
         created_new = True
 
@@ -425,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     failed_count = 0
     with sqlite3.connect(args.db) as conn:
         _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
         _ensure_role_column(conn)
         for f in files:
             try:

@@ -13,7 +13,8 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     CREATE TABLE events (
       id TEXT PRIMARY KEY, title TEXT NOT NULL,
       date TEXT, location TEXT, language TEXT,
-      translated_from TEXT
+      translated_from TEXT,
+      source_short TEXT
     );
     CREATE TABLE paragraphs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,24 +37,25 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     );
   `);
 
-  // (id, title, date, location, language, translated_from)
-  const events: Array<[string, string, string, string, string, string]> = [
-    ['e1', 'The Book of Secrets ~ 01',    '1973-01-01', 'Bombay', 'English', 'none'],
-    ['e2', 'The Mustard Seed ~ 04',       '1974-08-21', 'Poona',  'English', 'none'],
-    ['e3', 'Vigyan Bhairav Tantra ~ 12',  '1984-05-10', 'Pune',   'English', 'none'],
-    ['e4', 'A Course on Meditation ~ 03', '1988-03-03', 'Pune',   'English', 'none'],
-    ['e5', 'Zen: The Quantum Leap ~ 02',  '1989-04-04', 'Pune',   'English', 'none'],
-    ['h1', 'Dekh Kabira Roya ~ 17',       '1978-06-15', 'Pune',   'Hindi',   'none'],
-    ['h2', 'Dhammapada ~ 03',             '1979-09-10', 'Pune',   'Hindi',   'none'],
-    ['h3', 'Ek Omkar Satnam ~ 05',        '1975-02-20', 'Bombay', 'Hindi',   'none'],
-    ['t1', 'The Path of Meditation (Translation)', '1980-01-01', 'Pune', 'English', 'Hindi'],
-    ['p1', 'Light on the Path ~ 29',      '1986-02-25', 'Pune',   'English', 'none'],
-    ['p2', 'The Messiah Vol 1 ~ 15',      '1987-01-10', 'Pune',   'English', 'none'],
-    ['ss1', 'Satyam Shivam Sundaram ~ 01', '1980-11-11', 'Pune', 'Hindi', 'none'],
-    ['ss2', 'Satyam Shivam Sundaram ~ 02', '1980-11-12', 'Pune', 'Hindi', 'none'],
+  // (id, title, date, location, language, translated_from, source_short)
+  // source_short is only set on translations (translated_from != 'none').
+  const events: Array<[string, string, string, string, string, string, string | null]> = [
+    ['e1', 'The Book of Secrets ~ 01',    '1973-01-01', 'Bombay', 'English', 'none', null],
+    ['e2', 'The Mustard Seed ~ 04',       '1974-08-21', 'Poona',  'English', 'none', null],
+    ['e3', 'Vigyan Bhairav Tantra ~ 12',  '1984-05-10', 'Pune',   'English', 'none', null],
+    ['e4', 'A Course on Meditation ~ 03', '1988-03-03', 'Pune',   'English', 'none', null],
+    ['e5', 'Zen: The Quantum Leap ~ 02',  '1989-04-04', 'Pune',   'English', 'none', null],
+    ['h1', 'Dekh Kabira Roya ~ 17',       '1978-06-15', 'Pune',   'Hindi',   'none', null],
+    ['h2', 'Dhammapada ~ 03',             '1979-09-10', 'Pune',   'Hindi',   'none', null],
+    ['h3', 'Ek Omkar Satnam ~ 05',        '1975-02-20', 'Bombay', 'Hindi',   'none', null],
+    ['t1', 'The Path of Meditation (Translation)', '1980-01-01', 'Pune', 'English', 'Hindi', 'The Path of Meditation'],
+    ['p1', 'Light on the Path ~ 29',      '1986-02-25', 'Pune',   'English', 'none', null],
+    ['p2', 'The Messiah Vol 1 ~ 15',      '1987-01-10', 'Pune',   'English', 'none', null],
+    ['ss1', 'Satyam Shivam Sundaram ~ 01', '1980-11-11', 'Pune', 'Hindi', 'none', null],
+    ['ss2', 'Satyam Shivam Sundaram ~ 02', '1980-11-12', 'Pune', 'Hindi', 'none', null],
   ];
   const evInsert = sqlite.prepare(
-    'INSERT INTO events (id,title,date,location,language,translated_from) VALUES (?,?,?,?,?,?)',
+    'INSERT INTO events (id,title,date,location,language,translated_from,source_short) VALUES (?,?,?,?,?,?,?)',
   );
   for (const e of events) evInsert.run(...e);
 
