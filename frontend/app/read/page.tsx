@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
+import { formatReadableDate } from '../../lib/dateFormat';
 
 /** "translated from <X> · <book>" line for translated records. Null for
  *  originals (`translated_from` absent / "none"). Kept inline rather than
@@ -129,8 +130,18 @@ function ReaderInner() {
             </h1>
             {data?.event && (
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px] tracking-[0.25em] uppercase text-stone-500 dark:text-ivory/75">
-                {data.event.date && <span className="text-gold font-medium">{data.event.date}</span>}
-                {data.event.location && <span>{data.event.location}</span>}
+                {/* Sugit/Anuragi 2026-05-21 layout: show the readable date and,
+                    for translations, the source book title where the location
+                    used to sit. The body header inside the discourse continues
+                    to carry the full date-and-place line verbatim. */}
+                {data.event.date && (
+                  <span className="text-gold font-medium">
+                    {formatReadableDate(data.event.date, locale)}
+                  </span>
+                )}
+                {(data.event.source_short ?? '').trim() && (
+                  <span>{(data.event.source_short ?? '').trim()}</span>
+                )}
                 {data.event.language && <span>{data.event.language}</span>}
                 {data.paragraphs.length > 0 && (
                   <span>

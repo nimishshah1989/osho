@@ -51,6 +51,15 @@ from scripts.ingest_docx import (  # noqa: E402
         # future style names like "ctp - Q & A" leaking ampersands into the role.
         ("ctp - Q & A", "q_a"),
         ("ctp - Footnote (1)", "footnote_1"),
+        # Language qualifiers on Hindi-template styles collapse to the same
+        # slug as the unqualified version — both are semantically the same
+        # paragraph role, only the Word font differs (Sugit's 2026-05-21).
+        ("ctp - Osho Talking (Hindi)", "osho_talking"),
+        ("ctp - Other Talking 1 (Hindi)", "other_talking_1"),
+        ("ctp - Sutra/Question (Devanagari)", "sutra_question"),
+        ("ctp - Osho Talking (English)", "osho_talking"),
+        # Case-insensitive on the qualifier
+        ("ctp - Poem (HINDI)", "poem"),
         ("ctp - !!!", None),  # nothing identifier-like left → None
         # Non-ctp styles → None (treated as plain body text)
         ("Normal", None),
