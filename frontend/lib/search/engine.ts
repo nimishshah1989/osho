@@ -52,6 +52,8 @@ interface FtsRow {
   date: string | null;
   location: string | null;
   language: string | null;
+  translated_from: string | null;
+  source_short: string | null;
   role: string | null;
   rank: number;
 }
@@ -111,6 +113,8 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
          e.date,
          e.location,
          e.language,
+         e.translated_from AS translated_from,
+         e.source_short AS source_short,
          p.role AS role,
          bm25(${ftsTable}) AS rank
        FROM ${ftsTable} f
@@ -136,6 +140,8 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
         date: r.date,
         location: r.location,
         language: r.language,
+        translated_from: r.translated_from,
+        source_short: r.source_short,
         best_rank: r.rank,
         hit_count: 0,
         hits: [],
@@ -229,6 +235,8 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
     date: ev.date,
     location: ev.location,
     language: ev.language,
+    translated_from: ev.translated_from,
+    source_short: ev.source_short,
     rank: ev.best_rank,
     hit_count: ev.hit_count,
     hits: ev.hits,
@@ -251,6 +259,8 @@ interface MutableEvent {
   date: string | null;
   location: string | null;
   language: string | null;
+  translated_from: string | null;
+  source_short: string | null;
   best_rank: number;
   hit_count: number;
   hits: SearchHit[];
@@ -370,8 +380,11 @@ function augmentNearAdjacentStrict(
       date: string | null;
       location: string | null;
       language: string | null;
+      translated_from: string | null;
+      source_short: string | null;
     }>(
-      'SELECT title, date, location, language FROM events WHERE id = ?',
+      'SELECT title, date, location, language, translated_from, source_short'
+      + ' FROM events WHERE id = ?',
       [evId],
     );
     if (!evRow) continue;
@@ -399,6 +412,8 @@ function augmentNearAdjacentStrict(
       date: evRow.date,
       location: evRow.location,
       language: evRow.language,
+      translated_from: evRow.translated_from,
+      source_short: evRow.source_short,
       best_rank: 0.0,
       hit_count: 2,
       hits,
@@ -468,8 +483,11 @@ function augmentNearCrossParagraph(
       date: string | null;
       location: string | null;
       language: string | null;
+      translated_from: string | null;
+      source_short: string | null;
     }>(
-      'SELECT title, date, location, language FROM events WHERE id = ?',
+      'SELECT title, date, location, language, translated_from, source_short'
+      + ' FROM events WHERE id = ?',
       [evId],
     );
     if (!evRow) continue;
@@ -501,6 +519,8 @@ function augmentNearCrossParagraph(
       date: evRow.date,
       location: evRow.location,
       language: evRow.language,
+      translated_from: evRow.translated_from,
+      source_short: evRow.source_short,
       best_rank: 0.0,
       hit_count: uniqueSeqs.length,
       hits,
@@ -551,17 +571,29 @@ export interface DiscourseOptions {
   q?: string;
 }
 
+interface DiscourseEventRow {
+  id: string;
+  title: string | null;
+  date: string | null;
+  location: string | null;
+  language: string | null;
+  translated_from: string | null;
+  source_short: string | null;
+}
+
 export function discourse(db: Database, opts: DiscourseOptions): DiscourseResponse {
   const { title, eventId, q } = opts;
   if (!title && !eventId) throw new SearchError('Provide title or event_id', 400);
 
   const evRow = eventId
-    ? db.get<{ id: string; title: string | null; date: string | null; location: string | null; language: string | null }>(
-        'SELECT id, title, date, location, language FROM events WHERE id = ?',
+    ? db.get<DiscourseEventRow>(
+        'SELECT id, title, date, location, language, translated_from, source_short'
+        + ' FROM events WHERE id = ?',
         [eventId],
       )
-    : db.get<{ id: string; title: string | null; date: string | null; location: string | null; language: string | null }>(
-        "SELECT id, title, date, location, language FROM events WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
+    : db.get<DiscourseEventRow>(
+        'SELECT id, title, date, location, language, translated_from, source_short'
+        + " FROM events WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
         [title!],
       );
   if (!evRow) throw new SearchError('Discourse not found', 404);
@@ -607,6 +639,8 @@ export function discourse(db: Database, opts: DiscourseOptions): DiscourseRespon
       date: evRow.date,
       location: evRow.location,
       language: evRow.language,
+      translated_from: evRow.translated_from,
+      source_short: evRow.source_short,
     },
     paragraphs,
   };
@@ -621,6 +655,8 @@ export interface CatalogEvent {
   date: string | null;
   location: string | null;
   language: string | null;
+  translated_from?: string | null;
+  source_short?: string | null;
   tags: string[];
 }
 
@@ -635,9 +671,11 @@ export function catalog(db: Database): CatalogResponse {
     date: string | null;
     location: string | null;
     language: string | null;
+    translated_from: string | null;
+    source_short: string | null;
   }>(
-    "SELECT id, title, date, location, language FROM events"
-    + " WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title",
+    'SELECT id, title, date, location, language, translated_from, source_short'
+    + " FROM events WHERE title IS NOT NULL ORDER BY COALESCE(date, ''), title",
   );
 
   // event_tags is optional — older DBs don't have it. Probe before
@@ -666,6 +704,8 @@ export function catalog(db: Database): CatalogResponse {
       date: r.date,
       location: r.location,
       language: r.language,
+      translated_from: r.translated_from,
+      source_short: r.source_short,
       tags: tagsByEvent.get(r.id) ?? [],
     })),
   };

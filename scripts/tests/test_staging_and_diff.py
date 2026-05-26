@@ -39,7 +39,8 @@ def _seed_minimal_db(path, *, events=()):
         CREATE TABLE events (
             id TEXT PRIMARY KEY, title TEXT NOT NULL,
             date TEXT, location TEXT, language TEXT,
-            translated_from TEXT
+            translated_from TEXT,
+            source_short TEXT
         );
         CREATE TABLE paragraphs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,3 +214,33 @@ def test_diff_detects_translated_from_change(tmp_path):
     diffs = diff(_load_snapshots(src), _load_snapshots(dst))
     mod = next(d for d in diffs if d.status == "MODIFIED")
     assert "translated_from" in mod.note
+
+
+def test_diff_detects_source_short_change(tmp_path):
+    """When Sugit retitles a translation's @sourceShort, the staging diff
+    surfaces the rename so a reviewer can confirm before cutover."""
+    src = tmp_path / "src.db"
+    dst = tmp_path / "dst.db"
+    _seed_minimal_db(
+        src,
+        events=[("Translated Talk", "English", "1980", "Pune", "Hindi", ["body"])],
+    )
+    with sqlite3.connect(str(src)) as conn:
+        conn.execute(
+            "UPDATE events SET source_short='Old Book Title'"
+            " WHERE title='Translated Talk'"
+        )
+        conn.commit()
+    copy_database(src, dst)
+    with sqlite3.connect(str(dst)) as conn:
+        conn.execute(
+            "UPDATE events SET source_short='New Book Title'"
+            " WHERE title='Translated Talk'"
+        )
+        conn.commit()
+
+    diffs = diff(_load_snapshots(src), _load_snapshots(dst))
+    mod = next(d for d in diffs if d.status == "MODIFIED")
+    assert "source_short" in mod.note
+    assert "Old Book Title" in mod.note
+    assert "New Book Title" in mod.note

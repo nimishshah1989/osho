@@ -21,6 +21,7 @@ from scripts.ingest_docx import (  # noqa: E402
     parse_docx,
     upsert,
     _ensure_role_column,
+    _ensure_source_short_column,
     _ensure_translated_from_column,
 )
 
@@ -132,6 +133,7 @@ def test_ingest_round_trips_role_to_db(tmp_path):
 
     with sqlite3.connect(db_path) as conn:
         _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
         _ensure_role_column(conn)
         upsert(conn, talk)
         rows = conn.execute(
@@ -149,3 +151,77 @@ def test_ingest_round_trips_role_to_db(tmp_path):
     # Content survived intact too
     assert "Why are you saying this" in rows[0][1]
     assert "the question itself reveals" in rows[1][1]
+
+
+# ── @sourceShort header — Sugit's 2026-05-26 addition ─────────────────────
+
+
+def test_source_short_parsed_and_stored_on_translation(tmp_path):
+    """A translated record carries the book title from @sourceShort
+    through parse → upsert → events.source_short."""
+    docx_path = tmp_path / "translation.docx"
+    db_path = tmp_path / "test.db"
+    make_docx(
+        str(docx_path),
+        title="The Path of Meditation",
+        language="EN",
+        translated_from="Hindi",
+        source_short="The Path of Meditation",
+        body=["A translated paragraph."],
+    )
+    _seed_minimal_db(str(db_path))
+
+    talk = parse_docx(docx_path)
+    assert talk.translated_from == "Hindi"
+    assert talk.source_short == "The Path of Meditation"
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
+        _ensure_role_column(conn)
+        upsert(conn, talk)
+        row = conn.execute(
+            "SELECT translated_from, source_short FROM events WHERE title = ?",
+            (talk.title,),
+        ).fetchone()
+    assert row == ("Hindi", "The Path of Meditation")
+
+
+def test_source_short_dropped_on_original_record(tmp_path, capsys):
+    """Sugit's convention: @sourceShort only applies to translations. If
+    it appears on an original-language record the parser warns and drops
+    the value rather than mis-storing it as a book-of-origin."""
+    docx_path = tmp_path / "original.docx"
+    make_docx(
+        str(docx_path),
+        title="An Original Discourse",
+        language="EN",
+        translated_from="none",
+        source_short="Should Not Stick",
+        body=["A body paragraph."],
+    )
+
+    talk = parse_docx(docx_path)
+    # parse_docx keeps the literal "none" (it's a non-empty string); the
+    # drop-rule fires off translated_from.lower() == "none", so the book
+    # title is removed even though translated_from itself stays "none".
+    assert talk.translated_from == "none"
+    assert talk.source_short is None
+
+    err = capsys.readouterr().err
+    assert "@sourceShort ignored" in err
+
+
+def test_source_short_absent_header_yields_none(tmp_path):
+    """Old documents that don't carry @sourceShort still parse cleanly
+    with source_short = None — the field is optional."""
+    docx_path = tmp_path / "no_source.docx"
+    make_docx(
+        str(docx_path),
+        title="Legacy Talk",
+        language="EN",
+        translated_from="none",
+        body=["A body paragraph."],
+    )
+    talk = parse_docx(docx_path)
+    assert talk.source_short is None

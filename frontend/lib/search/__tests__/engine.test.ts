@@ -179,6 +179,34 @@ describe('filters', () => {
 });
 
 
+// ─── translated_from / source_short ─────────────────────────────────────
+
+describe('translation provenance', () => {
+  it('search results carry translated_from + source_short for translated records', () => {
+    const r = search(freshEngine(), { q: 'meditation' });
+    const translation = r.events.find(
+      (e) => e.title === 'The Path of Meditation (Translation)',
+    );
+    expect(translation).toBeDefined();
+    expect(translation!.translated_from).toBe('Hindi');
+    expect(translation!.source_short).toBe('The Path of Meditation');
+  });
+
+  it('search results show source_short null for originals', () => {
+    const r = search(freshEngine(), { q: 'meditation', original: true });
+    for (const ev of r.events) {
+      expect(ev.source_short ?? null).toBeNull();
+    }
+  });
+
+  it('discourse() returns translation provenance on the event meta', () => {
+    const d = discourse(freshEngine(), { eventId: 't1' });
+    expect(d.event.translated_from).toBe('Hindi');
+    expect(d.event.source_short).toBe('The Path of Meditation');
+  });
+});
+
+
 // ─── Counts ──────────────────────────────────────────────────────────────
 
 describe('hit counts', () => {

@@ -21,6 +21,13 @@ export interface SearchEvent {
   date: string | null;
   location: string | null;
   language: string | null;
+  /** "none" / null for originals; the source-language name (e.g. "Hindi")
+   *  for records that were translated. Mirrors `events.translated_from`. */
+  translated_from?: string | null;
+  /** Short book title — set only when this record is a translation; the
+   *  UI shows it alongside "translated from X" so the reader can see
+   *  which published volume the translation came from. */
+  source_short?: string | null;
   rank: number;
   hit_count: number;
   hits: SearchHit[];
@@ -61,6 +68,8 @@ export interface DiscourseEventMeta {
   date: string | null;
   location: string | null;
   language: string | null;
+  translated_from?: string | null;
+  source_short?: string | null;
 }
 
 export interface DiscourseResponse {

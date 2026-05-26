@@ -51,6 +51,8 @@ interface DiscourseResponse {
     date: string | null;
     location: string | null;
     language: string | null;
+    translated_from?: string | null;
+    source_short?: string | null;
   };
   paragraphs: Paragraph[];
 }
@@ -61,6 +63,26 @@ type Mode = 'phrase' | 'all' | 'near';
 const DEFAULT_PROX = 30;
 
 const HAS_DEVANAGARI = /[\u0900-\u097F]/;
+
+/** Translation-provenance line for the search result + reader header.
+ *  Returns null when the record is original-language ("none" or empty). */
+function translationLine(
+  translatedFrom: string | null | undefined,
+  sourceShort: string | null | undefined,
+  locale: 'en' | 'hi',
+): string | null {
+  const tf = (translatedFrom ?? '').trim();
+  if (!tf || tf.toLowerCase() === 'none') return null;
+  const book = (sourceShort ?? '').trim();
+  if (locale === 'hi') {
+    return book
+      ? `${tf} \u0938\u0947 \u0905\u0928\u0942\u0926\u093F\u0924 \u00B7 ${book}`
+      : `${tf} \u0938\u0947 \u0905\u0928\u0942\u0926\u093F\u0924`;
+  }
+  return book
+    ? `translated from ${tf} \u00B7 ${book}`
+    : `translated from ${tf}`;
+}
 
 function buildQuery(raw: string, mode: Mode, prox: number): string {
   const trimmed = raw.trim();
@@ -919,6 +941,14 @@ function SearchPageInner() {
                               {ev.hit_count > 0 && (
                                 <> · <strong className="text-gold">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
                               )}
+                              {(() => {
+                                const tline = translationLine(ev.translated_from, ev.source_short, locale);
+                                return tline ? (
+                                  <span className="block italic text-[11px] tracking-[0.05em] text-stone-500 dark:text-ivory/50 mt-0.5">
+                                    {tline}
+                                  </span>
+                                ) : null;
+                              })()}
                             </span>
                           </span>
                           <span className="text-[12px] tracking-[0.1em] text-stone-400 dark:text-ivory/40 flex-shrink-0 pt-1 font-medium">
@@ -961,6 +991,14 @@ function SearchPageInner() {
                           <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
+                      {(() => {
+                        const tline = translationLine(selectedEvent.translated_from, selectedEvent.source_short, locale);
+                        return tline ? (
+                          <div className="italic text-[12px] tracking-[0.05em] text-stone-500 dark:text-ivory/55 mt-1">
+                            {tline}
+                          </div>
+                        ) : null;
+                      })()}
                       {selectedEvent.title && (
                         <a
                           href={`https://www.sannyas.wiki/index.php?title=${encodeURIComponent(selectedEvent.title.replace(/ /g, '_'))}`}

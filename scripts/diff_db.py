@@ -52,22 +52,23 @@ class RecordSnapshot:
     date: str | None
     location: str | None
     translated_from: str | None
+    source_short: str | None
     paragraph_count: int
     body_hash: str  # SHA-1 of concatenated paragraph contents
 
 
 def _load_snapshots(db_path: Path) -> dict[tuple[str, str], RecordSnapshot]:
     """Return {(title, language): RecordSnapshot}. Missing translated_from
-    column (legacy DBs) becomes None."""
+    or source_short columns (legacy DBs) become None."""
     snaps: dict[tuple[str, str], RecordSnapshot] = {}
     with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
         conn.row_factory = sqlite3.Row
         cols = {r[1] for r in conn.execute("PRAGMA table_info(events)").fetchall()}
-        has_translated_from = "translated_from" in cols
-        tf_col = "translated_from" if has_translated_from else "NULL AS translated_from"
+        tf_col = "translated_from" if "translated_from" in cols else "NULL AS translated_from"
+        ss_col = "source_short" if "source_short" in cols else "NULL AS source_short"
 
         ev_rows = conn.execute(
-            f"SELECT id, title, language, date, location, {tf_col} FROM events"
+            f"SELECT id, title, language, date, location, {tf_col}, {ss_col} FROM events"
         ).fetchall()
 
         # Pre-fetch paragraphs grouped by event_id so we hit the DB only twice
@@ -92,6 +93,7 @@ def _load_snapshots(db_path: Path) -> dict[tuple[str, str], RecordSnapshot]:
                 date=ev["date"],
                 location=ev["location"],
                 translated_from=ev["translated_from"],
+                source_short=ev["source_short"],
                 paragraph_count=len(paras),
                 body_hash=body_hash,
             )
@@ -129,6 +131,8 @@ def _describe_change(a: RecordSnapshot, b: RecordSnapshot) -> list[str]:
         notes.append(f"location: {a.location!r} → {b.location!r}")
     if a.translated_from != b.translated_from:
         notes.append(f"translated_from: {a.translated_from!r} → {b.translated_from!r}")
+    if a.source_short != b.source_short:
+        notes.append(f"source_short: {a.source_short!r} → {b.source_short!r}")
     if a.body_hash != b.body_hash:
         if a.paragraph_count != b.paragraph_count:
             notes.append(

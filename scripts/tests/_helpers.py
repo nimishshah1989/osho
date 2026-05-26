@@ -13,6 +13,7 @@ def make_docx(
     title: str = "Sample Discourse ~ 01",
     language: str = "EN",
     translated_from: str = "none",
+    source_short: str | None = None,
     time: str = "1987-03-08-xm",
     body=None,
 ):
@@ -45,13 +46,15 @@ def make_docx(
         if name not in [s.name for s in doc.styles]:
             doc.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
 
-    for line in (
+    header_lines = [
         f"@title={title}",
         f"@language={language}",
         f"@translatedFrom={translated_from}",
-        f"@time={time}",
-        "@eventText=",
-    ):
+    ]
+    if source_short is not None:
+        header_lines.append(f"@sourceShort={source_short}")
+    header_lines.extend([f"@time={time}", "@eventText="])
+    for line in header_lines:
         doc.add_paragraph(line, style="ctp - Event Info")
 
     if body is None:

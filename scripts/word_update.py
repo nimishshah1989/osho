@@ -41,6 +41,7 @@ from pathlib import Path
 from ingest_docx import (
     DB_PATH,
     _ensure_role_column,
+    _ensure_source_short_column,
     _ensure_translated_from_column,
     _find_existing_event_id,
     delete_record,
@@ -205,6 +206,7 @@ def run_update(root: Path, db_path: Path, dry_run: bool = False) -> RunReport:
     conn = sqlite3.connect(db_path)
     try:
         _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
         _ensure_role_column(conn)
         # Implicit transaction — sqlite3 begins one on the first write.
         for path in _list_docx(root / "Add"):
