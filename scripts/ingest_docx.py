@@ -123,6 +123,13 @@ def _normalise_role(style_name: str | None) -> str | None:
     if not m:
         return None
     label = m.group(1).strip().lower()
+    # Sugit's Hindi files use the same semantic styles as English but with a
+    # trailing language qualifier — "ctp - Osho Talking (Hindi)" carries the
+    # same role as "ctp - Osho Talking", differing only in the font the Word
+    # template applies. Strip the qualifier so both map to the same slug;
+    # otherwise the frontend would render them with two different CSS
+    # classes for what is the same semantic paragraph type.
+    label = re.sub(r"\s*\((hindi|devanagari|english|en|hi)\)\s*$", "", label)
     # "Sutra/Question" → "sutra_question", "Other Talking 1" → "other_talking_1",
     # "Q & A" → "q_a". `[^\w]+` collapses any run of non-identifier characters
     # so the slug is always a safe map-key / CSS-class fragment.

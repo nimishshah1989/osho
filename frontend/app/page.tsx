@@ -21,6 +21,7 @@ import {
 import Nav from '../components/Nav';
 import HindiInput from '../components/HindiInput';
 import { useLocale } from '../lib/i18n';
+import { formatReadableDate } from '../lib/dateFormat';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
 import { paragraphRoleClass, cx } from '../lib/paragraphRole';
 import { useOfflineEngine } from '../lib/search/OfflineProvider';
@@ -934,7 +935,14 @@ function SearchPageInner() {
                               {ev.title ?? 'Untitled'}
                             </span>
                             <span className="block text-[12px] tracking-[0.1em] text-stone-500 dark:text-ivory/55 mt-1">
-                              {[ev.date, ev.location].filter(Boolean).join(' · ')}
+                              {/* Sugit/Anuragi 2026-05-21 layout: readable date,
+                                  optional book title for translations (replaces
+                                  the location slot), language. The technical
+                                  `@time` string is no longer surfaced here. */}
+                              {[
+                                formatReadableDate(ev.date, locale),
+                                (ev.source_short ?? '').trim() || null,
+                              ].filter(Boolean).join(' · ')}
                               {ev.language && (
                                 <span className="ml-1 text-[10px] tracking-[0.15em] uppercase text-gold/50">[{ev.language}]</span>
                               )}
@@ -984,7 +992,11 @@ function SearchPageInner() {
                         {selectedEvent.title ?? 'Untitled'}
                       </h2>
                       <div className="text-[13px] tracking-[0.15em] uppercase text-stone-500 dark:text-ivory/55 mt-1.5">
-                        {[selectedEvent.date, selectedEvent.location, selectedEvent.language]
+                        {[
+                          formatReadableDate(selectedEvent.date, locale),
+                          (selectedEvent.source_short ?? '').trim() || null,
+                          selectedEvent.language,
+                        ]
                           .filter(Boolean)
                           .join(' · ')}
                         {selectedEvent.hit_count > 0 && (
