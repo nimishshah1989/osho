@@ -253,6 +253,17 @@ def parse_docx(path: Path) -> TalkRecord:
         raise ValueError(f"{path.name}: no body paragraphs after @eventText=")
 
     translated_from = (header.get("translatedfrom") or "").strip() or None
+    # Sugit writes `@translatedFrom=` with the same language codes he uses
+    # on `@language=` (EN, HI, …), so map them through the same table.
+    # The existing corpus stores the full name ("Hindi" / "English") on the
+    # translated_from column; keeping a single canonical form is what
+    # makes filters like "originals only" work across old + new records.
+    # The literal "none" sentinel and any unrecognised value pass through
+    # unchanged so we don't silently rewrite something we didn't expect.
+    if translated_from:
+        code = translated_from.upper()
+        if code in _LANG_MAP:
+            translated_from = _LANG_MAP[code]
     source_short = (header.get("sourceshort") or "").strip() or None
     # Sugit's convention: `@sourceShort` only carries meaning for translations.
     # If it appears on an original-language record we drop it rather than

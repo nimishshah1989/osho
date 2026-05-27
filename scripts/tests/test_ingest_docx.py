@@ -221,6 +221,55 @@ def test_source_short_dropped_on_original_record(tmp_path, capsys):
     assert "@sourceShort ignored" in err
 
 
+def test_translated_from_code_normalised_to_full_name(tmp_path):
+    """Sugit writes `@translatedFrom=HI` (or `EN`), same codes as on
+    `@language=`. The ingester maps them through `_LANG_MAP` so the
+    stored value is the canonical "Hindi"/"English" — matching the
+    existing prod data so language-based filters don't fragment."""
+    docx_path = tmp_path / "translation.docx"
+    make_docx(
+        str(docx_path),
+        title="Translated Talk",
+        language="EN",
+        translated_from="HI",
+        source_short="A Book",
+        body=["body"],
+    )
+    talk = parse_docx(docx_path)
+    assert talk.translated_from == "Hindi"
+    assert talk.language == "English"
+
+
+def test_translated_from_none_passes_through(tmp_path):
+    """The literal "none" sentinel must NOT be mapped — it's the
+    canonical "this is an original" marker."""
+    docx_path = tmp_path / "original.docx"
+    make_docx(
+        str(docx_path),
+        title="Original Talk",
+        language="EN",
+        translated_from="none",
+        body=["body"],
+    )
+    talk = parse_docx(docx_path)
+    assert talk.translated_from == "none"
+
+
+def test_translated_from_full_name_idempotent(tmp_path):
+    """An already-full-name value must pass through unchanged so
+    re-ingesting an old-format doc doesn't double-rewrite."""
+    docx_path = tmp_path / "old_format.docx"
+    make_docx(
+        str(docx_path),
+        title="Old Format Talk",
+        language="EN",
+        translated_from="Hindi",
+        body=["body"],
+    )
+    talk = parse_docx(docx_path)
+    assert talk.translated_from == "Hindi"
+
+
 def test_source_short_absent_header_yields_none(tmp_path):
     """Old documents that don't carry @sourceShort still parse cleanly
     with source_short = None — the field is optional."""
