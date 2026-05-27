@@ -90,6 +90,11 @@ def _seed_db(path: str) -> None:
         # Event for proximity search testing
         ("p1", "Light on the Path ~ 29",      "1986-02-25", "Pune",    "English", "none"),
         ("p2", "The Messiah Vol 1 ~ 15",      "1987-01-10", "Pune",    "English", "none"),
+        # Sugit's archivist convention (2026-05-27): when the exact date
+        # is lost, `@time` carries "YYYY/YYYY ?" to mark "somewhere in
+        # this range, unknown which year". Year-range filtering must
+        # treat this as covering both years and ignore the trailing "?".
+        ("dd1", "The Dimensionless Dimension ~ 02", "1971/1972 ?", "unknown.", "English", "none"),
     ]
     cur.executemany(
         "INSERT INTO events (id,title,date,location,language,translated_from)"
@@ -176,6 +181,9 @@ def _seed_db(path: str) -> None:
         # token; exact search does not.
         (31, "h1", 80, "अनन्त — समय के पार जो है, वही अनन्त है।"),
         (32, "h2", 90, "अनंत यात्रा है, अंत नहीं।"),
+        # Body paragraph for the multi-year archivist record so date-range
+        # filter tests can run against a real `meditation` content match.
+        (50, "dd1", 1, "An early talk on meditation given somewhere in those two years."),
     ]
     cur.executemany(
         "INSERT INTO paragraphs (id,event_id,sequence_number,content) VALUES (?,?,?,?)",

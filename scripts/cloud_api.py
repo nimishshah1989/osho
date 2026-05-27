@@ -744,10 +744,8 @@ def search(
     if date_from and date_to and date_from > date_to:
         raise HTTPException(status_code=400, detail="date_from must be ≤ date_to")
 
-    filters = []
+    filters: list[str] = []
     filter_params: list = []
-    padded_from = ''
-    padded_to = ''
 
     if language:
         filters.append("LOWER(e.language) = LOWER(?)")
@@ -758,14 +756,35 @@ def search(
         filters.append(
             "(e.translated_from IS NULL OR LOWER(e.translated_from) = 'none')"
         )
-    if date_from:
-        padded_from = date_from if len(date_from) > 4 else f"{date_from}-01-01"
-        filters.append("e.date >= ?")
-        filter_params.append(padded_from)
-    if date_to:
-        padded_to = date_to if len(date_to) > 4 else f"{date_to}-12-31"
-        filters.append("e.date <= ?")
-        filter_params.append(padded_to)
+    if date_from or date_to:
+        # The year-range filter does an overlap test against the years
+        # covered by the record's date string. Most records have a clean
+        # ISO `YYYY-MM-DD[-slot]`, but archivist notes like `1971/1972 ?`
+        # mean "this talk is from somewhere in 1971-1972, exact date
+        # unknown" — Sugit asked for those to overlap correctly with any
+        # year-range query, and any `?` to be ignored.
+        #   first_year = leading 4 chars of e.date  (the "from" year of the record)
+        #   last_year  = 4 chars after '/' if present, else first_year ("to" year)
+        # SQLite's lexicographic comparison on YYYY strings is order-
+        # preserving for valid years, and any garbage prefix (e.g. an
+        # unparseable date) sorts strictly above any 4-digit year so it
+        # falls out of every range — which matches the "ignore" intent.
+        first_year_expr = "SUBSTR(e.date, 1, 4)"
+        last_year_expr = (
+            "(CASE WHEN INSTR(e.date, '/') > 0 "
+            "      THEN SUBSTR(e.date, INSTR(e.date, '/') + 1, 4) "
+            "      ELSE SUBSTR(e.date, 1, 4) END)"
+        )
+        if date_from:
+            from_year = date_from[:4]
+            # The record's *last* year must reach the filter's start.
+            filters.append(f"{last_year_expr} >= ?")
+            filter_params.append(from_year)
+        if date_to:
+            to_year = date_to[:4]
+            # The record's *first* year must not exceed the filter's end.
+            filters.append(f"{first_year_expr} <= ?")
+            filter_params.append(to_year)
 
     where_extra = (" AND " + " AND ".join(filters)) if filters else ""
 
@@ -934,8 +953,14 @@ def date_range():
     if not os.path.exists(DB_PATH):
         return {"min_year": None, "max_year": None}
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        # Match the year-range filter's first/last extraction so a "1971/1972 ?"
+        # record contributes 1972 to MAX (not 1971). Otherwise the UI's max-year
+        # slider would stop short of dates the records actually cover.
         row = conn.execute(
-            "SELECT MIN(SUBSTR(date,1,4)), MAX(SUBSTR(date,1,4))"
+            "SELECT MIN(SUBSTR(date,1,4)),"
+            " MAX(CASE WHEN INSTR(date, '/') > 0"
+            "          THEN SUBSTR(date, INSTR(date, '/') + 1, 4)"
+            "          ELSE SUBSTR(date, 1, 4) END)"
             " FROM events WHERE date IS NOT NULL AND LENGTH(date) >= 4"
         ).fetchone()
     return {"min_year": row[0], "max_year": row[1]}

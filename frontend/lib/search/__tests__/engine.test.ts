@@ -151,6 +151,31 @@ describe('title-only matches excluded from multi-word search', () => {
 
 // ─── Language + translated_from filters ──────────────────────────────────
 
+describe('multi-year archivist date filtering', () => {
+  const titles = (r: ReturnType<typeof search>) => r.events.map((e) => e.title);
+
+  it('matches a 1971/1972 record when filtering by 1971', () => {
+    const r = search(freshEngine(), { q: 'meditation', dateFrom: '1971', dateTo: '1971' });
+    expect(titles(r)).toContain('The Dimensionless Dimension ~ 02');
+  });
+
+  it('matches the same record when filtering by 1972', () => {
+    const r = search(freshEngine(), { q: 'meditation', dateFrom: '1972', dateTo: '1972' });
+    expect(titles(r)).toContain('The Dimensionless Dimension ~ 02');
+  });
+
+  it('matches when query range overlaps the record range', () => {
+    const r = search(freshEngine(), { q: 'meditation', dateFrom: '1970', dateTo: '1973' });
+    expect(titles(r)).toContain('The Dimensionless Dimension ~ 02');
+  });
+
+  it('excludes the record when query range is entirely outside', () => {
+    const r = search(freshEngine(), { q: 'meditation', dateFrom: '1980', dateTo: '1985' });
+    expect(titles(r)).not.toContain('The Dimensionless Dimension ~ 02');
+  });
+});
+
+
 describe('filters', () => {
   it('language=Hindi excludes English events', () => {
     const r = search(freshEngine(), { q: 'meditation', language: 'Hindi' });

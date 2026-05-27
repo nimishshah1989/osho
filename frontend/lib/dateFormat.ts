@@ -9,8 +9,11 @@
  *      "1970-08-17"      no slot suffix
  *      "1971/1972 ?"     archivist note — non-ISO, passed through verbatim
  *
- *  When the leading 10 chars aren't a valid YYYY-MM-DD date we return the
- *  string unchanged so archivist-style notes still render.
+ *  Output: "DD MonthName YYYY". The slot suffix is intentionally NOT
+ *  rendered here — Sugit's 2026-05-27 mail asked for the date to look
+ *  the same as the document's body header (just the date, no slot).
+ *  When the leading 10 chars aren't a valid YYYY-MM-DD date we return
+ *  the string unchanged so archivist-style notes still render.
  */
 
 type Locale = 'en' | 'hi';
@@ -25,20 +28,14 @@ const MONTHS_HI = [
   'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर',
 ];
 
-const SLOT_LABELS: Record<string, { en: string; hi: string }> = {
-  am: { en: 'morning', hi: 'प्रातः' },
-  pm: { en: 'evening', hi: 'सायं' },
-  // xm = slot unknown; omit any slot suffix
-};
-
-const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:-([a-z]{2,3}))?$/i;
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:-[a-z]{2,3})?$/i;
 
 export function formatReadableDate(raw: string | null | undefined, locale: Locale = 'en'): string {
   if (!raw) return '';
   const m = ISO_RE.exec(raw.trim());
   if (!m) return raw.trim();
 
-  const [, yyyy, mm, dd, slotRaw] = m;
+  const [, yyyy, mm, dd] = m;
   const year = Number(yyyy);
   const monthIdx = Number(mm) - 1;
   const day = Number(dd);
@@ -52,10 +49,5 @@ export function formatReadableDate(raw: string | null | undefined, locale: Local
   }
 
   const months = locale === 'hi' ? MONTHS_HI : MONTHS_EN;
-  const base = `${day} ${months[monthIdx]} ${year}`;
-  const slot = slotRaw?.toLowerCase();
-  if (slot && SLOT_LABELS[slot]) {
-    return `${base}, ${SLOT_LABELS[slot][locale]}`;
-  }
-  return base;
+  return `${day} ${months[monthIdx]} ${year}`;
 }

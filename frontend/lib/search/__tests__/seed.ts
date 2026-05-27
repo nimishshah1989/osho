@@ -53,6 +53,10 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     ['p2', 'The Messiah Vol 1 ~ 15',      '1987-01-10', 'Pune',   'English', 'none', null],
     ['ss1', 'Satyam Shivam Sundaram ~ 01', '1980-11-11', 'Pune', 'Hindi', 'none', null],
     ['ss2', 'Satyam Shivam Sundaram ~ 02', '1980-11-12', 'Pune', 'Hindi', 'none', null],
+    // Sugit's archivist convention: "talk somewhere in 1971-1972, exact
+    // date unknown" → `@time=YYYY/YYYY ?`. Year-range filtering must
+    // treat this as covering both years.
+    ['dd1', 'The Dimensionless Dimension ~ 02', '1971/1972 ?', 'unknown.', 'English', 'none', null],
   ];
   const evInsert = sqlite.prepare(
     'INSERT INTO events (id,title,date,location,language,translated_from,source_short) VALUES (?,?,?,?,?,?,?)',
@@ -103,6 +107,7 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     [30, 'e1', 50, 'The teaching of the masters is one and the same.'],
     [31, 'h1', 80, 'अनन्त — समय के पार जो है, वही अनन्त है।'],
     [32, 'h2', 90, 'अनंत यात्रा है, अंत नहीं।'],
+    [50, 'dd1', 1, 'An early talk on meditation given somewhere in those two years.'],
   ];
   const paraInsert = sqlite.prepare(
     'INSERT INTO paragraphs (id, event_id, sequence_number, content) VALUES (?,?,?,?)',
