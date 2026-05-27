@@ -396,6 +396,59 @@ def test_date_range_combined(app_client):
         assert 1984 <= int(year) <= 1989
 
 
+# ── Multi-year archivist dates (Sugit 2026-05-27) ────────────────────
+
+
+def _titles(r):
+    return [ev["title"] for ev in r.json()["events"]]
+
+
+def test_multiyear_date_first_year_matches(app_client):
+    """A `1971/1972 ?` record must come back when filtering by 1971."""
+    r = app_client.get("/api/search?q=meditation&date_from=1971&date_to=1971")
+    assert r.status_code == 200
+    assert "The Dimensionless Dimension ~ 02" in _titles(r)
+
+
+def test_multiyear_date_second_year_matches(app_client):
+    """The "to" year on the right of `/` must match too."""
+    r = app_client.get("/api/search?q=meditation&date_from=1972&date_to=1972")
+    assert r.status_code == 200
+    assert "The Dimensionless Dimension ~ 02" in _titles(r)
+
+
+def test_multiyear_date_range_overlap_matches(app_client):
+    """Any query range that overlaps the record's [first, last] years matches."""
+    r = app_client.get("/api/search?q=meditation&date_from=1971&date_to=1972")
+    assert "The Dimensionless Dimension ~ 02" in _titles(r)
+    r = app_client.get("/api/search?q=meditation&date_from=1970&date_to=1973")
+    assert "The Dimensionless Dimension ~ 02" in _titles(r)
+
+
+def test_multiyear_date_outside_range_excluded(app_client):
+    """A record covering 1971-1972 must NOT show up for a 1980-1985 filter."""
+    r = app_client.get("/api/search?q=meditation&date_from=1980&date_to=1985")
+    assert "The Dimensionless Dimension ~ 02" not in _titles(r)
+    # And not for years strictly before either.
+    r = app_client.get("/api/search?q=meditation&date_from=1960&date_to=1970")
+    assert "The Dimensionless Dimension ~ 02" not in _titles(r)
+
+
+def test_date_range_endpoint_includes_second_year_of_slash_date(app_client):
+    """`/api/date-range` must report 1972 (not 1971) as the contributing
+    upper bound for `1971/1972 ?`, so the UI slider can reach years the
+    corpus actually covers."""
+    r = app_client.get("/api/date-range")
+    assert r.status_code == 200
+    data = r.json()
+    # The seed's overall max is 1989 (e5); we just need to confirm dd1's
+    # 1972 doesn't get truncated to 1971 by the SUBSTR(date,1,4) shortcut.
+    assert data["min_year"] is not None
+    assert data["max_year"] is not None
+    # min year in seed is 1971 (from "1971/1972 ?"); confirm it isn't lost.
+    assert data["min_year"] == "1971"
+
+
 # ── Shailendra text stripping ────────────────────────────
 
 def test_shailendra_text_stripped_from_search_results(app_client):

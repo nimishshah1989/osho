@@ -88,13 +88,27 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   if (original) {
     filters.push("(e.translated_from IS NULL OR LOWER(e.translated_from) = 'none')");
   }
-  if (dateFrom) {
-    filters.push('e.date >= ?');
-    filterParams.push(dateFrom.length > 4 ? dateFrom : `${dateFrom}-01-01`);
-  }
-  if (dateTo) {
-    filters.push('e.date <= ?');
-    filterParams.push(dateTo.length > 4 ? dateTo : `${dateTo}-12-31`);
+  if (dateFrom || dateTo) {
+    // Match scripts/cloud_api.py's year-overlap filter so the offline
+    // engine and the FastAPI backend treat archivist notes like
+    // "1971/1972 ?" the same way: the record covers [1971, 1972] and
+    // matches any query range that overlaps with those years. SQLite
+    // lexicographic comparison on the leading-4 substring is order-
+    // preserving for valid years; garbage prefixes sort above all
+    // 4-digit years and so fall out of every range.
+    const firstYearExpr = 'SUBSTR(e.date, 1, 4)';
+    const lastYearExpr =
+      "(CASE WHEN INSTR(e.date, '/') > 0 "
+      + "      THEN SUBSTR(e.date, INSTR(e.date, '/') + 1, 4) "
+      + '      ELSE SUBSTR(e.date, 1, 4) END)';
+    if (dateFrom) {
+      filters.push(`${lastYearExpr} >= ?`);
+      filterParams.push(dateFrom.slice(0, 4));
+    }
+    if (dateTo) {
+      filters.push(`${firstYearExpr} <= ?`);
+      filterParams.push(dateTo.slice(0, 4));
+    }
   }
   const whereExtra = filters.length ? ' AND ' + filters.join(' AND ') : '';
 
@@ -729,8 +743,14 @@ export interface DateRangeResponse {
 }
 
 export function dateRange(db: Database): DateRangeResponse {
+  // Mirror the year-range filter's first/last extraction so a "1971/1972 ?"
+  // record contributes 1972 to MAX. The same expression must live in both
+  // engines (cloud_api.py + here) for parity per CLAUDE.md.
   const row = db.get<{ min: string | null; max: string | null }>(
-    'SELECT MIN(SUBSTR(date,1,4)) AS min, MAX(SUBSTR(date,1,4)) AS max'
+    'SELECT MIN(SUBSTR(date,1,4)) AS min,'
+    + " MAX(CASE WHEN INSTR(date, '/') > 0"
+    + '          THEN SUBSTR(date, INSTR(date, \'/\') + 1, 4)'
+    + '          ELSE SUBSTR(date, 1, 4) END) AS max'
     + ' FROM events WHERE date IS NOT NULL AND LENGTH(date) >= 4',
   );
   return { min_year: row?.min ?? null, max_year: row?.max ?? null };
