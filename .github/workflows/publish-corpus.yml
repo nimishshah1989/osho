@@ -45,27 +45,32 @@ jobs:
           envs: GH_TOKEN_FOR_RELEASE
           script: |
             set -euo pipefail
+            # Non-interactive SSH shells don't source ~/.bashrc, so
+            # $HOME/bin is off PATH by default. The sponsor-owned VPS
+            # ships gh as a user-local binary at ~/bin/gh (installed
+            # 2026-05-27 to avoid needing sudo on a box where the `osho`
+            # user has no passwordless apt) — this export makes it
+            # visible to every command in this script.
+            export PATH="$HOME/bin:$PATH"
             cd /home/osho/osho
             git fetch origin main
             git reset --hard origin/main
 
-            # Install gh CLI on first run if missing. Cheap idempotent
-            # install via the official APT repo. zstd is checked
-            # independently so a host with gh but missing zstd doesn't
-            # silently skip the install (the build would then fail
-            # later inside scripts/build_corpus_artifact.sh).
-            if ! command -v gh >/dev/null 2>&1; then
-              type -p curl >/dev/null || sudo apt-get install -y curl
-              curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
-              sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
-              echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-                | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-              sudo apt-get update
-              sudo apt-get install -y gh
-            fi
-            if ! command -v zstd >/dev/null 2>&1; then
-              sudo apt-get install -y zstd
-            fi
+            # gh and zstd must already be on the box. We no longer try
+            # to auto-install — the previous sudo-apt path silently
+            # 12s-timed-out on the new VPS for five nights running
+            # because the `osho` user has no passwordless apt. Fail
+            # loudly here so the failure mode is "install gh and re-run"
+            # instead of an opaque timeout.
+            for tool in gh zstd; do
+              if ! command -v "$tool" >/dev/null 2>&1; then
+                echo "ERROR: $tool is not on PATH. Install it on the VPS:" >&2
+                echo "  - zstd:  sudo apt-get install -y zstd" >&2
+                echo "  - gh:    download from https://github.com/cli/cli/releases" >&2
+                echo "           and place the binary at ~/bin/gh" >&2
+                exit 1
+              fi
+            done
 
             # Authenticate gh with the forwarded GitHub Actions token.
             export GH_TOKEN="$GH_TOKEN_FOR_RELEASE"
