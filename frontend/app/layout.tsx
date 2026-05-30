@@ -9,6 +9,11 @@ import { PwaRegistrar } from "../components/PwaRegistrar";
 import { DesktopGate } from "../components/DesktopGate";
 import { OfflineProvider } from "../lib/search/OfflineProvider";
 
+// Gates the cross-origin Google Analytics tags out of the offline
+// desktop build (DESKTOP_BUILD=true at `next build`). Evaluated at
+// build time so the scripts are simply absent from the static export.
+const IS_DESKTOP = process.env.DESKTOP_BUILD === 'true';
+
 const inter = Inter({ subsets: ["latin", "latin-ext"], variable: "--font-inter" });
 
 // Inter has no Devanagari glyphs; without a dedicated Devanagari webfont the
@@ -68,16 +73,24 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className={`${inter.variable} ${notoDevanagari.variable} font-sans`}>
-        <Script
-          src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
-          strategy="afterInteractive"
-        />
-        <Script id="ga-init" strategy="afterInteractive">{`
-          window.dataLayer = window.dataLayer || [];
-          function gtag(){dataLayer.push(arguments);}
-          gtag('js', new Date());
-          gtag('config', '${GA_ID}', { send_page_view: false });
-        `}</Script>
+        {/* Analytics is omitted from the desktop build: it's an offline
+            app (nothing to phone home to), and the gtag script is
+            cross-origin, which the desktop's `require-corp` policy
+            (needed for OPFS) would block anyway. */}
+        {!IS_DESKTOP && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+              strategy="afterInteractive"
+            />
+            <Script id="ga-init" strategy="afterInteractive">{`
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', '${GA_ID}', { send_page_view: false });
+            `}</Script>
+          </>
+        )}
         <ThemeProvider>
           <LocaleProvider>
             <OfflineProvider>
