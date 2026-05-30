@@ -10,7 +10,7 @@ copyright: Osho Archives
 
 directories:
   output: dist
-  buildResources: build
+  buildResources: build-resources
 
 # `asar: false` — keep the app as plain files rather than an asar
 # archive. The bundled corpus is ~550 MB; serving it (and reading it
