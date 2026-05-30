@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Osho Archives app icon — gold "O" on black, used to generate
+     desktop/build-resources/icon.png (1024x1024) which electron-builder
+     turns into the platform .icns / .ico at package time.
+     Regenerate the PNG with scripts/make_desktop_icon.py. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Black rounded-square tile; corners stay transparent. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="215" ry="215" fill="#0a0806"/>
+  <!-- Subtle gold inner border. -->
+  <rect x="46" y="46" width="932" height="932" rx="168" ry="168"
+        fill="none" stroke="#d4af37" stroke-width="6" opacity="0.43"/>
+  <!-- Typographic "O" — thicker sides than top/bottom for letterform stress. -->
+  <circle cx="512" cy="512" r="307" fill="#d4af37"/>
+  <ellipse cx="512" cy="512" rx="174" ry="210" fill="#0a0806"/>
+</svg>
