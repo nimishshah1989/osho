@@ -11,7 +11,7 @@
     "start": "electron .",
     "dist": "electron-builder",
     "check:bundle": "node test/check-bundled-modules.mjs",
-    "verify:offline": "node test/verify-opfs.mjs"
+    "verify:offline": "node test/verify-offline.mjs"
   },
   "dependencies": {
     "serve-handler": "^6.1.6"
