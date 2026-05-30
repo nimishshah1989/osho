@@ -48,7 +48,10 @@ fi
 echo "==> Uploading osho.db.zst + sha256"
 gh release upload "$TAG" "$ART" "$SHA" --repo "$GH_REPO" --clobber
 
-# Print the public URL the PWA fetches from. Operators can set this in
-# Vercel's env vars: `NEXT_PUBLIC_CORPUS_URL`.
+# Print the public URL the PWA fetches from. This is wired into the
+# frontend via frontend/.env.production (NEXT_PUBLIC_CORPUS_DOWNLOAD_URL),
+# baked in at `next build` time on the VPS — the tag is stable so the
+# committed value never needs to change.
 public_url="https://github.com/${GH_REPO}/releases/download/${TAG}/osho.db.zst"
-echo "==> Done. Set NEXT_PUBLIC_CORPUS_URL=${public_url} on Vercel."
+echo "==> Done. Corpus published at ${public_url}"
+echo "    (frontend reads this via NEXT_PUBLIC_CORPUS_DOWNLOAD_URL in frontend/.env.production)"

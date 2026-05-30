@@ -15,9 +15,11 @@
 #   4. Move the artifact into place atomically so any in-flight web
 #      readers see either the old file or the new one, never a partial.
 #
-# The artifact then gets rsync'd / pushed to a CDN that the PWA points
-# at via `NEXT_PUBLIC_CORPUS_URL`. The PWA verifies size and (in a
-# later PR) a content hash before opening the file.
+# The artifact is then published as the stable `corpus-latest` GitHub
+# release asset (see publish_corpus.sh). The PWA points at that URL via
+# NEXT_PUBLIC_CORPUS_DOWNLOAD_URL (frontend/.env.production) and the
+# desktop app bundles the same file. The worker verifies the magic
+# bytes (zstd vs raw SQLite) before opening the file.
 set -euo pipefail
 
 REPO_DIR="${REPO_DIR:-/home/osho/osho}"

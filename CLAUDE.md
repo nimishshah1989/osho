@@ -144,10 +144,15 @@ narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
 Beyond the hosted site, the corpus ships in two offline forms:
 
 - **PWA** — `frontend/lib/search/` is a full TypeScript port of the FastAPI
-  search engine running on sqlite-wasm + OPFS in a web worker. On first run the
-  browser downloads a compressed corpus (`NEXT_PUBLIC_CORPUS_URL` → a GitHub
-  Release asset) and search runs entirely client-side. Manifest, icons, and
-  service worker live in `frontend/public/`. `/downloadapp` is the install page.
+  search engine running on sqlite-wasm + OPFS in a web worker. The user
+  downloads a compressed corpus from `/downloadapp` (a click-to-download link
+  to `NEXT_PUBLIC_CORPUS_DOWNLOAD_URL`, set in `frontend/.env.production` → the
+  stable `corpus-latest` GitHub Release asset) and picks the file; the worker
+  decompresses it into OPFS and search runs entirely client-side. Manifest,
+  icons, and service worker live in `frontend/public/`. **Note:** the env var
+  is baked in at `next build` time on the VPS, so a fresh build is required
+  after changing it; the only frontend code that reads it is
+  `components/OfflineSetup.tsx`.
 - **Desktop app** — `desktop/` is an Electron shell that bundles the built
   frontend and the corpus, offline from first launch. Installers are built in CI
   by `.github/workflows/build-desktop.yml`.
