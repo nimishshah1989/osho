@@ -17,32 +17,13 @@
  * from the very first run, with no download step.
  */
 const { app, BrowserWindow, shell } = require('electron');
-const http = require('node:http');
 const path = require('node:path');
-const handler = require('serve-handler');
+const { startServer } = require('./server');
 
 // The bundled static frontend (populated by CI before packaging).
 const APP_DIR = path.join(__dirname, 'app');
 
 let origin = null;
-
-function startServer() {
-  return new Promise((resolve, reject) => {
-    const server = http.createServer((req, res) => {
-      handler(req, res, {
-        public: APP_DIR,
-        cleanUrls: false,
-        trailingSlash: true,
-        directoryListing: false,
-      });
-    });
-    server.on('error', reject);
-    // Port 0 → the OS assigns a free local port.
-    server.listen(0, '127.0.0.1', () => {
-      resolve(`http://127.0.0.1:${server.address().port}`);
-    });
-  });
-}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -73,7 +54,10 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  origin = await startServer();
+  // The COOP/COEP headers set inside startServer() are what enable OPFS
+  // in the renderer — see desktop/server.js. Without them the app can't
+  // open the bundled archive.
+  ({ origin } = await startServer(APP_DIR));
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

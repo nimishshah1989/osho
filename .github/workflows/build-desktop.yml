@@ -11,7 +11,34 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Gate: prove the offline OPFS path actually works before we spend time
+  # building installers. The desktop app stores the corpus in OPFS via
+  # sqlite-wasm, which only works when desktop/server.js sets the
+  # cross-origin-isolation headers. This headless-Chromium check (Electron's
+  # renderer IS Chromium) opens a real OPFS database under those headers and
+  # fails the whole workflow if it can't — so a build that would show
+  # "sqlite-wasm built without OPFS support." never produces installers.
+  verify-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install sqlite-wasm (frontend dep used by the probe)
+        working-directory: frontend
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Install desktop deps + Chromium
+        working-directory: desktop
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Verify offline OPFS path
+        working-directory: desktop
+        run: npm run verify:offline
+
   build:
+    needs: verify-offline
     strategy:
       fail-fast: false
       matrix:
