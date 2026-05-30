@@ -33,6 +33,9 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
+      - name: Check all runtime-required modules are packaged
+        working-directory: desktop
+        run: npm run check:bundle
       - name: Verify offline OPFS path
         working-directory: desktop
         run: npm run verify:offline

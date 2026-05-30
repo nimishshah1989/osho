@@ -10,6 +10,7 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
+    "check:bundle": "node test/check-bundled-modules.mjs",
     "verify:offline": "node test/verify-opfs.mjs"
   },
   "dependencies": {
