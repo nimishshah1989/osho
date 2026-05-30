@@ -23,6 +23,7 @@ asar: false
 # automatically.
 files:
   - main.js
+  - server.js
   - preload.js
   - package.json
   - app/**/*
