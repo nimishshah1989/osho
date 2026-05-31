@@ -185,6 +185,23 @@ describe('record-level All-words / Within-N', () => {
     expect(near.total_hits).toBeLessThanOrEqual(allw.total_hits);
   });
 
+  it('Within-N total is the windowed count, not the All-words intersection', () => {
+    // Regression for the NEAR-counting bug: a too-tight window matches
+    // nothing even though All-words matches the record.
+    const allw = search(freshEngine(), { q: 'love intelligence awareness' });
+    const tight = search(freshEngine(), { q: 'NEAR(love intelligence awareness, 2)' });
+    expect(allw.total).toBeGreaterThanOrEqual(1);
+    expect(tight.total).toBe(0);
+    expect(tight.total_hits).toBe(0);
+  });
+
+  it('Within-N counts one passage per discourse (total === total_hits, hit_count 1)', () => {
+    const r = search(freshEngine(), { q: 'NEAR(politicians mafia, 30)' });
+    expect(r.total).toBe(r.total_hits);
+    expect(r.total).toBeGreaterThanOrEqual(1);
+    for (const ev of r.events) expect(ev.hit_count).toBe(1);
+  });
+
   it('#2 — Within-N exact-mode finds a cross-paragraph match at a generous N', () => {
     const r = search(freshEngine(), { q: 'NEAR(alpha bravo charlie, 20)', exact: true });
     const titles = r.events.map((e) => e.title);

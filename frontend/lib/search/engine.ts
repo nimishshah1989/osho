@@ -362,11 +362,17 @@ function countTokens(text: string): number {
 /** Smallest window (max-min) containing one position from every unit's
  *  sorted list — a k-way merge over the per-unit record-level token
  *  position lists. Mirror of `_min_token_span` in cloud_api.py. */
-function minTokenSpan(positionsPerUnit: number[][]): number {
-  if (positionsPerUnit.some((s) => s.length === 0)) return Number.MAX_SAFE_INTEGER;
+// Returns [span, lo, hi]: the tightest window covering one position from
+// each unit, and the record-level token positions bounding it (so the
+// caller can map [lo, hi] back to the paragraphs forming the proximity
+// hit). Mirror of _min_token_window in cloud_api.py.
+function minTokenWindow(positionsPerUnit: number[][]): [number, number, number] {
+  if (positionsPerUnit.some((s) => s.length === 0)) return [Number.MAX_SAFE_INTEGER, 0, 0];
   const idx = positionsPerUnit.map(() => 0);
   let maxVal = Math.max(...positionsPerUnit.map((s) => s[0]));
   let best = Number.MAX_SAFE_INTEGER;
+  let bestLo = 0;
+  let bestHi = 0;
   while (true) {
     let minListIdx = 0;
     let minVal = positionsPerUnit[0][idx[0]];
@@ -377,14 +383,18 @@ function minTokenSpan(positionsPerUnit: number[][]): number {
         minListIdx = i;
       }
     }
-    best = Math.min(best, maxVal - minVal);
+    if (maxVal - minVal < best) {
+      best = maxVal - minVal;
+      bestLo = minVal;
+      bestHi = maxVal;
+    }
     if (best === 0) break;
     idx[minListIdx] += 1;
     if (idx[minListIdx] >= positionsPerUnit[minListIdx].length) break;
     const newVal = positionsPerUnit[minListIdx][idx[minListIdx]];
     if (newVal > maxVal) maxVal = newVal;
   }
-  return best;
+  return [best, bestLo, bestHi];
 }
 
 
@@ -590,10 +600,16 @@ function recordLevelSearch(
     const paraMap = matched.get(evId);
     if (!paraMap || paraMap.size === 0) continue;
 
+    // display_seqs: which paragraphs to show + count. All-words → every
+    // matched paragraph; Within-N → narrowed to the proximity-window
+    // paragraphs below. Mirror of cloud_api.py.
+    let displaySeqs = [...paraMap.keys()].sort((a, b) => a - b);
+
     if (nearDist !== null) {
       const unitPos = perUnitPos.get(evId);
       const seqOff = offsets.get(evId) ?? new Map<number, number>();
       const positionsPerUnit: number[][] = [];
+      const posSeq = new Map<number, number>();
       let ok = true;
       for (let ui = 0; ui < units.length; ui++) {
         const bySeq = unitPos?.get(ui);
@@ -601,14 +617,20 @@ function recordLevelSearch(
         const recPositions: number[] = [];
         for (const [seq, plist] of bySeq) {
           const base = seqOff.get(seq) ?? 0;
-          for (const p of plist) recPositions.push(base + p);
+          for (const p of plist) { const rp = base + p; recPositions.push(rp); posSeq.set(rp, seq); }
         }
         if (!recPositions.length) { ok = false; break; }
         recPositions.sort((a, b) => a - b);
         positionsPerUnit.push(recPositions);
       }
       if (!ok) continue;
-      if (minTokenSpan(positionsPerUnit) > nearDist) continue;
+      const [span, lo, hi] = minTokenWindow(positionsPerUnit);
+      if (span > nearDist) continue;
+      const windowSeqs = [...new Set(
+        [...posSeq.entries()].filter(([p]) => p >= lo && p <= hi).map(([, s]) => s),
+      )].sort((a, b) => a - b);
+      const inMap = windowSeqs.filter((s) => paraMap.has(s));
+      displaySeqs = inMap.length ? inMap : windowSeqs;
     }
 
     const evRow = db.get<{
@@ -625,13 +647,16 @@ function recordLevelSearch(
     );
     if (!evRow) continue;
 
-    const hitCount = paraMap.size;
+    // All-words → per-paragraph hit count; Within-N → 1 passage per
+    // discourse (matches OCTP's within-N counts). Mirror of cloud_api.py.
+    const hitCount = nearDist !== null ? 1 : paraMap.size;
     totalHits += hitCount;
 
     const hits: SearchHit[] = [];
-    for (const seq of [...paraMap.keys()].sort((a, b) => a - b)) {
+    for (const seq of displaySeqs) {
       if (hits.length >= 3) break;
-      const info = paraMap.get(seq)!;
+      const info = paraMap.get(seq);
+      if (!info) continue;
       const content = stripShailendra(info.content || '');
       // paraMap is already meta-filtered at gather time.
       const rawHl = info.hl || info.content;
@@ -664,7 +689,10 @@ function recordLevelSearch(
   // summed over the gathered (possibly capped) events. Exact below the
   // cap; above it the discourse count stays accurate while totalHits is a
   // lower bound. Mirrors cloud_api.py.
-  return { events, totalEvents: trueTotalEvents, totalHits };
+  // totalEvents: All-words → true intersection size (pre-cap); Within-N →
+  // discourses that passed the proximity window. Mirror of cloud_api.py.
+  const totalEvents = nearDist !== null ? events.size : trueTotalEvents;
+  return { events, totalEvents, totalHits };
 }
 
 

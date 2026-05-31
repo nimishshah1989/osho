@@ -525,6 +525,37 @@ def test_within_n_is_subset_of_all_words(app_client):
     )
 
 
+def test_within_n_total_is_windowed_not_all_words(app_client):
+    """Regression for the 2026-05-31 NEAR-counting bug: Within-N's `total`
+    must be the number of discourses that PASSED the proximity window, not
+    the All-words intersection (records containing the words anywhere).
+    `love intelligence awareness` All-words finds bd1; the same trio
+    Within-2 is far too tight to match, so Within-2 total must be 0 even
+    though the All-words total is >= 1."""
+    allw = app_client.get("/api/search?q=love intelligence awareness").json()
+    tight = app_client.get(
+        "/api/search?q=NEAR(love%20intelligence%20awareness%2C%202)"
+    ).json()
+    assert allw["total"] >= 1
+    assert tight["total"] == 0, (
+        f"Within-2 should match nothing but reported total={tight['total']} "
+        "— NEAR is leaking the All-words intersection count again."
+    )
+    assert tight["total_hits"] == 0
+
+
+def test_within_n_counts_one_passage_per_discourse(app_client):
+    """Within-N reports one hit per qualifying discourse (the proximity
+    passage), so total == total_hits and every returned event has
+    hit_count == 1 — this is what makes the prod numbers match OCTP
+    (politicians/mafia → 2, enlightenment/trust/love → 5)."""
+    d = app_client.get("/api/search?q=NEAR(politicians%20mafia%2C%2030)").json()
+    assert d["total"] == d["total_hits"]
+    assert d["total"] >= 1
+    for ev in d["events"]:
+        assert ev["hit_count"] == 1
+
+
 def test_within_n_exact_cross_paragraph(app_client):
     """#2 — Within-N exact-mode finds a match whose words straddle a
     paragraph break (record-level token span), and respects the distance:

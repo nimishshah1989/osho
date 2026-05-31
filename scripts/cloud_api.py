@@ -411,20 +411,26 @@ def _count_tokens(text: str) -> int:
     return total
 
 
-def _min_token_span(positions_per_unit: list[list[int]]) -> int:
-    """Smallest window (max-min) that contains at least one position from
-    every unit's sorted position list. A k-way merge over the per-unit
-    position lists (record-level token positions). Returns sys.maxsize
-    when any unit has no positions."""
+def _min_token_window(positions_per_unit: list[list[int]]) -> tuple[int, int, int]:
+    """Smallest window that contains at least one position from every
+    unit's sorted position list. A k-way merge over the per-unit
+    record-level token-position lists. Returns ``(span, lo, hi)`` where
+    ``span = hi - lo`` is the window width and ``[lo, hi]`` are the
+    record-level token positions bounding the tightest match — so the
+    caller can map them back to the paragraphs that actually form the
+    proximity hit. Returns ``(sys.maxsize, 0, 0)`` if any unit is absent."""
     if any(not lst for lst in positions_per_unit):
-        return sys.maxsize
+        return sys.maxsize, 0, 0
     heap = [(lst[0], i, 0) for i, lst in enumerate(positions_per_unit)]
     heapq.heapify(heap)
     max_val = max(lst[0] for lst in positions_per_unit)
     best = sys.maxsize
+    best_lo = best_hi = 0
     while True:
         min_val, ui, pos = heapq.heappop(heap)
-        best = min(best, max_val - min_val)
+        if max_val - min_val < best:
+            best = max_val - min_val
+            best_lo, best_hi = min_val, max_val
         if best == 0:
             break
         npos = pos + 1
@@ -433,7 +439,7 @@ def _min_token_span(positions_per_unit: list[list[int]]) -> int:
         nval = positions_per_unit[ui][npos]
         max_val = max(max_val, nval)
         heapq.heappush(heap, (nval, ui, npos))
-    return best
+    return best, best_lo, best_hi
 
 
 # Cap on how many common events we'll do the (more expensive) paragraph
@@ -669,13 +675,22 @@ def _record_level_search(
         if not para_map:
             continue
 
+        # `display_seqs` selects which paragraphs to show + count as the
+        # hit. For All-words it's every matched paragraph. For Within-N it
+        # is narrowed below to just the paragraphs forming the proximity
+        # window, so a NEAR hit shows the actual close-together passage —
+        # not every paragraph that happens to contain one of the words
+        # (the 2026-05-31 bug where Within-N reported All-words counts).
+        display_seqs = sorted(para_map.keys())
+
         if near_dist is not None:
-            # Build record-level positions per unit and run a min-window
-            # sweep. A unit's positions = for each paragraph that contains
-            # it, (paragraph offset + in-paragraph position).
+            # Build record-level positions per unit (paragraph offset +
+            # in-paragraph position) plus a position→seq map, then find the
+            # tightest window covering one position from each unit.
             unit_pos = per_unit_pos.get(ev_id, {})
             seq_off = offsets.get(ev_id, {})
             positions_per_unit: list[list[int]] = []
+            pos_seq: dict[int, int] = {}
             ok = True
             for ui in range(len(units)):
                 seq_positions = unit_pos.get(ui)
@@ -685,7 +700,10 @@ def _record_level_search(
                 rec_positions: list[int] = []
                 for seq, plist in seq_positions.items():
                     base = seq_off.get(seq, 0)
-                    rec_positions.extend(base + p for p in plist)
+                    for p in plist:
+                        rp = base + p
+                        rec_positions.append(rp)
+                        pos_seq[rp] = seq
                 if not rec_positions:
                     ok = False
                     break
@@ -693,9 +711,13 @@ def _record_level_search(
                 positions_per_unit.append(rec_positions)
             if not ok:
                 continue
-            span = _min_token_span(positions_per_unit)
+            span, lo, hi = _min_token_window(positions_per_unit)
             if span > near_dist:
                 continue
+            # The hit is the passage spanning [lo, hi]: the paragraphs whose
+            # matched positions fall inside the window.
+            window_seqs = sorted({s for p, s in pos_seq.items() if lo <= p <= hi})
+            display_seqs = [s for s in window_seqs if s in para_map] or window_seqs
 
         ev_row = conn.execute(
             "SELECT title, date, location, language, "
@@ -705,21 +727,29 @@ def _record_level_search(
         if not ev_row:
             continue
 
-        # Paragraph-level hit count: number of matched paragraphs in the
-        # event. (Same set whether All-words or Within-N, so Within-N ⊆
-        # All-words by construction.)
-        hit_count = len(para_map)
+        # Hit count:
+        #   All-words → number of matched paragraphs (the agreed
+        #     per-paragraph rule; ranks discourses with more hits higher).
+        #   Within-N → 1 — the discourse has one proximity passage. This is
+        #     what makes the within-N total match OCTP (2 for politicians/
+        #     mafia, 5 for enlightenment/trust/love) instead of the
+        #     all-words paragraph count.
+        if near_dist is not None:
+            hit_count = 1
+        else:
+            hit_count = len(para_map)
         total_hits += hit_count
 
-        # Display hits: up to 3 matched paragraphs, ordered by
+        # Display hits: up to 3 paragraphs from display_seqs, ordered by
         # sequence_number, with «»-highlight conversion. (para_map is
-        # already meta-filtered at gather time, so every entry is a real
-        # content hit.)
+        # already meta-filtered at gather time.)
         hits = []
-        for seq in sorted(para_map.keys()):
+        for seq in display_seqs:
             if len(hits) >= 3:
                 break
-            info = para_map[seq]
+            info = para_map.get(seq)
+            if info is None:
+                continue
             content = _strip_shailendra(info['content'] or '')
             raw_hl = info['hl'] if info.get('hl') else info['content']
             hl = (
@@ -751,10 +781,15 @@ def _record_level_search(
             '_record_level': True,
         }
 
-    # total_events is the true intersection size (pre-cap); total_hits is
-    # summed over the gathered (possibly capped) events. For queries under
-    # the cap these are exact; above it, the discourse count stays accurate
-    # while total_hits is a lower bound over the capped sample.
+    # total_events:
+    #   All-words → the true intersection size (pre-cap), so a broad query's
+    #     discourse count is accurate even when the gather/display is capped.
+    #   Within-N → the number of discourses that actually passed the
+    #     proximity window. (Using the intersection size here was the
+    #     2026-05-31 bug that reported 951 for a within-20 query that truly
+    #     matched only 5 discourses.)
+    if near_dist is not None:
+        return events, len(events), total_hits
     return events, true_total_events, total_hits
 
 
