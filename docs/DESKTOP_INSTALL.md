@@ -31,12 +31,36 @@ The steps below get you past it in a few seconds. You only do this **once**.
 2. A window opens — drag the **Osho Archives** icon onto the **Applications**
    folder shown beside it.
 3. Open **Applications** and double-click **Osho Archives**.
-4. You'll see: *"Apple could not verify Osho Archives is free of malware."*
-   Click **Done** (do not click "Move to Trash").
-5. Open **System Settings → Privacy & Security**. Scroll down — you'll see a
-   line that says *"Osho Archives was blocked"* with an **Open Anyway** button.
-   Click **Open Anyway**.
-6. Confirm **Open Anyway** once more, and enter your Mac password if asked.
+4. You'll see one of two warnings — follow whichever applies:
+
+### 4a. *"Osho Archives is damaged and can't be opened. You should move it to the Trash."*
+
+This is the prompt you'll most likely see on a recent Mac (especially Apple
+Silicon — M1, M2, M3). The app is **not** damaged — macOS marks every app
+downloaded via a browser with a "downloaded from the internet" flag, and on
+unsigned apps it shows this stronger warning instead of the friendlier
+"unidentified developer" one. You bypass it once and then it opens normally
+forever after.
+
+- Click **Cancel** (do **not** click "Move to Trash").
+- Open the **Terminal** app (Spotlight: ⌘-Space, type *Terminal*, press Enter).
+- Copy and paste this line exactly, then press Enter:
+
+  ```
+  xattr -dr com.apple.quarantine "/Applications/Osho Archives.app"
+  ```
+
+- Now double-click **Osho Archives** in your Applications folder. It opens.
+
+### 4b. *"Apple could not verify Osho Archives is free of malware."*
+
+If you see this milder prompt instead:
+
+- Click **Done** (do not click "Move to Trash").
+- Open **System Settings → Privacy & Security**. Scroll down — you'll see a
+  line that says *"Osho Archives was blocked"* with an **Open Anyway** button.
+  Click **Open Anyway**.
+- Confirm **Open Anyway** once more, and enter your Mac password if asked.
 
 That's it. From now on it opens normally with a double-click, like any app.
 
