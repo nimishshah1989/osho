@@ -896,10 +896,18 @@ function SearchPageInner() {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-6 md:gap-10">
-            {/* Left: results list */}
+            {/* Left: results list.
+                `self-start` stops the CSS grid from stretching this column
+                to the (often much taller) right column's height. Without it
+                the section is forced to the row height and grows past its
+                own content, so the scroll track runs off the bottom of the
+                viewport and the handle becomes unreachable (Sugit
+                2026-05-31). With self-start the column sizes to its content
+                capped at max-h and scrolls internally — the same effective
+                behaviour the right pane already has. */}
             <section
               aria-label="Results"
-              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-14rem)] overflow-y-auto"
+              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-14rem)] overflow-y-auto"
             >
               {!results && !loading && !error && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">

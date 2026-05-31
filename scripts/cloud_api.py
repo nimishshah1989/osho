@@ -244,6 +244,18 @@ def _rewrite_query(user_query: str, exact: bool = False) -> str:
     # or if the entire query is a single quoted phrase.
     if 'title_search:' in q or _PHRASE_ONLY_RE.match(q):
         return q
+    # An apostrophe in an un-quoted term (e.g. "women's") is a hard FTS5
+    # grammar error: `fts5: syntax error near "'"`. The unicode61
+    # tokenizer already splits on apostrophe at index time (women's →
+    # women + s), so replacing it with a space here yields the same
+    # matched tokens without the crash. Phrases ("…") are left untouched
+    # above — FTS5 accepts an apostrophe inside a quoted string. Both the
+    # straight (U+0027) and curly (U+2019) forms are handled.
+    q = q.replace("’", " ").replace("'", " ").strip()
+    # A query of nothing but apostrophes collapses to empty here — return
+    # empty rather than wrapping `{content} : ()`, which FTS5 also rejects.
+    if not q:
+        return ""
     # Otherwise scope to the content column. FTS5 column-filter syntax:
     #   {colname} : (subquery)
     return f'{{content}} : ({q})'

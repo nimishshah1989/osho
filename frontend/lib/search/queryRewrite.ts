@@ -50,6 +50,15 @@ export function rewriteQuery(userQuery: string, opts: RewriteOptions = {}): stri
   if (!opts.exact) q = normalizeDevanagari(q);
   if (!q) return q;
   if (q.includes('title_search:') || PHRASE_ONLY_RE.test(q)) return q;
+  // An apostrophe in an un-quoted term ("women's") is a hard FTS5 grammar
+  // error. The unicode61 tokenizer splits on apostrophe at index time
+  // (women's → women + s), so replacing it with a space yields the same
+  // tokens without the crash. Mirrors _rewrite_query in cloud_api.py.
+  // Phrases keep their apostrophes (handled by the early return above).
+  q = q.replace(/[’']/g, ' ').trim();
+  // A query of nothing but apostrophes collapses to empty here — return
+  // empty rather than wrapping `{content} : ()`, which FTS5 also rejects.
+  if (!q) return '';
   return `{content} : (${q})`;
 }
 

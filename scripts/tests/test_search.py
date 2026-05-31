@@ -291,6 +291,43 @@ def test_near_search_excludes_title_only_matches(app_client):
     assert "Satyam Shivam Sundaram ~ 01" not in titles
 
 
+def test_apostrophe_all_words_does_not_crash(app_client):
+    """#4 (Sugit 2026-05-31): a bare apostrophe in a bag-of-words query
+    used to return "Invalid search syntax" (FTS5 `syntax error near '`).
+    It must now return 200 and find the discourse whose content has the
+    phrase."""
+    r = app_client.get("/api/search?q=a new vision of women's liberation")
+    assert r.status_code == 200, r.text
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Mustard Seed ~ 04" in titles  # event e2, the apostrophe paragraph
+
+
+def test_all_apostrophe_query_is_empty_not_crash(app_client):
+    """An edge case of the #4 fix: a query that is nothing but apostrophes
+    must not crash FTS5 with `syntax error near ")"`. It collapses to an
+    empty query → graceful 400 'Empty query.', never a 500/syntax error."""
+    r = app_client.get("/api/search?q='")
+    assert r.status_code == 400
+    assert "Empty query" in r.json().get("detail", "")
+
+
+def test_apostrophe_phrase_still_works(app_client):
+    """The quoted-phrase form already worked (FTS5 accepts an apostrophe
+    inside a string) — guard that the #4 fix didn't change it."""
+    r = app_client.get('/api/search?q="women\'s liberation"')
+    assert r.status_code == 200, r.text
+
+
+def test_hindi_or_expanded_query_parses(app_client):
+    """#5 (Sugit 2026-05-31): the frontend's Stemmed-mode Hindi OR-expansion
+    now joins variants with explicit AND. The backend must accept the
+    resulting `(a OR b) AND c` form (it used to crash). We feed the
+    expanded shape the frontend produces and assert 200, not 400."""
+    # ध्यान expands; join with AND as buildHindiFtsQuery now does.
+    r = app_client.get("/api/search?q=(ध्यान OR ध्यान) AND मौन")
+    assert r.status_code == 200, r.text
+
+
 def test_phrase_search_still_matches_titles(app_client):
     """Phrase mode is the explicit "find me anywhere" mode, including
     titles — this is how a user looks up a series by name."""

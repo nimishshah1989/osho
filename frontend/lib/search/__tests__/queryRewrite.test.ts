@@ -10,6 +10,17 @@ describe('rewriteQuery', () => {
     expect(rewriteQuery('"Satyam Shivam"')).toBe('"Satyam Shivam"');
   });
 
+  it('replaces an apostrophe in a bag-of-words query (#4)', () => {
+    // A bare apostrophe is an FTS5 syntax error; the tokenizer splits on
+    // it anyway, so women's -> women s yields the same matched tokens.
+    expect(rewriteQuery("a new vision of women's liberation"))
+      .toBe('{content} : (a new vision of women s liberation)');
+  });
+
+  it('keeps the apostrophe inside a quoted phrase (#4)', () => {
+    expect(rewriteQuery('"women\'s liberation"')).toBe('"women\'s liberation"');
+  });
+
   it('scopes bag-of-words queries to the content column', () => {
     // Sugit's case: Satyam Shivam shouldn't match the series via title.
     expect(rewriteQuery('Satyam Shivam')).toBe('{content} : (Satyam Shivam)');
