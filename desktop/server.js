@@ -23,8 +23,16 @@ function createOshoServer(rootDir) {
   return http.createServer((req, res) => {
     handler(req, res, {
       public: rootDir,
-      cleanUrls: false,
-      trailingSlash: true,
+      // Defaults except for `directoryListing`. The previous config
+      // (`cleanUrls: false, trailingSlash: true`) silently broke every
+      // route in the static export — `/` returned 404 (the white
+      // "404: This page could not be found." window the user saw),
+      // `/archive/` and `/read/` did too, and static assets only
+      // resolved via 301 redirect chains. serve-handler's default
+      // `cleanUrls: true` is exactly what makes `out/foo/index.html`
+      // be served for the request `/foo` or `/foo/`. We only override
+      // directoryListing to false so a misconfigured deploy can never
+      // expose the file tree.
       directoryListing: false,
     });
   });

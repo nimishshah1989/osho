@@ -61,7 +61,13 @@ try {
   await page.addInitScript(() => {
     window.oshoDesktop = { corpusUrl: '/corpus/osho.db.zst' };
   });
-  await page.goto(origin + '/index.html', { waitUntil: 'load' });
+  // CRITICAL: load `/` exactly like the Electron main process does
+  // (win.loadURL(origin) — no path). If the server's static-routing
+  // config breaks `/` → `index.html` resolution (as the previous
+  // `cleanUrls: false` did), the packaged app shows a 404 window — the
+  // 2026-05-30 white-404 incident. Hitting `/index.html` would have
+  // hidden that, which is precisely how the bug shipped the last time.
+  await page.goto(origin + '/', { waitUntil: 'load' });
 
   // Resolve to the error screen or the ready app.
   let state = 'timeout';
