@@ -14,9 +14,22 @@
  * nested async-proxy worker that can't be resolved in the Next.js-bundled
  * build and throws "Expecting vfs=opfs|opfs-wl URL argument for this
  * worker" (the 2026-05-30 desktop failure). SAHPool sidesteps all of it.
+ *
+ * NOTE on port: Chromium scopes OPFS storage by origin (host + port),
+ * so an Electron app that listens on `port: 0` (OS-assigned, different
+ * every launch) gets a different origin each time → empty OPFS →
+ * ~1.6 GB corpus reinstall on every relaunch. We pin a small range of
+ * high ports so the origin is stable across launches and OPFS persists.
+ * If all preferred ports are taken (truly rare on a desktop), we fall
+ * back to an OS-assigned port and accept the one-time reinstall.
  */
 const http = require('node:http');
 const handler = require('serve-handler');
+
+// Picked once, deliberately uncommon and well above all the standard dev
+// ports a user might run alongside the app. The fallback range covers
+// the very rare case where some other process already owns the first one.
+const PREFERRED_PORTS = [17789, 17790, 17791, 17792, 17793];
 
 /** Build (but don't listen on) the HTTP server that serves `rootDir`. */
 function createOshoServer(rootDir) {
@@ -38,15 +51,50 @@ function createOshoServer(rootDir) {
   });
 }
 
-/** Start the server on a free 127.0.0.1 port. Resolves {server, origin}. */
+/** Start the server, preferring a stable port so OPFS storage persists
+ *  across app launches. Resolves {server, origin, persistent} — where
+ *  persistent=false means we fell back to an OS-assigned port and the
+ *  corpus will be reinstalled next launch. */
 function startServer(rootDir) {
-  return new Promise((resolve, reject) => {
-    const server = createOshoServer(rootDir);
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      resolve({ server, origin: `http://127.0.0.1:${server.address().port}` });
+  return (async () => {
+    for (const port of PREFERRED_PORTS) {
+      try {
+        const server = createOshoServer(rootDir);
+        await new Promise((resolve, reject) => {
+          const onErr = (e) => {
+            server.removeListener('error', onErr);
+            reject(e);
+          };
+          server.once('error', onErr);
+          server.listen(port, '127.0.0.1', () => {
+            server.removeListener('error', onErr);
+            resolve();
+          });
+        });
+        return { server, origin: `http://127.0.0.1:${port}`, persistent: true };
+      } catch (e) {
+        if (e && e.code === 'EADDRINUSE') continue; // try next preferred port
+        throw e;
+      }
+    }
+    // Every preferred port was busy — fall back to an OS-assigned port.
+    // Storage won't persist across launches, but the app still works.
+    return new Promise((resolve, reject) => {
+      const server = createOshoServer(rootDir);
+      server.on('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        console.warn(
+          '[osho] All preferred ports were in use — using an OS-assigned port. '
+          + 'The offline archive will be reinstalled on next launch.',
+        );
+        resolve({
+          server,
+          origin: `http://127.0.0.1:${server.address().port}`,
+          persistent: false,
+        });
+      });
     });
-  });
+  })();
 }
 
-module.exports = { createOshoServer, startServer };
+module.exports = { createOshoServer, startServer, PREFERRED_PORTS };
