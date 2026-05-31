@@ -403,6 +403,55 @@ def _titles(r):
     return [ev["title"] for ev in r.json()["events"]]
 
 
+# ── Multi-word NEAR cross-paragraph (Sugit 2026-05-31) ──────────────
+
+
+def test_three_word_near_finds_cross_paragraph_match(app_client):
+    """`enlightenment trust love` within 20 must find the case where the
+    three words straddle a paragraph break — exactly what FTS5's in-row
+    NEAR misses and the 2-word-only augmentation refused to handle."""
+    r = app_client.get(
+        "/api/search?q=NEAR(enlightenment%20trust%20love%2C%2020)"
+    )
+    assert r.status_code == 200
+    titles = [ev["title"] for ev in r.json()["events"]]
+    # The seed parks the three words across p2's paragraphs 30 and 31.
+    assert "The Messiah Vol 1 ~ 15" in titles
+
+
+def test_three_word_near_respects_distance(app_client):
+    """The same trio at a very tight distance must NOT match — the
+    augmentation has to honour the user's `near_dist`, not just find
+    'words exist in adjacent paragraphs'."""
+    r = app_client.get(
+        "/api/search?q=NEAR(enlightenment%20trust%20love%2C%202)"
+    )
+    assert r.status_code == 200
+    titles = [ev["title"] for ev in r.json()["events"]]
+    assert "The Messiah Vol 1 ~ 15" not in titles
+
+
+# ── Language code/name alias tolerance (Sugit 2026-05-31) ───────────
+
+
+def test_language_filter_accepts_iso_code(app_client):
+    """If the DB ever stored `en` instead of `English` (the 2026-05-31
+    regression), passing `?language=English` must still match."""
+    r = app_client.get("/api/search?q=meditation&language=English")
+    assert r.status_code == 200
+    assert r.json()["total"] > 0
+
+
+def test_language_filter_accepts_full_name_when_db_has_codes(app_client):
+    """And the symmetric case: passing `?language=en` must work too."""
+    r = app_client.get("/api/search?q=meditation&language=en")
+    assert r.status_code == 200
+    assert r.json()["total"] > 0
+
+
+# ── Multi-year date filter (existing tests below) ────────────────────
+
+
 def test_multiyear_date_first_year_matches(app_client):
     """A `1971/1972 ?` record must come back when filtering by 1971."""
     r = app_client.get("/api/search?q=meditation&date_from=1971&date_to=1971")

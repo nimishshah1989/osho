@@ -301,8 +301,13 @@ function SearchPageInner() {
       // hasn't explicitly asked for English content via the language filter.
       // Without this opt-out, `Lang: English` + a Roman query produced zero
       // hits because the query was silently rewritten to Devanagari.
+      // Tolerate either pill value ("English", "en", "EN") — the DB may
+      // hold ISO codes instead of full names if any ingest path skipped
+      // the language normalisation.
+      const langKey = (langFilter || '').trim().toLowerCase();
+      const explicitEnglish = langKey === 'english' || langKey === 'en';
       const isRoman =
-        locale === 'hi' && langFilter !== 'English' && /[a-zA-Z]/.test(raw);
+        locale === 'hi' && !explicitEnglish && /[a-zA-Z]/.test(raw);
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
       const isSingleWord = !/\s/.test(devanagari.trim());

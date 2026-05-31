@@ -82,8 +82,13 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   const filters: string[] = [];
   const filterParams: unknown[] = [];
   if (language) {
-    filters.push('LOWER(e.language) = LOWER(?)');
-    filterParams.push(language);
+    // Accept both full names and ISO codes — see cloud_api.py's
+    // `_expand_language_aliases` for the same logic. Keeps the offline
+    // engine tolerant to whatever the DB happens to hold.
+    const aliases = expandLanguageAliases(language);
+    const placeholders = aliases.map(() => 'LOWER(?)').join(',');
+    filters.push(`LOWER(e.language) IN (${placeholders})`);
+    filterParams.push(...aliases);
   }
   if (original) {
     filters.push("(e.translated_from IS NULL OR LOWER(e.translated_from) = 'none')");
@@ -181,7 +186,7 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   // Cross-paragraph augmentation for NEAR queries.
   let augmentedCrossPara = false;
   if (nearParsed) {
-    if (nearParsed.words.length === 2) {
+    if (nearParsed.words.length >= 2) {
       const adj = augmentNearAdjacentStrict(
         db, nearParsed.words, nearParsed.distance, whereExtra, filterParams, ftsTable,
       );
@@ -298,7 +303,7 @@ function augmentNearAdjacentStrict(
   filterParams: unknown[],
   ftsTable: string,
 ): Map<string, MutableEvent> {
-  if (words.length !== 2) return new Map();
+  if (words.length < 2) return new Map();
   const useNormalised = !ftsTable.endsWith('_exact');
   const wordNorm = (s: string) => (useNormalised ? normalizeDevanagari(s) : s);
 
@@ -353,41 +358,64 @@ function augmentNearAdjacentStrict(
     perWord.push(perEv);
   }
 
-  if (!perWord[0]?.size || !perWord[1]?.size) return new Map();
+  if (perWord.some((m) => m.size === 0)) return new Map();
 
-  const events = new Map<string, MutableEvent>();
-  const commonIds = new Set<string>();
-  for (const id of perWord[0].keys()) {
-    if (perWord[1].has(id)) commonIds.add(id);
+  // Events that contain every query word in at least one paragraph.
+  let commonIds = new Set<string>(perWord[0].keys());
+  for (let i = 1; i < perWord.length; i++) {
+    const next = new Set<string>();
+    for (const id of commonIds) if (perWord[i].has(id)) next.add(id);
+    commonIds = next;
   }
 
+  const events = new Map<string, MutableEvent>();
   for (const evId of commonIds) {
-    const wa = perWord[0].get(evId)!;
-    const wb = perWord[1].get(evId)!;
-    let best: { dist: number; seqA: number; seqB: number; infoA: WordParaInfo; infoB: WordParaInfo } | null = null;
+    // For each consecutive pair (seq_x, seq_x+1) where the union of word
+    // matches covers all N query words, compute the conservative span
+    // across the two paragraphs and keep the tightest match. The 2-word
+    // case is just N=2 of this same algorithm (Sugit 2026-05-31).
+    const seqsPerWord = perWord.map((m) => new Set(m.get(evId)?.keys() ?? []));
+    const seqsAny = new Set<number>();
+    for (const s of seqsPerWord) for (const v of s) seqsAny.add(v);
 
-    for (const [seqA, infoA] of wa) {
-      for (const delta of [-1, 1] as const) {
-        const seqB = seqA + delta;
-        if (seqB === seqA) continue;
-        const infoB = wb.get(seqB);
-        if (!infoB) continue;
-        let dist: number;
-        if (delta === 1) {
-          const lastA = Math.max(...infoA.positions);
-          const firstB = Math.min(...infoB.positions);
-          dist = (infoA.token_count - 1 - lastA) + firstB;
-        } else {
-          const firstA = Math.min(...infoA.positions);
-          const lastB = Math.max(...infoB.positions);
-          dist = (infoB.token_count - 1 - lastB) + firstA;
+    let bestSpan = nearDist + 1;
+    let bestPair: { sx: number; sy: number } | null = null;
+    for (const sx of seqsAny) {
+      const sy = sx + 1;
+      if (!seqsAny.has(sy)) continue;
+      const infoX: Array<WordParaInfo | undefined> = perWord.map(
+        (m) => m.get(evId)?.get(sx),
+      );
+      const infoY: Array<WordParaInfo | undefined> = perWord.map(
+        (m) => m.get(evId)?.get(sy),
+      );
+      const tokenCountX = (infoX.find((v) => v) || infoY.find((v) => v))?.token_count ?? 0;
+      let coversX = false;
+      let coversY = false;
+      let minPos = Infinity;
+      let maxPos = -Infinity;
+      let coveredAll = true;
+      for (let i = 0; i < words.length; i++) {
+        const positions: number[] = [];
+        if (infoX[i]) { positions.push(...infoX[i]!.positions); coversX = true; }
+        if (infoY[i]) {
+          positions.push(...infoY[i]!.positions.map((p) => p + tokenCountX));
+          coversY = true;
         }
-        if (dist <= nearDist && (!best || dist < best.dist)) {
-          best = { dist, seqA, seqB, infoA, infoB };
-        }
+        if (!positions.length) { coveredAll = false; break; }
+        minPos = Math.min(minPos, ...positions);
+        maxPos = Math.max(maxPos, ...positions);
+      }
+      // Skip when all words actually sit in one paragraph — FTS5's in-row
+      // NEAR handles that case already; counting it here double-counts.
+      if (!coveredAll || !(coversX && coversY)) continue;
+      const span = maxPos - minPos;
+      if (span <= nearDist && span < bestSpan) {
+        bestSpan = span;
+        bestPair = { sx, sy };
       }
     }
-    if (!best) continue;
+    if (!bestPair) continue;
 
     const evRow = db.get<{
       title: string | null;
@@ -403,12 +431,16 @@ function augmentNearAdjacentStrict(
     );
     if (!evRow) continue;
 
+    // Build display hits: one entry per paragraph in the matched pair
+    // that actually contributed a word.
     const hits: SearchHit[] = [];
-    const ordered = [
-      [best.seqA, best.infoA] as const,
-      [best.seqB, best.infoB] as const,
-    ].sort((a, b) => a[0] - b[0]);
-    for (const [seq, info] of ordered) {
+    for (const seq of [bestPair.sx, bestPair.sy]) {
+      let info: WordParaInfo | undefined;
+      for (let i = 0; i < words.length; i++) {
+        const v = perWord[i].get(evId)?.get(seq);
+        if (v) { info = v; break; }
+      }
+      if (!info) continue;
       const content = stripShailendra(info.content || '');
       if (isMetaParagraph(seq, content)) continue;
       const hit: SearchHit = {
@@ -429,7 +461,7 @@ function augmentNearAdjacentStrict(
       translated_from: evRow.translated_from,
       source_short: evRow.source_short,
       best_rank: 0.0,
-      hit_count: 2,
+      hit_count: words.length,
       hits,
     });
   }
@@ -758,6 +790,20 @@ export function dateRange(db: Database): DateRangeResponse {
 
 
 // ─── Errors ──────────────────────────────────────────────────────────────
+
+/** Mirror of scripts/cloud_api.py:_LANGUAGE_ALIASES — keep them in sync. */
+const LANGUAGE_ALIASES: Record<string, string[]> = {
+  english: ['English', 'en', 'EN'],
+  hindi: ['Hindi', 'hi', 'HI'],
+  en: ['English', 'en', 'EN'],
+  hi: ['Hindi', 'hi', 'HI'],
+};
+
+function expandLanguageAliases(language: string): string[] {
+  const key = (language || '').trim().toLowerCase();
+  return LANGUAGE_ALIASES[key] ?? [language];
+}
+
 
 export class SearchError extends Error {
   constructor(message: string, public readonly status: number) {
