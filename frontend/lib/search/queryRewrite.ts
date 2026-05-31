@@ -45,6 +45,15 @@ export interface RewriteOptions {
  *
  * Returns the empty string when given the empty string.
  */
+/** True when the FTS query is exactly one quoted phrase and nothing
+ *  else — the case where we content-scope counting but still check title
+ *  membership separately (#3). Mirror of the `_PHRASE_ONLY_RE.match`
+ *  check in cloud_api.py's `search()`. */
+export function isPhraseOnly(ftsQuery: string): boolean {
+  return PHRASE_ONLY_RE.test(ftsQuery.trim());
+}
+
+
 export function rewriteQuery(userQuery: string, opts: RewriteOptions = {}): string {
   let q = userQuery.replace(TITLE_FILTER_RE, 'title_search:').trim();
   if (!opts.exact) q = normalizeDevanagari(q);
@@ -98,4 +107,69 @@ export function parseNear(ftsQuery: string): NearQuery | null {
  *  leak into the augmentation either. */
 export function scopeWordToContent(word: string): string {
   return `{content} : (${word})`;
+}
+
+
+// A `(g1) AND (g2) AND …` separator — the shape the frontend's Hindi
+// OR-expansion (buildHindiFtsQuery) emits. Mirrors `_AND_SPLIT_RE`.
+const AND_SPLIT_RE = /\s+AND\s+/;
+const BOOLEAN_OP_RE = /^(OR|AND|NOT|NEAR)$/i;
+
+
+/**
+ * Split an *all-words* query into the list of independent "units" that
+ * must each be present somewhere in a record for it to match at record
+ * level. Mirror of `_parse_query_units` in `scripts/cloud_api.py`.
+ *
+ * A unit is a self-contained FTS subquery — either a bare term (`love`)
+ * or a parenthesised OR-group from the Hindi spelling expansion
+ * (`अनंत OR अनन्त`, parens stripped). The original user query is parsed
+ * (not the rewritten `{content}:(…)` form) so the units can be re-scoped
+ * to the content column individually.
+ *
+ * Returns `null` when the query can't be confidently treated as a flat
+ * AND of two-or-more units — phrase / single-word / `title:` / nested
+ * grouping all fall back to the legacy single-MATCH path.
+ */
+export function parseQueryUnits(userQuery: string, exact = false): string[] | null {
+  if (!userQuery) return null;
+  let q = userQuery.trim();
+  // Phrases and explicit title filters keep the legacy path.
+  if (q.includes('"') || TITLE_FILTER_RE.test(q)) {
+    // TITLE_FILTER_RE is a global regex — reset lastIndex so the stateful
+    // `.test()` doesn't skip a match on the next call.
+    TITLE_FILTER_RE.lastIndex = 0;
+    return null;
+  }
+  TITLE_FILTER_RE.lastIndex = 0;
+  if (!exact) q = normalizeDevanagari(q);
+  // Drop apostrophes the same way rewriteQuery does (tokenizer splits on
+  // them anyway), so `women's` → `women s`.
+  q = q.replace(/[’']/g, ' ').trim();
+  if (!q) return null;
+
+  const hasExplicitAnd = AND_SPLIT_RE.test(q);
+  const parts = hasExplicitAnd ? q.split(AND_SPLIT_RE) : q.split(/\s+/);
+
+  const units: string[] = [];
+  for (const raw of parts) {
+    const part = raw.trim();
+    if (!part) continue;
+    if (part.startsWith('(') && part.endsWith(')')) {
+      const inner = part.slice(1, -1).trim();
+      // Nested grouping we don't model — bail to the legacy path.
+      if (!inner || inner.includes('(') || inner.includes(')')) return null;
+      units.push(inner);
+    } else {
+      if (part.includes('(') || part.includes(')')) return null;
+      if (hasExplicitAnd) units.push(part);
+      else for (const t of part.split(/\s+/)) if (t) units.push(t);
+    }
+  }
+
+  for (const u of units) {
+    if (BOOLEAN_OP_RE.test(u.trim())) return null;
+  }
+  if (units.length < 2) return null;
+  return units;
 }

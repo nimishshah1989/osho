@@ -57,6 +57,15 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     // date unknown" → `@time=YYYY/YYYY ?`. Year-range filtering must
     // treat this as covering both years.
     ['dd1', 'The Dimensionless Dimension ~ 02', '1971/1972 ?', 'unknown.', 'English', 'none', null],
+    // Record-level All-words (#7): love / intelligence / awareness each
+    // appear in THREE DIFFERENT paragraphs.
+    ['bd1', 'The Buddha Disease ~ 14', '1979-05-05', 'Pune', 'English', 'none', null],
+    // Record-level Within-N exact-mode (#2): three rare words straddle a
+    // paragraph break.
+    ['n2', 'The Long Pilgrimage ~ 07', '1982-07-07', 'Pune', 'English', 'none', null],
+    // Phrase == TITLE (#3): the title phrase appears in exactly two
+    // content paragraphs.
+    ['wl1', "A New Vision of Women's Liberation ~ 01", '1985-03-08', 'Pune', 'English', 'none', null],
   ];
   const evInsert = sqlite.prepare(
     'INSERT INTO events (id,title,date,location,language,translated_from,source_short) VALUES (?,?,?,?,?,?,?)',
@@ -84,6 +93,11 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     [17, 'p1', 7, 'Nietzsche\'s Zarathustra is one of the most significant books ever written.'],
     [18, 'p1', 12, 'Beyond good and evil — Nietzsche saw clearly what others could not.'],
     [19, 'p2', 5, 'Nietzsche once said that God is dead.'],
+    // Three-word NEAR cross-paragraph: enlightenment / trust / love are
+    // split across two adjacent paragraphs of p2 (record-level token span
+    // is 5), so only record-level Within-N matching finds it.
+    [100, 'p2', 30, 'He said the path begins with enlightenment and trust.'],
+    [101, 'p2', 31, 'From there love arises naturally.'],
     [20, 'p1', 20, 'The politicians have always been in alliance with the mafia.'],
     [21, 'p2', 10, 'When politicians and the mafia join hands, the common man suffers.'],
     [24, 'e2', 4, 'Power corrupts every government and every assembly of politicians.'],
@@ -101,6 +115,10 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
       + 'end of all this digression does the word mafia surface again.'],
     [22, 'e3', 0, 'Vigyan Bhairav Tantra ~ 12'],
     [23, 'e3', 2, 'event page in sannyas.wiki: Vigyan Bhairav Tantra ~ 12.'],
+    // Apostrophe in body content (the #4 regression seed) — also the
+    // second content paragraph that matches the women's-liberation phrase,
+    // so #3 reports two events (e2 + wl1) identically to the Python suite.
+    [60, 'e2', 60, "This is a new vision of women's liberation in our time."],
     [40, 'ss1', 1, 'Truth is a state of being, not a doctrine to be believed.'],
     [41, 'ss1', 2, 'Listen to the heart, and the path opens by itself.'],
     [42, 'ss2', 1, 'Beauty without truth is decoration; truth without beauty is austerity.'],
@@ -108,6 +126,22 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     [31, 'h1', 80, 'अनन्त — समय के पार जो है, वही अनन्त है।'],
     [32, 'h2', 90, 'अनंत यात्रा है, अंत नहीं।'],
     [50, 'dd1', 1, 'An early talk on meditation given somewhere in those two years.'],
+    // #7 / #6 — record-level All-words. love / intelligence / awareness in
+    // three separate paragraphs.
+    [70, 'bd1', 1, 'Love is the most misunderstood word on the earth.'],
+    [71, 'bd1', 5, 'Real intelligence has nothing to do with the intellect.'],
+    [72, 'bd1', 9, 'Awareness is the golden key that unlocks every door.'],
+    // #2 — Within-N exact-mode cross-paragraph. alpha / bravo / charlie
+    // straddle the seq 10/11 break; record-level token span is 8.
+    [73, 'n2', 10, 'the wandering monk carried only a wooden alpha'],
+    [74, 'n2', 11, 'bravo arrived first then much later came charlie here'],
+    // #3 — phrase == title. The title phrase appears in exactly two
+    // content paragraphs (seq 1 and seq 3).
+    [80, 'wl1', 1, "This is a new vision of women's liberation that the world needs."],
+    [81, 'wl1', 2, 'Down the ages women have been treated as second-class citizens.'],
+    [82, 'wl1', 3, "The future belongs to a new vision of women's liberation."],
+    [83, 'wl1', 4, 'Man and woman are two wings of the same bird.'],
+    [84, 'wl1', 5, 'Only together can they soar into the sky of freedom.'],
   ];
   const paraInsert = sqlite.prepare(
     'INSERT INTO paragraphs (id, event_id, sequence_number, content) VALUES (?,?,?,?)',

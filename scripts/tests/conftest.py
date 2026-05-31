@@ -95,6 +95,20 @@ def _seed_db(path: str) -> None:
         # this range, unknown which year". Year-range filtering must
         # treat this as covering both years and ignore the trailing "?".
         ("dd1", "The Dimensionless Dimension ~ 02", "1971/1972 ?", "unknown.", "English", "none"),
+        # Record-level All-words (#7): love, intelligence and awareness each
+        # appear, but in THREE DIFFERENT paragraphs. FTS5's per-row AND
+        # cannot match this; record-level matching must.
+        ("bd1", "The Buddha Disease ~ 14", "1979-05-05", "Pune", "English", "none"),
+        # Record-level Within-N exact-mode (#2): three rare words straddle
+        # a paragraph break. Found by Within-N at a generous distance, not
+        # at distance 1.
+        ("n2", "The Long Pilgrimage ~ 07", "1982-07-07", "Pune", "English", "none"),
+        # Phrase == TITLE (#3): the phrase "a new vision of women's
+        # liberation" is the series title AND appears in exactly two of the
+        # discourse's content paragraphs. A phrase search must report the
+        # content hits (small), not one-per-paragraph because the title
+        # rides on every paragraph's FTS row.
+        ("wl1", "A New Vision of Women's Liberation ~ 01", "1985-03-08", "Pune", "English", "none"),
     ]
     cur.executemany(
         "INSERT INTO events (id,title,date,location,language,translated_from)"
@@ -195,6 +209,28 @@ def _seed_db(path: str) -> None:
         # Body paragraph for the multi-year archivist record so date-range
         # filter tests can run against a real `meditation` content match.
         (50, "dd1", 1, "An early talk on meditation given somewhere in those two years."),
+        # #7 / #6 — record-level All-words. The three words live in three
+        # SEPARATE paragraphs, so only record-level matching finds bd1 for
+        # `love intelligence awareness`. The Within-100 subset invariant
+        # (#6) is checked against the same data.
+        (70, "bd1", 1, "Love is the most misunderstood word on the earth."),
+        (71, "bd1", 5, "Real intelligence has nothing to do with the intellect."),
+        (72, "bd1", 9, "Awareness is the golden key that unlocks every door."),
+        # #2 — Within-N exact-mode cross-paragraph. The three rare words
+        # `alpha`, `bravo`, `charlie` straddle the seq 10/11 break. Record-
+        # level token span across the two paragraphs is 8, so Within-20
+        # matches and Within-1 does not.
+        (73, "n2", 10, "the wandering monk carried only a wooden alpha"),
+        (74, "n2", 11, "bravo arrived first then much later came charlie here"),
+        # #3 — phrase == title. The series title "A New Vision of Women's
+        # Liberation" rides on every FTS row of wl1, but the phrase itself
+        # only appears in TWO content paragraphs. A content-scoped phrase
+        # search must count those two, not one hit per paragraph.
+        (80, "wl1", 1, "This is a new vision of women's liberation that the world needs."),
+        (81, "wl1", 2, "Down the ages women have been treated as second-class citizens."),
+        (82, "wl1", 3, "The future belongs to a new vision of women's liberation."),
+        (83, "wl1", 4, "Man and woman are two wings of the same bird."),
+        (84, "wl1", 5, "Only together can they soar into the sky of freedom."),
     ]
     cur.executemany(
         "INSERT INTO paragraphs (id,event_id,sequence_number,content) VALUES (?,?,?,?)",

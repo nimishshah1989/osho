@@ -292,25 +292,84 @@ def _parse_near(fts_query: str):
     return words, int(dist_str)
 
 
-def _min_para_span(seqs_per_word: list[list[int]]) -> int:
-    if any(not lst for lst in seqs_per_word):
-        return sys.maxsize
-    heap = [(seqs[0], i, 0) for i, seqs in enumerate(seqs_per_word)]
-    heapq.heapify(heap)
-    max_val = max(seqs[0] for seqs in seqs_per_word)
-    best = sys.maxsize
-    while True:
-        min_val, wi, pos = heapq.heappop(heap)
-        best = min(best, max_val - min_val)
-        if best == 0:
-            break
-        npos = pos + 1
-        if npos >= len(seqs_per_word[wi]):
-            break
-        nval = seqs_per_word[wi][npos]
-        max_val = max(max_val, nval)
-        heapq.heappush(heap, (nval, wi, npos))
-    return best
+# Splits an all-words query into its top-level units, treating an
+# explicit ` AND ` separator (the shape the frontend's Hindi OR-expansion
+# emits: `(अनंत OR अनन्त) AND (मौन OR मौं)`) as the boundary.
+_AND_SPLIT_RE = re.compile(r'\s+AND\s+')
+
+
+def _parse_query_units(user_query: str, exact: bool = False):
+    """Split an *all-words* query into the list of independent "units"
+    that must each be present somewhere in a record for it to match at
+    record level.
+
+    A unit is a self-contained FTS subquery — either a bare term
+    (`love`) or a parenthesised OR-group from the frontend's Hindi
+    spelling expansion (`अनंत OR अनन्त`, with the surrounding parens
+    stripped). The original user query `q` is parsed (not the rewritten
+    `{content}:(…)` form) so the units can be re-scoped to the content
+    column individually.
+
+    Returns the list of unit subquery strings, or ``None`` when the query
+    can't be confidently treated as a flat AND of units — i.e. it
+    contains a quote (phrase), an explicit `title:` filter, fewer than
+    two units, or any leftover grouping/operator we don't model. Callers
+    fall back to the existing single-MATCH path in that case so phrase /
+    single-word / title searches keep their current behaviour.
+    """
+    if not user_query:
+        return None
+    q = user_query.strip()
+    # Phrases and explicit title filters keep the legacy path.
+    if '"' in q or _TITLE_FILTER_RE.search(q):
+        return None
+    if not exact:
+        q = _normalize_devanagari(q)
+    # An apostrophe is dropped the same way _rewrite_query does (the
+    # tokenizer splits on it anyway), so `women's` → `women s`.
+    q = q.replace("’", " ").replace("'", " ").strip()
+    if not q:
+        return None
+
+    # Hindi OR-expansion shape: `(g1) AND (g2) AND …`. Split on the
+    # explicit AND separator the frontend emits.
+    has_explicit_and = bool(_AND_SPLIT_RE.search(q))
+    parts = _AND_SPLIT_RE.split(q) if has_explicit_and else q.split()
+
+    units: list[str] = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if part.startswith('(') and part.endswith(')'):
+            # A parenthesised OR-group — strip the outer parens and keep
+            # the inner OR expression verbatim (it'll be re-wrapped in a
+            # content-scope filter by the caller).
+            inner = part[1:-1].strip()
+            if not inner or '(' in inner or ')' in inner:
+                # Nested grouping we don't model — bail to legacy path.
+                return None
+            units.append(inner)
+        else:
+            # A bare run of terms. With an explicit AND separator this is
+            # a single term; without one, implicit-AND whitespace means
+            # each whitespace token is its own unit. Either way, any
+            # stray paren or operator we didn't expect means bail.
+            if '(' in part or ')' in part:
+                return None
+            if has_explicit_and:
+                units.append(part)
+            else:
+                units.extend(part.split())
+
+    # Reject if a unit is a bare boolean operator (would mean the query
+    # had a shape we don't model, e.g. `a OR b` without grouping).
+    for u in units:
+        if u.strip().upper() in ('OR', 'AND', 'NOT', 'NEAR'):
+            return None
+    if len(units) < 2:
+        return None
+    return units
 
 
 _TOKEN_RE = re.compile(r"[\wऀ-ॿ]+", re.UNICODE)
@@ -343,163 +402,300 @@ def _hl_token_positions(hl: str) -> tuple[list[int], int]:
     return positions, total
 
 
-def _augment_near_adjacent_strict(
+def _count_tokens(text: str) -> int:
+    """Token count for a paragraph using the same tokenisation as
+    `_hl_token_positions` (so record-level token offsets line up with the
+    in-paragraph positions FTS5 highlight() reports). No markers present,
+    so only the total is needed."""
+    _, total = _hl_token_positions(text or "")
+    return total
+
+
+def _min_token_span(positions_per_unit: list[list[int]]) -> int:
+    """Smallest window (max-min) that contains at least one position from
+    every unit's sorted position list. A k-way merge over the per-unit
+    position lists (record-level token positions). Returns sys.maxsize
+    when any unit has no positions."""
+    if any(not lst for lst in positions_per_unit):
+        return sys.maxsize
+    heap = [(lst[0], i, 0) for i, lst in enumerate(positions_per_unit)]
+    heapq.heapify(heap)
+    max_val = max(lst[0] for lst in positions_per_unit)
+    best = sys.maxsize
+    while True:
+        min_val, ui, pos = heapq.heappop(heap)
+        best = min(best, max_val - min_val)
+        if best == 0:
+            break
+        npos = pos + 1
+        if npos >= len(positions_per_unit[ui]):
+            break
+        nval = positions_per_unit[ui][npos]
+        max_val = max(max_val, nval)
+        heapq.heappush(heap, (nval, ui, npos))
+    return best
+
+
+# Cap on how many common events we'll do the (more expensive) paragraph
+# gather + token-offset work for. Record-level matching is only reached
+# for multi-unit all-words / NEAR queries, where the intersection of
+# per-unit event sets is already narrow; the cap is a safety valve against
+# a pathological query (e.g. two extremely common stopword-like units)
+# blowing up memory. Far above any realistic discourse-count for a real
+# multi-word query.
+_RECORD_LEVEL_EVENT_CAP = 2000
+
+
+# SQL fragment mirroring _is_meta_paragraph for use inside FTS MATCH
+# queries: drop the title row (sequence 0) and the sannyas-wiki marker so
+# they never qualify a record or count as a hit. `f.content NOT LIKE` is
+# ASCII-case-insensitive in SQLite, which covers the English marker. Must
+# NOT be applied to the all-paragraphs offsets query (offsets need every
+# paragraph). Kept in sync with _is_meta_paragraph.
+_META_EXCLUDE_SQL = (
+    "AND f.sequence_number <> 0 "
+    "AND f.content NOT LIKE 'event page in sannyas%'"
+)
+
+
+def _is_meta_paragraph(seq: int, content: str) -> bool:
+    """A paragraph that is page metadata, not discourse text: the title
+    row (sequence 0) or the "event page in sannyas.wiki" marker. These
+    must never count as a search hit — neither in the displayed snippets
+    NOR in hit_count / total_hits (the 2026-05-31 record-level bug counted
+    them in the totals while hiding them from the snippets)."""
+    return (
+        seq == 0
+        or _strip_shailendra(content or '').lower().startswith("event page in sannyas")
+    )
+
+
+def _record_level_search(
     conn: sqlite3.Connection,
-    words: list[str],
-    near_dist: int,
+    units: list[str],
+    near_dist: Optional[int],
     where_extra: str,
     filter_params: list,
     fts_table: str = "paragraphs_fts",
-) -> dict:
-    """Find pairs of *adjacent* paragraphs whose tokens span a NEAR match.
+) -> tuple[dict, int, int]:
+    """Record-level All-words / Within-N matching (OCTP semantics).
 
-    FTS5's NEAR() operates within a single FTS row (= one paragraph), so it
-    cannot find a match when the query terms straddle a paragraph break.
-    This augmentation closes that gap for any N-word NEAR by measuring real
-    token distance across two consecutive paragraphs. For each consecutive
-    pair (p_x, p_{x+1}) where the union of word matches covers all N query
-    words, compute the conservative "window span" across both paragraphs:
+    A "unit" is a self-contained FTS subquery (a bare term like ``love`` or
+    a parenthesised OR-group like ``अनंत OR अनन्त``). Each unit is scoped to
+    the content column as ``{content}:(unit)``.
 
-        span = (tokens after first matched word in p_x)
-               + (tokens before last matched word in p_{x+1})
+    Matching is over the WHOLE discourse, not a single FTS5 row (= one
+    paragraph):
 
-    A pair is included only if `span <= near_dist`, so this never broadens
-    a query beyond what the user asked for. The Sugit 2026-05-31 report
-    (`enlightenment trust love within 20` finding 2 instead of OCTP's 5)
-    was caused by the previous version of this function rejecting any
-    N != 2 case — the in-row FTS5 NEAR alone misses every match that
-    straddles a paragraph boundary.
+    * **All-words** (``near_dist is None``): a record matches iff every unit
+      occurs *somewhere* in it (words may span paragraphs — fixes #7).
+    * **Within-N** (``near_dist`` set): additionally, the record-level token
+      positions of the units must fit inside a window of ``near_dist`` tokens.
+      Token offsets are computed against the full discourse so a match may
+      straddle a paragraph break (fixes #2). Within-N events are always a
+      subset of the All-words events with the same per-event paragraph-hit
+      sets, so Within-N totals are a strict subset of All-words totals
+      (fixes #6).
 
-    `fts_table` selects the stemmed (default) or exact FTS index. The
-    name is taken only from the closed set
-    {paragraphs_fts, paragraphs_fts_exact}, never from user input — so
-    the f-string SQL stays injection-safe.
+    Returns ``(events_dict, total_events, total_hits)`` where ``total_hits``
+    is the sum over qualifying events of the number of matched paragraphs in
+    that event (the agreed paragraph-level counting rule).
     """
-    if len(words) < 2:
-        return {}
     if fts_table not in ("paragraphs_fts", "paragraphs_fts_exact"):
         raise ValueError(f"unsupported fts_table: {fts_table!r}")
     # In exact mode we don't normalise Devanagari at index time, so we must
-    # not normalise at query time either — otherwise the query token won't
-    # match the stored token.
-    word_norm = (lambda s: s) if fts_table.endswith("_exact") else _normalize_devanagari
+    # not normalise at query time either — same policy as the augmentations.
+    unit_norm = (lambda s: s) if fts_table.endswith("_exact") else _normalize_devanagari
 
-    per_word: list[dict[str, dict[int, dict]]] = []
-    for word in words:
-        # Restrict to the content column for the same reason as
-        # _rewrite_query — augmentation should not pick up title-only
-        # word matches that wouldn't survive the cross-paragraph check
-        # in the first place.
-        word_fts = f'{{content}} : ({word_norm(word)})'
+    if len(units) < 2:
+        return {}, 0, 0
+
+    scoped_units = [f'{{content}} : ({unit_norm(u)})' for u in units]
+
+    # ── Step A: per-unit event-id sets, intersect → records with ALL units.
+    # Exclude meta paragraphs (title row / sannyas-wiki marker) from the
+    # match so a record that contains a unit ONLY in its metadata is not
+    # treated as containing that word — otherwise it would inflate the
+    # qualifying-discourse count while having no displayable hit. This
+    # keeps `common` (and thus total_events) to records with the words in
+    # real discourse text. The offsets query below deliberately does NOT
+    # apply this filter — token offsets need every paragraph.
+    common: Optional[set] = None
+    for su in scoped_units:
         try:
-            wrows = conn.execute(
+            rows = conn.execute(
                 f"""
-                SELECT
-                    f.event_id,
-                    f.sequence_number,
-                    f.paragraph_id,
-                    f.content,
-                    p.role AS role,
-                    highlight({fts_table}, 0, '\x02', '\x03') AS hl
+                SELECT DISTINCT f.event_id
                 FROM {fts_table} f
                 LEFT JOIN events e ON e.id = f.event_id
-                LEFT JOIN paragraphs p ON p.id = f.paragraph_id
                 WHERE {fts_table} MATCH ?
+                {_META_EXCLUDE_SQL}
                 {where_extra}
                 """,
-                ([word_fts] + filter_params),
+                ([su] + filter_params),
             ).fetchall()
         except sqlite3.OperationalError:
-            return {}
-        per_ev: dict[str, dict[int, dict]] = {}
-        for r in wrows:
-            positions, total = _hl_token_positions(r['hl'] or r['content'])
-            if not positions:
-                continue
-            per_ev.setdefault(r['event_id'], {})[r['sequence_number']] = {
-                'pid': r['paragraph_id'],
-                'content': r['content'],
-                'role': r['role'],
-                'positions': positions,
-                'token_count': total,
-            }
-        per_word.append(per_ev)
+            return {}, 0, 0
+        ids = {r[0] for r in rows}
+        common = ids if common is None else (common & ids)
+        if not common:
+            return {}, 0, 0
 
-    if not per_word or any(not m for m in per_word):
-        return {}
+    common = set(common or set())
+    if not common:
+        return {}, 0, 0
+    # The TRUE qualifying-discourse count is the full intersection size —
+    # capture it before the cap so the "N discourses" header stays accurate
+    # for broad queries (the cap only bounds how many we gather/rank/show,
+    # not the reported total). Without this, a query matching >cap events
+    # under-reported its discourse count.
+    true_total_events = len(common)
+    # Sanity cap (see _RECORD_LEVEL_EVENT_CAP). Deterministic order so the
+    # cap is reproducible across runs/engines.
+    if len(common) > _RECORD_LEVEL_EVENT_CAP:
+        common = set(sorted(common)[:_RECORD_LEVEL_EVENT_CAP])
 
-    # Events that contain EVERY query word in at least one paragraph.
-    common_ids: set = set(per_word[0].keys())
-    for m in per_word[1:]:
-        common_ids &= set(m.keys())
+    placeholders = ",".join("?" * len(common))
+    common_list = list(common)
+
+    # ── Step B: gather matched paragraphs for the common events only.
+    union_query = " OR ".join(f"({unit_norm(u)})" for u in units)
+    gather_fts = f'{{content}} : ({union_query})'
+    try:
+        prows = conn.execute(
+            f"""
+            SELECT
+                f.event_id,
+                f.sequence_number,
+                f.paragraph_id,
+                f.content,
+                p.role AS role,
+                highlight({fts_table}, 0, '\x02', '\x03') AS hl
+            FROM {fts_table} f
+            LEFT JOIN events e ON e.id = f.event_id
+            LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+            WHERE {fts_table} MATCH ?
+            AND f.event_id IN ({placeholders})
+            {where_extra}
+            """,
+            ([gather_fts] + common_list + filter_params),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}, 0, 0
+
+    # event_id -> { seq: {pid, content, role, positions, token_count} }
+    # Meta paragraphs (title row / sannyas-wiki marker) are dropped here so
+    # they count toward neither hit_count nor total_hits nor the NEAR
+    # window — an event matched ONLY via a meta paragraph correctly falls
+    # out (its para_map becomes empty → skipped below).
+    matched: dict[str, dict[int, dict]] = {}
+    for r in prows:
+        if _is_meta_paragraph(r['sequence_number'], r['content']):
+            continue
+        positions, total = _hl_token_positions(r['hl'] or r['content'])
+        matched.setdefault(r['event_id'], {})[r['sequence_number']] = {
+            'pid': r['paragraph_id'],
+            'content': r['content'],
+            'role': r['role'],
+            'positions': positions,
+            'token_count': total,
+        }
+
+    # For NEAR we need per-unit, per-paragraph position info to assign
+    # record-level token offsets. Run one scoped query per unit, restricted
+    # to the common events, recording each unit's in-paragraph positions.
+    # event_id -> unit_index -> { seq: positions }
+    per_unit_pos: dict[str, dict[int, dict[int, list[int]]]] = {}
+    if near_dist is not None:
+        for ui, su in enumerate(scoped_units):
+            try:
+                urows = conn.execute(
+                    f"""
+                    SELECT
+                        f.event_id,
+                        f.sequence_number,
+                        highlight({fts_table}, 0, '\x02', '\x03') AS hl,
+                        f.content
+                    FROM {fts_table} f
+                    LEFT JOIN events e ON e.id = f.event_id
+                    WHERE {fts_table} MATCH ?
+                    AND f.event_id IN ({placeholders})
+                    {where_extra}
+                    """,
+                    ([su] + common_list + filter_params),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return {}, 0, 0
+            for r in urows:
+                if _is_meta_paragraph(r['sequence_number'], r['content']):
+                    continue
+                positions, _ = _hl_token_positions(r['hl'] or r['content'])
+                if not positions:
+                    continue
+                (per_unit_pos
+                    .setdefault(r['event_id'], {})
+                    .setdefault(ui, {})[r['sequence_number']]) = positions
+
+    # Record-level token offset for each paragraph = sum of the token counts
+    # of all *earlier* paragraphs (by sequence_number) in the discourse. We
+    # need counts for EVERY paragraph, not just matched ones, so the offsets
+    # line up with the true position of a token in the whole talk. Fetch all
+    # paragraphs of the common events in one query and prefix-sum per event.
+    offsets: dict[str, dict[int, int]] = {}
+    if near_dist is not None:
+        allp = conn.execute(
+            f"SELECT event_id, sequence_number, content FROM paragraphs"
+            f" WHERE event_id IN ({placeholders}) ORDER BY event_id, sequence_number",
+            common_list,
+        ).fetchall()
+        by_ev: dict[str, list[tuple[int, str]]] = {}
+        for r in allp:
+            by_ev.setdefault(r['event_id'], []).append(
+                (r['sequence_number'], r['content'])
+            )
+        for ev_id, plist in by_ev.items():
+            plist.sort(key=lambda t: t[0])
+            running = 0
+            seq_off: dict[int, int] = {}
+            for seq, content in plist:
+                seq_off[seq] = running
+                running += _count_tokens(content)
+            offsets[ev_id] = seq_off
 
     events: dict = {}
-    for ev_id in common_ids:
-        # For every consecutive pair (seq_x, seq_x+1) in this event, check
-        # if those two paragraphs together cover all N query words. If yes,
-        # compute the span across the two paragraphs and keep the best.
-        # The 2-word case is just N=2 of this same algorithm.
-        seqs_per_word = [set(per_word[i][ev_id].keys()) for i in range(len(words))]
-        seqs_with_any_word: set[int] = set().union(*seqs_per_word)
-
-        best_span = near_dist + 1
-        best_pair: tuple[int, int, dict[int, dict]] | None = None  # (seq_x, seq_y, infos_by_word_idx_then_para)
-        for seq_x in seqs_with_any_word:
-            seq_y = seq_x + 1
-            if seq_y not in seqs_with_any_word:
-                continue
-            # Per word: which of the two paragraphs contains it (could be both).
-            coverage: list[list[int]] = []
-            for i in range(len(words)):
-                hits = []
-                if seq_x in seqs_per_word[i]:
-                    hits.append(seq_x)
-                if seq_y in seqs_per_word[i]:
-                    hits.append(seq_y)
-                if not hits:
-                    coverage = []
-                    break
-                coverage.append(hits)
-            if not coverage:
-                continue
-            info_x = {i: per_word[i][ev_id].get(seq_x) for i in range(len(words))}
-            info_y = {i: per_word[i][ev_id].get(seq_y) for i in range(len(words))}
-            token_count_x = next(
-                (v['token_count'] for v in info_x.values() if v), 0
-            )
-            # Span calculation: each word contributes its earliest position
-            # in p_x (if present) or its earliest position in p_y offset by
-            # p_x's token count. Take the min across the resulting picks for
-            # the LEFTMOST end, and similarly the max for the RIGHTMOST. The
-            # tightest span is exactly max - min. The check is conservative:
-            # if this bound <= near_dist, an in-window arrangement exists.
-            mins, maxs = [], []
-            covers_x, covers_y = False, False
-            for i in range(len(words)):
-                positions = []
-                if info_x[i]:
-                    positions.extend(info_x[i]['positions'])
-                    covers_x = True
-                if info_y[i]:
-                    positions.extend(p + token_count_x for p in info_y[i]['positions'])
-                    covers_y = True
-                if not positions:
-                    mins = None
-                    break
-                mins.append(min(positions))
-                maxs.append(max(positions))
-            if mins is None or not (covers_x and covers_y):
-                # If all words sit in one paragraph FTS5's in-row NEAR has
-                # it already; skip to avoid double-counting.
-                continue
-            span = max(maxs) - min(mins)
-            if span <= near_dist and span < best_span:
-                best_span = span
-                best_pair = (seq_x, seq_y, {i: (info_x[i], info_y[i]) for i in range(len(words))})
-
-        if best_pair is None:
+    total_hits = 0
+    for ev_id in common:
+        para_map = matched.get(ev_id)
+        if not para_map:
             continue
-        seq_x, seq_y, _ = best_pair
+
+        if near_dist is not None:
+            # Build record-level positions per unit and run a min-window
+            # sweep. A unit's positions = for each paragraph that contains
+            # it, (paragraph offset + in-paragraph position).
+            unit_pos = per_unit_pos.get(ev_id, {})
+            seq_off = offsets.get(ev_id, {})
+            positions_per_unit: list[list[int]] = []
+            ok = True
+            for ui in range(len(units)):
+                seq_positions = unit_pos.get(ui)
+                if not seq_positions:
+                    ok = False
+                    break
+                rec_positions: list[int] = []
+                for seq, plist in seq_positions.items():
+                    base = seq_off.get(seq, 0)
+                    rec_positions.extend(base + p for p in plist)
+                if not rec_positions:
+                    ok = False
+                    break
+                rec_positions.sort()
+                positions_per_unit.append(rec_positions)
+            if not ok:
+                continue
+            span = _min_token_span(positions_per_unit)
+            if span > near_dist:
+                continue
 
         ev_row = conn.execute(
             "SELECT title, date, location, language, "
@@ -509,28 +705,33 @@ def _augment_near_adjacent_strict(
         if not ev_row:
             continue
 
-        # Build display hits from p_x and p_y (whichever actually had words).
+        # Paragraph-level hit count: number of matched paragraphs in the
+        # event. (Same set whether All-words or Within-N, so Within-N ⊆
+        # All-words by construction.)
+        hit_count = len(para_map)
+        total_hits += hit_count
+
+        # Display hits: up to 3 matched paragraphs, ordered by
+        # sequence_number, with «»-highlight conversion. (para_map is
+        # already meta-filtered at gather time, so every entry is a real
+        # content hit.)
         hits = []
-        for seq in (seq_x, seq_y):
-            info = next(
-                (per_word[i][ev_id].get(seq) for i in range(len(words))
-                 if per_word[i][ev_id].get(seq) is not None),
-                None,
-            )
-            if not info:
-                continue
+        for seq in sorted(para_map.keys()):
+            if len(hits) >= 3:
+                break
+            info = para_map[seq]
             content = _strip_shailendra(info['content'] or '')
-            is_meta = (
-                seq == 0
-                or content.lower().startswith('event page in sannyas')
+            raw_hl = info['hl'] if info.get('hl') else info['content']
+            hl = (
+                _strip_shailendra(raw_hl or '')
+                .replace('\x02', '«')
+                .replace('\x03', '»')
             )
-            if is_meta:
-                continue
             hit: dict = {
                 'paragraph_id': info['pid'],
                 'sequence_number': seq,
                 'content': content,
-                'hl': None,
+                'hl': hl,
             }
             if info.get('role'):
                 hit['role'] = info['role']
@@ -544,113 +745,17 @@ def _augment_near_adjacent_strict(
             'language': ev_row[3],
             'translated_from': ev_row[4],
             'source_short': ev_row[5],
-            'rank': 0.0,
-            'hit_count': len(words),
+            'best_rank': 0.0,
+            'hit_count': hit_count,
             'hits': hits,
-            '_cross_para': True,
+            '_record_level': True,
         }
 
-    return events
-
-
-def _augment_near_cross_paragraph(
-    conn: sqlite3.Connection,
-    words: list[str],
-    para_span: int,
-    where_extra: str,
-    filter_params: list,
-    fts_table: str = "paragraphs_fts",
-) -> dict:
-    if fts_table not in ("paragraphs_fts", "paragraphs_fts_exact"):
-        raise ValueError(f"unsupported fts_table: {fts_table!r}")
-    word_norm = (lambda s: s) if fts_table.endswith("_exact") else _normalize_devanagari
-
-    per_word: list[dict[int, list[int]]] = []
-    for word in words:
-        # Restrict to the content column for the same reason as
-        # _rewrite_query — augmentation should not pick up title-only
-        # word matches that wouldn't survive the cross-paragraph check
-        # in the first place.
-        word_fts = f'{{content}} : ({word_norm(word)})'
-        try:
-            wrows = conn.execute(
-                f"""
-                SELECT f.event_id, f.sequence_number
-                FROM {fts_table} f
-                LEFT JOIN events e ON e.id = f.event_id
-                WHERE {fts_table} MATCH ?
-                {where_extra}
-                """,
-                ([word_fts] + filter_params),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return {}
-        d: dict[int, list[int]] = {}
-        for r in wrows:
-            d.setdefault(r[0], []).append(r[1])
-        per_word.append(d)
-
-    if not per_word:
-        return {}
-    common_ids = set(per_word[0].keys())
-    for d in per_word[1:]:
-        common_ids &= d.keys()
-
-    events: dict = {}
-    for ev_id in common_ids:
-        seqs_per_word = [sorted(d[ev_id]) for d in per_word]
-        span = _min_para_span(seqs_per_word)
-        if span > para_span:
-            continue
-
-        ev_row = conn.execute(
-            "SELECT title, date, location, language, "
-            "translated_from, source_short FROM events WHERE id = ?",
-            (ev_id,),
-        ).fetchone()
-        if not ev_row:
-            continue
-
-        all_seqs: list[int] = []
-        for seqs in seqs_per_word:
-            all_seqs.extend(seqs)
-        all_seqs = sorted(set(all_seqs))[:5]
-
-        hits = []
-        for seq in all_seqs:
-            para = conn.execute(
-                "SELECT id, content FROM paragraphs WHERE event_id = ? AND sequence_number = ?",
-                (ev_id, seq),
-            ).fetchone()
-            if para and len(hits) < 3:
-                content = _strip_shailendra(para[1] or '')
-                is_meta = (
-                    seq == 0
-                    or content.lower().startswith("event page in sannyas")
-                )
-                if not is_meta:
-                    hits.append({
-                        "paragraph_id": para[0],
-                        "sequence_number": seq,
-                        "content": content,
-                        "hl": None,
-                    })
-
-        events[ev_id] = {
-            "event_id": ev_id,
-            "title": ev_row[0],
-            "date": ev_row[1],
-            "location": ev_row[2],
-            "language": ev_row[3],
-            "translated_from": ev_row[4],
-            "source_short": ev_row[5],
-            "rank": 0.0,
-            "hit_count": len(all_seqs),
-            "hits": hits,
-            "_cross_para": True,
-        }
-
-    return events
+    # total_events is the true intersection size (pre-cap); total_hits is
+    # summed over the gathered (possibly capped) events. For queries under
+    # the cap these are exact; above it, the discourse count stays accurate
+    # while total_hits is a lower bound over the capped sample.
+    return events, true_total_events, total_hits
 
 
 def _ensure_paragraph_role_column(conn: sqlite3.Connection) -> None:
@@ -886,8 +991,76 @@ def search(
 
     near_parsed = _parse_near(fts_query)
 
+    # Decide whether this query gets RECORD-LEVEL treatment (OCTP
+    # semantics): a record matches when its units appear anywhere in the
+    # whole discourse (All-words), optionally within N tokens (Within-N).
+    # This activates ONLY for NEAR and for multi-unit All-words queries —
+    # single-word, phrase, and explicit `title:` queries keep the existing
+    # single-MATCH path so we minimise regression to the rest of the suite.
+    if near_parsed:
+        record_units = list(near_parsed[0])
+        record_near_dist = near_parsed[1]
+    else:
+        parsed = _parse_query_units(q, exact=exact)
+        record_units = parsed if (parsed and len(parsed) >= 2) else None
+        record_near_dist = None
+
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
+
+        if record_units is not None:
+            events, total_events, total_hits = _record_level_search(
+                conn,
+                record_units,
+                record_near_dist,
+                where_extra,
+                filter_params,
+                fts_table=fts_table,
+            )
+
+            for ev in events.values():
+                hit_bonus = math.log1p(ev.get("hit_count", 1))
+                best = ev.get("best_rank", 0.0)
+                # Record-level events have best_rank 0; rank them by
+                # hit_count (more matched paragraphs → earlier) so the
+                # display order is stable and meaningful.
+                ev["rank"] = best - hit_bonus
+
+            # Tie-break on event_id so the order — and therefore which
+            # events survive the `[:limit]` slice when many share a rank —
+            # is deterministic and identical to the TS engine (which sorts
+            # the same way). Without this, Python set order vs JS Set order
+            # could return different subsets for tied results past `limit`.
+            out = sorted(
+                events.values(), key=lambda e: (e["rank"], e["event_id"])
+            )[:limit]
+            if sort == 'title':
+                out.sort(key=lambda e: ((e["title"] or "").lower(), e["event_id"]))
+            for ev in out:
+                ev.pop("best_rank", None)
+                ev.pop("_record_level", None)
+
+            return {
+                "query": q,
+                "total": total_events,
+                "total_hits": total_hits,
+                "events": out,
+            }
+
+        # ── Phrase / single-word / title: — the existing single-MATCH path.
+        # For a single quoted phrase we scope the COUNT/display to the
+        # content column so a phrase that happens to equal a discourse
+        # TITLE doesn't inflate the hit count to one-per-paragraph (the
+        # title is on every paragraph's FTS row). A separate title
+        # membership check still RETURNS such a discourse (with a small
+        # hit_count) so series can be found by their name (#3).
+        is_phrase_only = bool(_PHRASE_ONLY_RE.match(fts_query))
+        phrase_inner = None
+        if is_phrase_only:
+            phrase_inner = fts_query.strip()
+            count_query = f'{{content}} : ({phrase_inner})'
+        else:
+            count_query = fts_query
 
         try:
             rows = conn.execute(
@@ -914,7 +1087,7 @@ def search(
                 ORDER BY rank
                 LIMIT ?
                 """,
-                ([fts_query] + filter_params + [limit * 10]),
+                ([count_query] + filter_params + [limit * 10]),
             ).fetchall()
         except sqlite3.OperationalError as ex:
             raise HTTPException(status_code=400, detail="Invalid search syntax.")
@@ -955,63 +1128,68 @@ def search(
                     hit["role"] = r["role"]
                 ev["hits"].append(hit)
 
-        augmented_cross_para = False
-        if near_parsed:
-            near_words, near_dist = near_parsed
-            # Strict adjacent-paragraph augmentation for any N-word NEAR.
-            # Catches matches where the query terms straddle a paragraph
-            # break but stay within `near_dist` actual tokens of each
-            # other — something FTS5's row-bound NEAR cannot find on its
-            # own. Generalised 2026-05-31 (Sugit report: 3-word NEAR at
-            # narrow distance missed cross-paragraph hits).
-            if len(near_words) >= 2:
-                adj = _augment_near_adjacent_strict(
-                    conn, near_words, near_dist, where_extra, filter_params,
-                    fts_table=fts_table,
-                )
-                for ev_id, cev in adj.items():
-                    if ev_id not in events:
-                        events[ev_id] = cev
-                        augmented_cross_para = True
-            if near_dist >= 100:
-                para_span = max(1, near_dist // 30)
-                cross = _augment_near_cross_paragraph(
-                    conn, near_words, para_span, where_extra, filter_params,
-                    fts_table=fts_table,
-                )
-                for ev_id, cev in cross.items():
-                    if ev_id not in events:
-                        events[ev_id] = cev
-                        augmented_cross_para = True
-
-        # Count strategy:
-        #   - Whenever cross-paragraph augmentation added events that FTS5's
-        #     in-row NEAR didn't, derive counts from the merged events dict so
-        #     the total reflects what the user actually sees.
-        #   - Otherwise (all-words / phrase / pure in-row NEAR), the unlimited
-        #     COUNT(*) over the FTS index stays accurate even when the main
-        #     SELECT is capped by LIMIT.
-        near_words, near_dist = near_parsed if near_parsed else (None, 0)
-        if augmented_cross_para:
+        # The unlimited COUNT(*) over the content-scoped query stays
+        # accurate even when the main SELECT was capped by LIMIT. Using
+        # `count_query` (content-scoped for phrases) means a phrase that
+        # equals a discourse TITLE no longer inflates the count to one hit
+        # per paragraph — only the genuine content matches are counted (#3).
+        try:
+            count_row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+                FROM {fts_table} f
+                LEFT JOIN events e ON e.id = f.event_id
+                WHERE {fts_table} MATCH ?
+                {where_extra}
+                """,
+                ([count_query] + filter_params),
+            ).fetchone()
+            total_events = count_row["ev_count"]
+            total_hits = count_row["hit_count"]
+        except sqlite3.OperationalError:
             total_events = len(events)
             total_hits = sum(e["hit_count"] for e in events.values())
-        else:
+
+        # #3 — title membership for a single quoted phrase. A phrase that
+        # appears only in a discourse's TITLE (the Satyam Shivam series
+        # case) must still be FOUND, but without counting one hit per
+        # paragraph. We look the phrase up against the title_search column
+        # and add any not-yet-present discourse with a hit_count of 1.
+        if is_phrase_only and phrase_inner is not None:
+            title_query = f'{{title_search}} : ({phrase_inner})'
             try:
-                count_row = conn.execute(
+                trows = conn.execute(
                     f"""
-                    SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+                    SELECT DISTINCT f.event_id, f.title,
+                        e.date, e.location, e.language,
+                        e.translated_from AS translated_from,
+                        e.source_short AS source_short
                     FROM {fts_table} f
                     LEFT JOIN events e ON e.id = f.event_id
                     WHERE {fts_table} MATCH ?
                     {where_extra}
                     """,
-                    ([fts_query] + filter_params),
-                ).fetchone()
-                total_events = count_row["ev_count"]
-                total_hits = count_row["hit_count"]
+                    ([title_query] + filter_params),
+                ).fetchall()
             except sqlite3.OperationalError:
-                total_events = len(events)
-                total_hits = sum(e["hit_count"] for e in events.values())
+                trows = []
+            for r in trows:
+                ev_id = r["event_id"]
+                if ev_id in events:
+                    continue
+                events[ev_id] = {
+                    "event_id": ev_id,
+                    "title": r["title"],
+                    "date": r["date"],
+                    "location": r["location"],
+                    "language": r["language"],
+                    "translated_from": r["translated_from"],
+                    "source_short": r["source_short"],
+                    "best_rank": 0.0,
+                    "hit_count": 1,
+                    "hits": [],
+                }
+                total_events += 1
 
     for ev in events.values():
         hit_bonus = math.log1p(ev.get("hit_count", 1))
@@ -1024,7 +1202,6 @@ def search(
 
     for ev in out:
         ev.pop("best_rank", None)
-        ev.pop("_cross_para", None)
 
     return {
         "query": q,

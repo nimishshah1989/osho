@@ -11,7 +11,12 @@
  */
 import { normalizeDevanagari } from './devanagari';
 import { hlTokenPositions, markersToGuillemets, HL_CLOSE, HL_OPEN } from './highlight';
-import { parseNear, rewriteQuery, scopeWordToContent } from './queryRewrite';
+import {
+  isPhraseOnly,
+  parseNear,
+  parseQueryUnits,
+  rewriteQuery,
+} from './queryRewrite';
 import type {
   Database,
   DiscourseParagraph,
@@ -119,6 +124,64 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
 
   const nearParsed = parseNear(ftsQuery);
 
+  // Decide whether this query gets RECORD-LEVEL treatment (OCTP
+  // semantics): a record matches when its units appear anywhere in the
+  // whole discourse (All-words), optionally within N tokens (Within-N).
+  // This activates ONLY for NEAR and for multi-unit All-words queries —
+  // single-word, phrase and explicit `title:` queries keep the existing
+  // single-MATCH path. Mirrors the same decision in cloud_api.py.
+  let recordUnits: string[] | null;
+  let recordNearDist: number | null;
+  if (nearParsed) {
+    recordUnits = nearParsed.words;
+    recordNearDist = nearParsed.distance;
+  } else {
+    const parsed = parseQueryUnits(q, exact);
+    recordUnits = parsed && parsed.length >= 2 ? parsed : null;
+    recordNearDist = null;
+  }
+
+  if (recordUnits !== null) {
+    const { events: recEvents, totalEvents, totalHits } = recordLevelSearch(
+      db, recordUnits, recordNearDist, whereExtra, filterParams, ftsTable,
+    );
+
+    for (const ev of recEvents.values()) {
+      const hitBonus = Math.log1p(ev.hit_count || 1);
+      // Record-level events carry best_rank 0; rank by hit_count (more
+      // matched paragraphs → earlier) so the order is stable.
+      ev.best_rank = ev.best_rank - hitBonus;
+    }
+    // Tie-break on event_id so which events survive the `slice(0, limit)`
+    // when many share a rank is deterministic and identical to the Python
+    // engine (which sorts (rank, event_id) the same way).
+    let out = [...recEvents.values()]
+      .sort((a, b) => (a.best_rank - b.best_rank) || (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0))
+      .slice(0, limit);
+    if (sort === 'title') {
+      out = out.sort((a, b) => {
+        const t = (a.title ?? '').toLowerCase().localeCompare((b.title ?? '').toLowerCase());
+        return t || (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
+      });
+    }
+    return {
+      query: q,
+      total: totalEvents,
+      total_hits: totalHits,
+      events: out.map(toSearchEvent),
+    };
+  }
+
+  // ── Phrase / single-word / title: — the existing single-MATCH path.
+  // For a single quoted phrase we scope the COUNT/display to the content
+  // column so a phrase that equals a discourse TITLE doesn't inflate the
+  // hit count to one-per-paragraph (the title rides on every paragraph's
+  // FTS row). A separate title-membership check still RETURNS such a
+  // discourse with a small hit_count so series can be found by name (#3).
+  const phraseOnly = isPhraseOnly(ftsQuery);
+  const phraseInner = phraseOnly ? ftsQuery.trim() : null;
+  const countQuery = phraseInner ? `{content} : (${phraseInner})` : ftsQuery;
+
   let rows: FtsRow[];
   try {
     rows = db.all<FtsRow>(
@@ -143,7 +206,7 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
        ${whereExtra}
        ORDER BY rank
        LIMIT ?`,
-      [HL_OPEN, HL_CLOSE, ftsQuery, ...filterParams, limit * 10],
+      [HL_OPEN, HL_CLOSE, countQuery, ...filterParams, limit * 10],
     );
   } catch (e) {
     throw new SearchError('Invalid search syntax.', 400);
@@ -183,58 +246,71 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
     }
   }
 
-  // Cross-paragraph augmentation for NEAR queries.
-  let augmentedCrossPara = false;
-  if (nearParsed) {
-    if (nearParsed.words.length >= 2) {
-      const adj = augmentNearAdjacentStrict(
-        db, nearParsed.words, nearParsed.distance, whereExtra, filterParams, ftsTable,
-      );
-      for (const [evId, cev] of adj) {
-        if (!events.has(evId)) {
-          events.set(evId, cev);
-          augmentedCrossPara = true;
-        }
-      }
-    }
-    if (nearParsed.distance >= 100) {
-      const paraSpan = Math.max(1, Math.floor(nearParsed.distance / 30));
-      const cross = augmentNearCrossParagraph(
-        db, nearParsed.words, paraSpan, whereExtra, filterParams, ftsTable,
-      );
-      for (const [evId, cev] of cross) {
-        if (!events.has(evId)) {
-          events.set(evId, cev);
-          augmentedCrossPara = true;
-        }
-      }
-    }
-  }
-
-  // Count strategy: when cross-paragraph augmentation produced new
-  // events, sum from the merged dict; otherwise, derive from an
-  // unlimited COUNT(*) so the total stays accurate even when the
-  // main SELECT was capped by LIMIT.
+  // Unlimited COUNT(*) over the content-scoped query stays accurate even
+  // when the main SELECT was capped by LIMIT, and (being content-scoped
+  // for phrases) does not inflate a title-phrase to one-per-paragraph.
   let totalEvents: number;
   let totalHits: number;
-  if (augmentedCrossPara) {
+  try {
+    const row = db.get<{ ev_count: number; hit_count: number }>(
+      `SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+       FROM ${ftsTable} f
+       LEFT JOIN events e ON e.id = f.event_id
+       WHERE ${ftsTable} MATCH ?
+       ${whereExtra}`,
+      [countQuery, ...filterParams],
+    );
+    totalEvents = row?.ev_count ?? events.size;
+    totalHits = row?.hit_count ?? [...events.values()].reduce((s, e) => s + e.hit_count, 0);
+  } catch {
     totalEvents = events.size;
     totalHits = [...events.values()].reduce((s, e) => s + e.hit_count, 0);
-  } else {
+  }
+
+  // #3 — title membership for a single quoted phrase. A phrase that only
+  // appears in a discourse's TITLE (the Satyam Shivam series case) must
+  // still be FOUND, with a small hit_count, not one-per-paragraph.
+  if (phraseInner) {
+    const titleQuery = `{title_search} : (${phraseInner})`;
+    let trows: Array<{
+      event_id: string;
+      title: string | null;
+      date: string | null;
+      location: string | null;
+      language: string | null;
+      translated_from: string | null;
+      source_short: string | null;
+    }>;
     try {
-      const row = db.get<{ ev_count: number; hit_count: number }>(
-        `SELECT COUNT(DISTINCT f.event_id) AS ev_count, COUNT(*) AS hit_count
+      trows = db.all(
+        `SELECT DISTINCT f.event_id, f.title,
+            e.date, e.location, e.language,
+            e.translated_from AS translated_from,
+            e.source_short AS source_short
          FROM ${ftsTable} f
          LEFT JOIN events e ON e.id = f.event_id
          WHERE ${ftsTable} MATCH ?
          ${whereExtra}`,
-        [ftsQuery, ...filterParams],
+        [titleQuery, ...filterParams],
       );
-      totalEvents = row?.ev_count ?? events.size;
-      totalHits = row?.hit_count ?? [...events.values()].reduce((s, e) => s + e.hit_count, 0);
     } catch {
-      totalEvents = events.size;
-      totalHits = [...events.values()].reduce((s, e) => s + e.hit_count, 0);
+      trows = [];
+    }
+    for (const r of trows) {
+      if (events.has(r.event_id)) continue;
+      events.set(r.event_id, {
+        event_id: r.event_id,
+        title: r.title,
+        date: r.date,
+        location: r.location,
+        language: r.language,
+        translated_from: r.translated_from,
+        source_short: r.source_short,
+        best_rank: 0.0,
+        hit_count: 1,
+        hits: [],
+      });
+      totalEvents += 1;
     }
   }
 
@@ -248,7 +324,17 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
     out = out.sort((a, b) => (a.title ?? '').toLowerCase().localeCompare((b.title ?? '').toLowerCase()));
   }
 
-  const events_out: SearchEvent[] = out.map((ev) => ({
+  return {
+    query: q,
+    total: totalEvents,
+    total_hits: totalHits,
+    events: out.map(toSearchEvent),
+  };
+}
+
+
+function toSearchEvent(ev: MutableEvent): SearchEvent {
+  return {
     event_id: ev.event_id,
     title: ev.title,
     date: ev.date,
@@ -259,163 +345,271 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
     rank: ev.best_rank,
     hit_count: ev.hit_count,
     hits: ev.hits,
-  }));
-
-  return {
-    query: q,
-    total: totalEvents,
-    total_hits: totalHits,
-    events: events_out,
   };
 }
 
 
-// ─── Cross-paragraph NEAR augmentation ───────────────────────────────────
+// ─── Record-level All-words / Within-N (OCTP semantics) ──────────────────
 
-interface MutableEvent {
-  event_id: string;
-  title: string | null;
-  date: string | null;
-  location: string | null;
-  language: string | null;
-  translated_from: string | null;
-  source_short: string | null;
-  best_rank: number;
-  hit_count: number;
-  hits: SearchHit[];
+/** Token count for a paragraph using the same tokenisation as
+ *  `hlTokenPositions` (so record-level offsets line up with in-paragraph
+ *  positions). Mirror of `_count_tokens` in cloud_api.py. */
+function countTokens(text: string): number {
+  return hlTokenPositions(text || '')[1];
 }
 
 
-interface WordParaInfo {
+/** Smallest window (max-min) containing one position from every unit's
+ *  sorted list — a k-way merge over the per-unit record-level token
+ *  position lists. Mirror of `_min_token_span` in cloud_api.py. */
+function minTokenSpan(positionsPerUnit: number[][]): number {
+  if (positionsPerUnit.some((s) => s.length === 0)) return Number.MAX_SAFE_INTEGER;
+  const idx = positionsPerUnit.map(() => 0);
+  let maxVal = Math.max(...positionsPerUnit.map((s) => s[0]));
+  let best = Number.MAX_SAFE_INTEGER;
+  while (true) {
+    let minListIdx = 0;
+    let minVal = positionsPerUnit[0][idx[0]];
+    for (let i = 1; i < positionsPerUnit.length; i++) {
+      const v = positionsPerUnit[i][idx[i]];
+      if (v < minVal) {
+        minVal = v;
+        minListIdx = i;
+      }
+    }
+    best = Math.min(best, maxVal - minVal);
+    if (best === 0) break;
+    idx[minListIdx] += 1;
+    if (idx[minListIdx] >= positionsPerUnit[minListIdx].length) break;
+    const newVal = positionsPerUnit[minListIdx][idx[minListIdx]];
+    if (newVal > maxVal) maxVal = newVal;
+  }
+  return best;
+}
+
+
+// Safety cap on how many common events we do the paragraph-gather +
+// token-offset work for. Mirror of `_RECORD_LEVEL_EVENT_CAP`.
+const RECORD_LEVEL_EVENT_CAP = 2000;
+
+// SQL fragment mirroring isMetaParagraph for use inside FTS MATCH queries —
+// drop the title row (seq 0) and the sannyas-wiki marker so they never
+// qualify a record or count as a hit. ASCII-case-insensitive LIKE covers
+// the English marker. Kept in sync with _META_EXCLUDE_SQL in cloud_api.py.
+// Must NOT be applied to the all-paragraphs offsets query.
+const META_EXCLUDE_SQL =
+  "AND f.sequence_number <> 0 AND f.content NOT LIKE 'event page in sannyas%'";
+
+
+interface RecordMatchedPara {
   pid: number;
   content: string;
   role: string | null;
-  positions: number[];
-  token_count: number;
+  hl: string;
 }
 
 
-function augmentNearAdjacentStrict(
+/**
+ * Record-level All-words / Within-N matching — TS mirror of
+ * `_record_level_search` in `scripts/cloud_api.py`. See that docstring
+ * for the full semantics. Returns the merged events map plus totals,
+ * where total_hits is the sum over qualifying events of their matched-
+ * paragraph count (guaranteeing Within-N ⊆ All-words).
+ */
+function recordLevelSearch(
   db: Database,
-  words: string[],
-  nearDist: number,
+  units: string[],
+  nearDist: number | null,
   whereExtra: string,
   filterParams: unknown[],
   ftsTable: string,
-): Map<string, MutableEvent> {
-  if (words.length < 2) return new Map();
+): { events: Map<string, MutableEvent>; totalEvents: number; totalHits: number } {
+  const empty = { events: new Map<string, MutableEvent>(), totalEvents: 0, totalHits: 0 };
+  if (units.length < 2) return empty;
   const useNormalised = !ftsTable.endsWith('_exact');
-  const wordNorm = (s: string) => (useNormalised ? normalizeDevanagari(s) : s);
+  const unitNorm = (s: string) => (useNormalised ? normalizeDevanagari(s) : s);
+  const scopedUnits = units.map((u) => `{content} : (${unitNorm(u)})`);
 
-  // per-word: event_id -> seq -> info
-  const perWord: Array<Map<string, Map<number, WordParaInfo>>> = [];
-  for (const word of words) {
-    const wordFts = scopeWordToContent(wordNorm(word));
-    let wrows: Array<{
-      event_id: string;
-      sequence_number: number;
-      paragraph_id: number;
-      content: string;
-      role: string | null;
-      hl: string;
-    }>;
+  // ── Step A: per-unit event-id sets → intersect to records with ALL units.
+  // Exclude meta paragraphs (title row / sannyas-wiki marker) so a record
+  // that contains a unit ONLY in its metadata doesn't qualify — otherwise
+  // it inflates total_events with no displayable hit. Mirrors
+  // _META_EXCLUDE_SQL in cloud_api.py. The offsets query below does NOT
+  // apply this (token offsets need every paragraph).
+  let common: Set<string> | null = null;
+  for (const su of scopedUnits) {
+    let rows: Array<{ event_id: string }>;
     try {
-      wrows = db.all(
-        `SELECT
-           f.event_id,
-           f.sequence_number,
-           f.paragraph_id,
-           f.content,
-           p.role AS role,
-           highlight(${ftsTable}, 0, ?, ?) AS hl
+      rows = db.all(
+        `SELECT DISTINCT f.event_id
          FROM ${ftsTable} f
          LEFT JOIN events e ON e.id = f.event_id
-         LEFT JOIN paragraphs p ON p.id = f.paragraph_id
          WHERE ${ftsTable} MATCH ?
+         ${META_EXCLUDE_SQL}
          ${whereExtra}`,
-        [HL_OPEN, HL_CLOSE, wordFts, ...filterParams],
+        [su, ...filterParams],
       );
     } catch {
-      return new Map();
+      return empty;
     }
-    const perEv = new Map<string, Map<number, WordParaInfo>>();
-    for (const r of wrows) {
-      const [positions, total] = hlTokenPositions(r.hl || r.content);
-      if (!positions.length) continue;
-      let seqMap = perEv.get(r.event_id);
-      if (!seqMap) {
-        seqMap = new Map();
-        perEv.set(r.event_id, seqMap);
-      }
-      seqMap.set(r.sequence_number, {
-        pid: r.paragraph_id,
-        content: r.content,
-        role: r.role,
-        positions,
-        token_count: total,
-      });
+    const ids = new Set(rows.map((r) => r.event_id));
+    if (common === null) common = ids;
+    else {
+      const next = new Set<string>();
+      for (const id of common) if (ids.has(id)) next.add(id);
+      common = next;
     }
-    perWord.push(perEv);
+    if (common.size === 0) return empty;
+  }
+  if (!common || common.size === 0) return empty;
+
+  // True qualifying-discourse count is the full intersection size —
+  // capture before the cap so the "N discourses" header stays accurate
+  // for broad queries (the cap only bounds gather/rank/display). Mirrors
+  // cloud_api.py.
+  const trueTotalEvents = common.size;
+  let commonList = [...common].sort();
+  if (commonList.length > RECORD_LEVEL_EVENT_CAP) {
+    commonList = commonList.slice(0, RECORD_LEVEL_EVENT_CAP);
+    common = new Set(commonList);
+  }
+  const placeholders = commonList.map(() => '?').join(',');
+
+  // ── Step B: gather matched paragraphs for the common events only.
+  const unionQuery = units.map((u) => `(${unitNorm(u)})`).join(' OR ');
+  const gatherFts = `{content} : (${unionQuery})`;
+  let prows: Array<{
+    event_id: string;
+    sequence_number: number;
+    paragraph_id: number;
+    content: string;
+    role: string | null;
+    hl: string;
+  }>;
+  try {
+    prows = db.all(
+      `SELECT
+         f.event_id,
+         f.sequence_number,
+         f.paragraph_id,
+         f.content,
+         p.role AS role,
+         highlight(${ftsTable}, 0, ?, ?) AS hl
+       FROM ${ftsTable} f
+       LEFT JOIN events e ON e.id = f.event_id
+       LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+       WHERE ${ftsTable} MATCH ?
+       AND f.event_id IN (${placeholders})
+       ${whereExtra}`,
+      [HL_OPEN, HL_CLOSE, gatherFts, ...commonList, ...filterParams],
+    );
+  } catch {
+    return empty;
   }
 
-  if (perWord.some((m) => m.size === 0)) return new Map();
+  // event_id -> seq -> matched paragraph info. Meta paragraphs (title row
+  // / sannyas-wiki marker) are dropped here so they count toward neither
+  // hit_count nor total_hits nor the NEAR window — mirrors cloud_api.py
+  // (the 2026-05-31 record-level bug counted them in the totals while
+  // hiding them from the snippets).
+  const matched = new Map<string, Map<number, RecordMatchedPara>>();
+  for (const r of prows) {
+    if (isMetaParagraph(r.sequence_number, r.content)) continue;
+    let m = matched.get(r.event_id);
+    if (!m) { m = new Map(); matched.set(r.event_id, m); }
+    m.set(r.sequence_number, {
+      pid: r.paragraph_id,
+      content: r.content,
+      role: r.role,
+      hl: r.hl,
+    });
+  }
 
-  // Events that contain every query word in at least one paragraph.
-  let commonIds = new Set<string>(perWord[0].keys());
-  for (let i = 1; i < perWord.length; i++) {
-    const next = new Set<string>();
-    for (const id of commonIds) if (perWord[i].has(id)) next.add(id);
-    commonIds = next;
+  // For NEAR: per-unit in-paragraph positions, restricted to common events.
+  // event_id -> unit_index -> seq -> positions
+  const perUnitPos = new Map<string, Map<number, Map<number, number[]>>>();
+  const offsets = new Map<string, Map<number, number>>();
+  if (nearDist !== null) {
+    for (let ui = 0; ui < scopedUnits.length; ui++) {
+      let urows: Array<{ event_id: string; sequence_number: number; hl: string; content: string }>;
+      try {
+        urows = db.all(
+          `SELECT f.event_id, f.sequence_number,
+             highlight(${ftsTable}, 0, ?, ?) AS hl, f.content
+           FROM ${ftsTable} f
+           LEFT JOIN events e ON e.id = f.event_id
+           WHERE ${ftsTable} MATCH ?
+           AND f.event_id IN (${placeholders})
+           ${whereExtra}`,
+          [HL_OPEN, HL_CLOSE, scopedUnits[ui], ...commonList, ...filterParams],
+        );
+      } catch {
+        return empty;
+      }
+      for (const r of urows) {
+        if (isMetaParagraph(r.sequence_number, r.content)) continue;
+        const [positions] = hlTokenPositions(r.hl || r.content);
+        if (!positions.length) continue;
+        let byUnit = perUnitPos.get(r.event_id);
+        if (!byUnit) { byUnit = new Map(); perUnitPos.set(r.event_id, byUnit); }
+        let bySeq = byUnit.get(ui);
+        if (!bySeq) { bySeq = new Map(); byUnit.set(ui, bySeq); }
+        bySeq.set(r.sequence_number, positions);
+      }
+    }
+
+    // Record-level token offset of each paragraph = sum of token counts of
+    // all earlier paragraphs (by sequence_number) in the discourse. Need
+    // counts for EVERY paragraph, not just matched ones.
+    const allp = db.all<{ event_id: string; sequence_number: number; content: string }>(
+      `SELECT event_id, sequence_number, content FROM paragraphs
+       WHERE event_id IN (${placeholders}) ORDER BY event_id, sequence_number`,
+      commonList,
+    );
+    const byEv = new Map<string, Array<[number, string]>>();
+    for (const r of allp) {
+      let arr = byEv.get(r.event_id);
+      if (!arr) { arr = []; byEv.set(r.event_id, arr); }
+      arr.push([r.sequence_number, r.content]);
+    }
+    for (const [evId, plist] of byEv) {
+      plist.sort((a, b) => a[0] - b[0]);
+      let running = 0;
+      const seqOff = new Map<number, number>();
+      for (const [seq, content] of plist) {
+        seqOff.set(seq, running);
+        running += countTokens(content);
+      }
+      offsets.set(evId, seqOff);
+    }
   }
 
   const events = new Map<string, MutableEvent>();
-  for (const evId of commonIds) {
-    // For each consecutive pair (seq_x, seq_x+1) where the union of word
-    // matches covers all N query words, compute the conservative span
-    // across the two paragraphs and keep the tightest match. The 2-word
-    // case is just N=2 of this same algorithm (Sugit 2026-05-31).
-    const seqsPerWord = perWord.map((m) => new Set(m.get(evId)?.keys() ?? []));
-    const seqsAny = new Set<number>();
-    for (const s of seqsPerWord) for (const v of s) seqsAny.add(v);
+  let totalHits = 0;
+  for (const evId of common) {
+    const paraMap = matched.get(evId);
+    if (!paraMap || paraMap.size === 0) continue;
 
-    let bestSpan = nearDist + 1;
-    let bestPair: { sx: number; sy: number } | null = null;
-    for (const sx of seqsAny) {
-      const sy = sx + 1;
-      if (!seqsAny.has(sy)) continue;
-      const infoX: Array<WordParaInfo | undefined> = perWord.map(
-        (m) => m.get(evId)?.get(sx),
-      );
-      const infoY: Array<WordParaInfo | undefined> = perWord.map(
-        (m) => m.get(evId)?.get(sy),
-      );
-      const tokenCountX = (infoX.find((v) => v) || infoY.find((v) => v))?.token_count ?? 0;
-      let coversX = false;
-      let coversY = false;
-      let minPos = Infinity;
-      let maxPos = -Infinity;
-      let coveredAll = true;
-      for (let i = 0; i < words.length; i++) {
-        const positions: number[] = [];
-        if (infoX[i]) { positions.push(...infoX[i]!.positions); coversX = true; }
-        if (infoY[i]) {
-          positions.push(...infoY[i]!.positions.map((p) => p + tokenCountX));
-          coversY = true;
+    if (nearDist !== null) {
+      const unitPos = perUnitPos.get(evId);
+      const seqOff = offsets.get(evId) ?? new Map<number, number>();
+      const positionsPerUnit: number[][] = [];
+      let ok = true;
+      for (let ui = 0; ui < units.length; ui++) {
+        const bySeq = unitPos?.get(ui);
+        if (!bySeq || bySeq.size === 0) { ok = false; break; }
+        const recPositions: number[] = [];
+        for (const [seq, plist] of bySeq) {
+          const base = seqOff.get(seq) ?? 0;
+          for (const p of plist) recPositions.push(base + p);
         }
-        if (!positions.length) { coveredAll = false; break; }
-        minPos = Math.min(minPos, ...positions);
-        maxPos = Math.max(maxPos, ...positions);
+        if (!recPositions.length) { ok = false; break; }
+        recPositions.sort((a, b) => a - b);
+        positionsPerUnit.push(recPositions);
       }
-      // Skip when all words actually sit in one paragraph — FTS5's in-row
-      // NEAR handles that case already; counting it here double-counts.
-      if (!coveredAll || !(coversX && coversY)) continue;
-      const span = maxPos - minPos;
-      if (span <= nearDist && span < bestSpan) {
-        bestSpan = span;
-        bestPair = { sx, sy };
-      }
+      if (!ok) continue;
+      if (minTokenSpan(positionsPerUnit) > nearDist) continue;
     }
-    if (!bestPair) continue;
 
     const evRow = db.get<{
       title: string | null;
@@ -431,22 +625,22 @@ function augmentNearAdjacentStrict(
     );
     if (!evRow) continue;
 
-    // Build display hits: one entry per paragraph in the matched pair
-    // that actually contributed a word.
+    const hitCount = paraMap.size;
+    totalHits += hitCount;
+
     const hits: SearchHit[] = [];
-    for (const seq of [bestPair.sx, bestPair.sy]) {
-      let info: WordParaInfo | undefined;
-      for (let i = 0; i < words.length; i++) {
-        const v = perWord[i].get(evId)?.get(seq);
-        if (v) { info = v; break; }
-      }
-      if (!info) continue;
+    for (const seq of [...paraMap.keys()].sort((a, b) => a - b)) {
+      if (hits.length >= 3) break;
+      const info = paraMap.get(seq)!;
       const content = stripShailendra(info.content || '');
-      if (isMetaParagraph(seq, content)) continue;
+      // paraMap is already meta-filtered at gather time.
+      const rawHl = info.hl || info.content;
+      const hl = markersToGuillemets(stripShailendra(rawHl || ''));
       const hit: SearchHit = {
         paragraph_id: info.pid,
         sequence_number: seq,
         content,
+        hl,
       };
       if (info.role) hit.role = info.role;
       hits.push(hit);
@@ -461,150 +655,32 @@ function augmentNearAdjacentStrict(
       translated_from: evRow.translated_from,
       source_short: evRow.source_short,
       best_rank: 0.0,
-      hit_count: words.length,
+      hit_count: hitCount,
       hits,
     });
   }
 
-  return events;
+  // totalEvents is the true intersection size (pre-cap); totalHits is
+  // summed over the gathered (possibly capped) events. Exact below the
+  // cap; above it the discourse count stays accurate while totalHits is a
+  // lower bound. Mirrors cloud_api.py.
+  return { events, totalEvents: trueTotalEvents, totalHits };
 }
 
 
-function augmentNearCrossParagraph(
-  db: Database,
-  words: string[],
-  paraSpan: number,
-  whereExtra: string,
-  filterParams: unknown[],
-  ftsTable: string,
-): Map<string, MutableEvent> {
-  const useNormalised = !ftsTable.endsWith('_exact');
-  const wordNorm = (s: string) => (useNormalised ? normalizeDevanagari(s) : s);
+// ─── Internal event accumulator ──────────────────────────────────────────
 
-  // per-word: event_id -> sorted list of sequence_numbers
-  const perWord: Array<Map<string, number[]>> = [];
-  for (const word of words) {
-    const wordFts = scopeWordToContent(wordNorm(word));
-    let wrows: Array<{ event_id: string; sequence_number: number }>;
-    try {
-      wrows = db.all(
-        `SELECT f.event_id, f.sequence_number
-         FROM ${ftsTable} f
-         LEFT JOIN events e ON e.id = f.event_id
-         WHERE ${ftsTable} MATCH ?
-         ${whereExtra}`,
-        [wordFts, ...filterParams],
-      );
-    } catch {
-      return new Map();
-    }
-    const m = new Map<string, number[]>();
-    for (const r of wrows) {
-      const arr = m.get(r.event_id);
-      if (arr) arr.push(r.sequence_number);
-      else m.set(r.event_id, [r.sequence_number]);
-    }
-    for (const seqs of m.values()) seqs.sort((a, b) => a - b);
-    perWord.push(m);
-  }
-
-  if (!perWord.length) return new Map();
-
-  // Intersect event ids
-  let commonIds = new Set(perWord[0].keys());
-  for (const m of perWord.slice(1)) {
-    const next = new Set<string>();
-    for (const id of commonIds) if (m.has(id)) next.add(id);
-    commonIds = next;
-  }
-
-  const events = new Map<string, MutableEvent>();
-  for (const evId of commonIds) {
-    const seqsPerWord = perWord.map((m) => m.get(evId)!);
-    const span = minParaSpan(seqsPerWord);
-    if (span > paraSpan) continue;
-
-    const evRow = db.get<{
-      title: string | null;
-      date: string | null;
-      location: string | null;
-      language: string | null;
-      translated_from: string | null;
-      source_short: string | null;
-    }>(
-      'SELECT title, date, location, language, translated_from, source_short'
-      + ' FROM events WHERE id = ?',
-      [evId],
-    );
-    if (!evRow) continue;
-
-    const allSeqs: number[] = [];
-    for (const seqs of seqsPerWord) allSeqs.push(...seqs);
-    const uniqueSeqs = [...new Set(allSeqs)].sort((a, b) => a - b).slice(0, 5);
-
-    const hits: SearchHit[] = [];
-    for (const seq of uniqueSeqs) {
-      if (hits.length >= 3) break;
-      const para = db.get<{ id: number; content: string }>(
-        'SELECT id, content FROM paragraphs WHERE event_id = ? AND sequence_number = ?',
-        [evId, seq],
-      );
-      if (!para) continue;
-      const content = stripShailendra(para.content || '');
-      if (isMetaParagraph(seq, content)) continue;
-      hits.push({
-        paragraph_id: para.id,
-        sequence_number: seq,
-        content,
-      });
-    }
-
-    events.set(evId, {
-      event_id: evId,
-      title: evRow.title,
-      date: evRow.date,
-      location: evRow.location,
-      language: evRow.language,
-      translated_from: evRow.translated_from,
-      source_short: evRow.source_short,
-      best_rank: 0.0,
-      hit_count: uniqueSeqs.length,
-      hits,
-    });
-  }
-
-  return events;
-}
-
-
-/** Minimum window-span across one chosen index from each list — same
- *  algorithm as `_min_para_span` in cloud_api.py. Used for the loose
- *  paragraph-distance heuristic that fires only at NEAR(...) ≥ 100. */
-function minParaSpan(seqsPerWord: number[][]): number {
-  if (seqsPerWord.some((s) => s.length === 0)) return Number.MAX_SAFE_INTEGER;
-  // Cursors into each sorted list
-  const idx = seqsPerWord.map(() => 0);
-  let maxVal = Math.max(...seqsPerWord.map((s) => s[0]));
-  let best = Number.MAX_SAFE_INTEGER;
-  while (true) {
-    // Find the list whose cursor points at the minimum
-    let minListIdx = 0;
-    let minVal = seqsPerWord[0][idx[0]];
-    for (let i = 1; i < seqsPerWord.length; i++) {
-      const v = seqsPerWord[i][idx[i]];
-      if (v < minVal) {
-        minVal = v;
-        minListIdx = i;
-      }
-    }
-    best = Math.min(best, maxVal - minVal);
-    if (best === 0) break;
-    idx[minListIdx] += 1;
-    if (idx[minListIdx] >= seqsPerWord[minListIdx].length) break;
-    const newVal = seqsPerWord[minListIdx][idx[minListIdx]];
-    if (newVal > maxVal) maxVal = newVal;
-  }
-  return best;
+interface MutableEvent {
+  event_id: string;
+  title: string | null;
+  date: string | null;
+  location: string | null;
+  language: string | null;
+  translated_from: string | null;
+  source_short: string | null;
+  best_rank: number;
+  hit_count: number;
+  hits: SearchHit[];
 }
 
 

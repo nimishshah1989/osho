@@ -77,6 +77,18 @@ describe('NEAR cross-paragraph augmentation', () => {
     const titles = r.events.map((e) => e.title);
     expect(titles).not.toContain('Zen: The Quantum Leap ~ 02');
   });
+
+  it('finds a 3-word cross-paragraph NEAR at a generous distance', () => {
+    const r = search(freshEngine(), { q: 'NEAR(enlightenment trust love, 20)' });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).toContain('The Messiah Vol 1 ~ 15');
+  });
+
+  it('respects distance — the same 3-word trio does NOT match at distance 2', () => {
+    const r = search(freshEngine(), { q: 'NEAR(enlightenment trust love, 2)' });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).not.toContain('The Messiah Vol 1 ~ 15');
+  });
 });
 
 
@@ -145,6 +157,58 @@ describe('title-only matches excluded from multi-word search', () => {
     const r = search(freshEngine(), { q: 'techniques meditation' });
     const titles = r.events.map((e) => e.title);
     expect(titles).toContain('Vigyan Bhairav Tantra ~ 12');
+  });
+});
+
+
+// ─── Record-level All-words / Within-N (OCTP semantics) ──────────────────
+
+describe('record-level All-words / Within-N', () => {
+  it('#7 — All-words matches a record whose words span paragraphs', () => {
+    const r = search(freshEngine(), { q: 'love intelligence awareness' });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).toContain('The Buddha Disease ~ 14');
+  });
+
+  it('ignores meta-only matches (no phantom count for title/wiki paragraphs)', () => {
+    // e3 has "page"/"sannyas" only in its seq-2 meta paragraph → must not
+    // be counted with an empty snippet. Mirrors the Python test.
+    const r = search(freshEngine(), { q: 'page sannyas' });
+    expect(r.total).toBe(0);
+    expect(r.total_hits).toBe(0);
+  });
+
+  it('#6 — Within-N total and total_hits are a subset of All-words', () => {
+    const allw = search(freshEngine(), { q: 'love intelligence awareness' });
+    const near = search(freshEngine(), { q: 'NEAR(love intelligence awareness, 100)' });
+    expect(near.total).toBeLessThanOrEqual(allw.total);
+    expect(near.total_hits).toBeLessThanOrEqual(allw.total_hits);
+  });
+
+  it('#2 — Within-N exact-mode finds a cross-paragraph match at a generous N', () => {
+    const r = search(freshEngine(), { q: 'NEAR(alpha bravo charlie, 20)', exact: true });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).toContain('The Long Pilgrimage ~ 07');
+  });
+
+  it('#2 — Within-N exact-mode does NOT match the same words at distance 1', () => {
+    const r = search(freshEngine(), { q: 'NEAR(alpha bravo charlie, 1)', exact: true });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).not.toContain('The Long Pilgrimage ~ 07');
+  });
+
+  it('#3 — phrase equal to a title counts only content hits, not one-per-paragraph', () => {
+    const r = search(freshEngine(), { q: '"a new vision of women\'s liberation"' });
+    const wl = r.events.find((e) => e.title === "A New Vision of Women's Liberation ~ 01");
+    expect(wl).toBeDefined();
+    expect(wl!.hit_count).toBe(2);
+  });
+
+  it('#3 — a title-only phrase (Satyam Shivam) still returns the series', () => {
+    const r = search(freshEngine(), { q: '"Satyam Shivam"' });
+    const titles = r.events.map((e) => e.title);
+    expect(titles).toContain('Satyam Shivam Sundaram ~ 01');
+    expect(titles).toContain('Satyam Shivam Sundaram ~ 02');
   });
 });
 

@@ -78,6 +78,29 @@ correctly (resizes with the window).
 
 ---
 
+## Resolution status (2026-05-31)
+
+- **#4, #5(crash), #8** — fixed in PR #82 (apostrophe, Hindi-stemmed, scroll).
+  #4/#5 verified live on prod; #8 awaits visual confirmation.
+- **#2, #3, #6, #7** — fixed by the record-level rewrite (this PR):
+  - All-words and Within-N are now record-level (per-unit event-set
+    intersection + record-level token-window). #7 (Buddha Disease) found;
+    #2 exact cross-paragraph found; #6 Within-N ⊆ All-words by construction.
+  - #3: a phrase equal to a title no longer inflates hits to one-per-
+    paragraph (content-scoped count) while still returning title-only
+    series (title-membership pass).
+  - Counting rule: `total` = qualifying discourses; `total_hits` = matched
+    paragraphs within them (per-paragraph, agreed with product owner).
+  - Code-review caught + fixed: cap no longer truncates `total`; meta
+    paragraphs excluded from matching/counting; deterministic tie-break for
+    Python↔TS parity.
+  - Known caveats: for queries matching >2000 discourses, `total` stays
+    accurate but `total_hits` is a lower bound over the first 2000; a
+    pre-existing underscore tokenizer difference between the Python and TS
+    engines is low-impact and left unchanged.
+
+---
+
 ## Cross-cutting root cause (#2, #6, #7)
 
 The corpus is indexed one **FTS5 row per paragraph**. OCTP — the reference the

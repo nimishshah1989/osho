@@ -479,6 +479,85 @@ def test_three_word_near_respects_distance(app_client):
     assert "The Messiah Vol 1 ~ 15" not in titles
 
 
+# ── Record-level All-words / Within-N (OCTP semantics) ───────────────
+
+
+def test_all_words_matches_across_paragraphs(app_client):
+    """#7 — All-words is RECORD-level: a discourse with the three query
+    words in three DIFFERENT paragraphs must match. FTS5's per-row AND
+    cannot find this; record-level matching must. bd1 (The Buddha Disease
+    ~ 14) seeds love / intelligence / awareness in seqs 1 / 5 / 9."""
+    r = app_client.get("/api/search?q=love intelligence awareness")
+    assert r.status_code == 200
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Buddha Disease ~ 14" in titles
+
+
+def test_record_level_ignores_meta_only_matches(app_client):
+    """Record-level All-words must NOT count a discourse that contains the
+    query words ONLY in a metadata paragraph (title row / "event page in
+    sannyas.wiki" marker). e3 (Vigyan) has "page"/"sannyas" only in its
+    seq-2 meta paragraph, so `page sannyas` must return 0 discourses and 0
+    hits — not 1 discourse with an empty snippet (the bug where the
+    intersection counted meta matches while the display filtered them)."""
+    r = app_client.get("/api/search?q=page sannyas")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 0
+    assert data["total_hits"] == 0
+
+
+def test_within_n_is_subset_of_all_words(app_client):
+    """#6 — Within-N events and total_hits must each be a (non-strict)
+    subset of the All-words results for the same query. This is the
+    regression lock that keeps Within-N from over-reporting more than
+    All-words ever could."""
+    allw = app_client.get("/api/search?q=love intelligence awareness").json()
+    near = app_client.get(
+        "/api/search?q=NEAR(love%20intelligence%20awareness%2C%20100)"
+    ).json()
+    assert near["total"] <= allw["total"], (
+        f"Within-100 total {near['total']} > All-words total {allw['total']}"
+    )
+    assert near["total_hits"] <= allw["total_hits"], (
+        f"Within-100 total_hits {near['total_hits']} > "
+        f"All-words total_hits {allw['total_hits']}"
+    )
+
+
+def test_within_n_exact_cross_paragraph(app_client):
+    """#2 — Within-N exact-mode finds a match whose words straddle a
+    paragraph break (record-level token span), and respects the distance:
+    found at a generous N, NOT found at N=1. n2 (The Long Pilgrimage ~ 07)
+    seeds alpha / bravo / charlie across the seq 10/11 break (span = 8)."""
+    found = app_client.get(
+        "/api/search?q=NEAR(alpha%20bravo%20charlie%2C%2020)&exact=true"
+    ).json()
+    assert "The Long Pilgrimage ~ 07" in [e["title"] for e in found["events"]]
+
+    tight = app_client.get(
+        "/api/search?q=NEAR(alpha%20bravo%20charlie%2C%201)&exact=true"
+    ).json()
+    assert "The Long Pilgrimage ~ 07" not in [e["title"] for e in tight["events"]]
+
+
+def test_phrase_equal_to_title_counts_only_content_hits(app_client):
+    """#3 — A phrase that equals a discourse TITLE must NOT inflate the
+    hit count to one-per-paragraph (the title rides on every paragraph's
+    FTS row). wl1's title is the phrase but only TWO of its five
+    paragraphs contain it; the reported hit_count must be 2, not 5."""
+    r = app_client.get(
+        '/api/search?q="a new vision of women\'s liberation"'
+    )
+    assert r.status_code == 200, r.text
+    ev_map = {e["title"]: e for e in r.json()["events"]}
+    wl = ev_map.get("A New Vision of Women's Liberation ~ 01")
+    assert wl is not None, "discourse with the phrase in its title not returned"
+    assert wl["hit_count"] == 2, (
+        f"Expected 2 content hits (not one-per-paragraph), got {wl['hit_count']}"
+    )
+
+
 # ── Language code/name alias tolerance (Sugit 2026-05-31) ───────────
 
 
