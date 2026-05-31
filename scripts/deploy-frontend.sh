@@ -18,6 +18,43 @@ cd "$REPO_DIR"
 echo "==> Pre-pull HEAD: $(git rev-parse --short HEAD)"
 BEFORE=$(git rev-parse HEAD)
 
+# Look ahead: if the incoming pull would touch an untracked file in the
+# working tree, `git pull --ff-only` aborts in ~1 second with a cryptic
+# "untracked working tree files would be overwritten" message and the
+# whole deploy silently 12-second-timeouts. Detect that case here and
+# act on it deterministically:
+#   - byte-identical to what we're about to pull → quietly remove the
+#     untracked copy (the merge is a no-op for that file anyway), so a
+#     manually-placed-then-later-committed file doesn't keep wedging
+#     deploys (the 2026-05-30 incident with frontend/.env.production);
+#   - different content → STOP and tell the operator exactly what to
+#     do, instead of either silently overwriting their changes or dying
+#     with the original opaque git error.
+echo "==> Fetching origin to compare incoming vs working tree"
+git fetch --quiet origin main
+INCOMING="$(git rev-parse origin/main)"
+CHANGED_INCOMING="$(git diff --name-only "HEAD..$INCOMING" || true)"
+UNTRACKED="$(git ls-files --others --exclude-standard)"
+for f in $CHANGED_INCOMING; do
+  if echo "$UNTRACKED" | grep -qxF "$f"; then
+    incoming_blob="$(git show "${INCOMING}:${f}" 2>/dev/null || true)"
+    working_blob="$(cat "$f" 2>/dev/null || true)"
+    if [ "$incoming_blob" = "$working_blob" ]; then
+      echo "==> Untracked $f matches the incoming version — removing local copy"
+      rm -f "$f"
+    else
+      echo "==> DEPLOY BLOCKED: untracked working-tree file would be overwritten:" >&2
+      echo "       $f" >&2
+      echo "    The file on the box differs from what the pull would install." >&2
+      echo "    Move it aside so the deploy can proceed without losing your changes:" >&2
+      echo "       mv $f ${f}.local-$(date +%Y-%m-%d)" >&2
+      echo "    Then re-run the deploy. If the local file holds values the build" >&2
+      echo "    needs (secrets, custom URLs), copy them into .env.local instead." >&2
+      exit 1
+    fi
+  fi
+done
+
 echo "==> git pull"
 git pull --ff-only origin main
 
