@@ -291,6 +291,54 @@ def test_near_search_excludes_title_only_matches(app_client):
     assert "Satyam Shivam Sundaram ~ 01" not in titles
 
 
+def test_apostrophe_all_words_does_not_crash(app_client):
+    """#4 (Sugit 2026-05-31): a bare apostrophe in a bag-of-words query
+    used to return "Invalid search syntax" (FTS5 `syntax error near '`).
+    It must now return 200 and find the discourse whose content has the
+    phrase."""
+    r = app_client.get("/api/search?q=a new vision of women's liberation")
+    assert r.status_code == 200, r.text
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Mustard Seed ~ 04" in titles  # event e2, the apostrophe paragraph
+
+
+def test_all_apostrophe_query_is_empty_not_crash(app_client):
+    """An edge case of the #4 fix: a query that is nothing but apostrophes
+    must not crash FTS5 with `syntax error near ")"`. It collapses to an
+    empty query → graceful 400 'Empty query.', never a 500/syntax error."""
+    r = app_client.get("/api/search?q='")
+    assert r.status_code == 400
+    assert "Empty query" in r.json().get("detail", "")
+
+
+def test_apostrophe_phrase_still_works(app_client):
+    """The quoted-phrase form already worked (FTS5 accepts an apostrophe
+    inside a string) — guard that the #4 fix didn't change it. Assert it
+    still *finds* the discourse, not merely that it returns 200, so a
+    regression that drops the phrase match is caught."""
+    r = app_client.get('/api/search?q="women\'s liberation"')
+    assert r.status_code == 200, r.text
+    titles = [e["title"] for e in r.json()["events"]]
+    assert "The Mustard Seed ~ 04" in titles
+
+
+def test_hindi_or_expanded_query_parses(app_client):
+    """#5 (Sugit 2026-05-31): the frontend's Stemmed-mode Hindi OR-expansion
+    emits group-AND-group, e.g. `(अनंत OR अनन्त) AND (मौन OR मौं)`. The
+    *broken* (space-joined) form `(a OR b) (c OR d)` crashed FTS5 with
+    `syntax error near "("`; the *fixed* AND-joined form must parse. We
+    assert the real group-AND-group shape the frontend produces returns
+    200, and (as a negative control of the regression boundary) that the
+    space-joined shape would still error."""
+    # The fixed shape buildHindiFtsQuery now emits — group AND group:
+    r = app_client.get("/api/search?q=(अनंत OR अनन्त) AND (मौन OR मौं)")
+    assert r.status_code == 200, r.text
+    # Negative control: the broken space-joined shape still errors, proving
+    # the AND-join is load-bearing (not that any query happens to pass).
+    r_bad = app_client.get("/api/search?q=(अनंत OR अनन्त) (मौन OR मौं)")
+    assert r_bad.status_code == 400
+
+
 def test_phrase_search_still_matches_titles(app_client):
     """Phrase mode is the explicit "find me anywhere" mode, including
     titles — this is how a user looks up a series by name."""

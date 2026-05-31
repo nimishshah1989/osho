@@ -233,5 +233,13 @@ export function buildHindiFtsQuery(devanagari: string): string {
     return variants.length > 1 ? `(${variants.join(' OR ')})` : variants[0];
   });
 
-  return expandedWords.join(' ');
+  // Join with explicit `AND`, not a space. FTS5's implicit-AND only works
+  // between bare terms — `(a OR b) c` is a hard syntax error ("syntax
+  // error near …"), which is why a multi-word Hindi query in Stemmed mode
+  // (the only mode that OR-expands variants) returned "Invalid search
+  // syntax". `(a OR b) AND c` and `(a OR b) AND (c OR d)` both parse, and
+  // the whole thing survives being wrapped in `{content} : (…)` by
+  // rewriteQuery / _rewrite_query. Single-word queries return one group
+  // with no join, unaffected.
+  return expandedWords.join(' AND ');
 }

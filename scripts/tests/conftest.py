@@ -173,6 +173,9 @@ def _seed_db(path: str) -> None:
         (22, "e3", 0, "Vigyan Bhairav Tantra ~ 12"),
         (23, "e3", 2,
          "event page in sannyas.wiki: Vigyan Bhairav Tantra ~ 12."),
+        # Apostrophe in body content — for the #4 regression (a bare
+        # apostrophe used to crash FTS5 with "syntax error near '").
+        (60, "e2", 60, "This is a new vision of women's liberation in our time."),
         # Body paragraphs for the Satyam Shivam Sundaram seed events. The
         # content deliberately does NOT contain "Satyam" or "Shivam" so
         # a bag-of-words search for those words only matches these rows
