@@ -86,6 +86,24 @@ _ADMIN_TOPIC_TAGS: dict[str, str] = {
 }
 
 
+_LANGUAGE_ALIASES: dict[str, tuple[str, ...]] = {
+    'english': ('English', 'en', 'EN'),
+    'hindi':   ('Hindi', 'hi', 'HI'),
+    'en':      ('English', 'en', 'EN'),
+    'hi':      ('Hindi', 'hi', 'HI'),
+}
+
+
+def _expand_language_aliases(language: str) -> list[str]:
+    """Map whatever the caller asked for to every aliased form the DB
+    might use. So `?language=English` matches rows with `English` OR
+    `en` (and same for Hindi). Unknown languages pass through verbatim
+    so a future addition (e.g. `Chinese`) keeps working without code
+    changes."""
+    key = (language or '').strip().lower()
+    return list(_LANGUAGE_ALIASES.get(key, (language,)))
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return bool(conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
@@ -324,26 +342,28 @@ def _augment_near_adjacent_strict(
     """Find pairs of *adjacent* paragraphs whose tokens span a NEAR match.
 
     FTS5's NEAR() operates within a single FTS row (= one paragraph), so it
-    cannot find a match when the two query terms straddle a paragraph break.
-    This augmentation closes that gap for the common 2-word case by
-    measuring real token distance across consecutive paragraphs:
+    cannot find a match when the query terms straddle a paragraph break.
+    This augmentation closes that gap for any N-word NEAR by measuring real
+    token distance across two consecutive paragraphs. For each consecutive
+    pair (p_x, p_{x+1}) where the union of word matches covers all N query
+    words, compute the conservative "window span" across both paragraphs:
 
-        distance = (tokens after `word_a` in para_n)
-                   + (tokens before `word_b` in para_{n+1})
+        span = (tokens after first matched word in p_x)
+               + (tokens before last matched word in p_{x+1})
 
-    A pair is included only if distance <= near_dist, so it does NOT
-    re-introduce the false positives the paragraph-adjacency heuristic
-    produced (see commit 8c69841).
-
-    Only handles len(words) == 2. For 3+-word NEAR, fall back to the
-    existing paragraph-span heuristic via `_augment_near_cross_paragraph`.
+    A pair is included only if `span <= near_dist`, so this never broadens
+    a query beyond what the user asked for. The Sugit 2026-05-31 report
+    (`enlightenment trust love within 20` finding 2 instead of OCTP's 5)
+    was caused by the previous version of this function rejecting any
+    N != 2 case — the in-row FTS5 NEAR alone misses every match that
+    straddles a paragraph boundary.
 
     `fts_table` selects the stemmed (default) or exact FTS index. The
     name is taken only from the closed set
     {paragraphs_fts, paragraphs_fts_exact}, never from user input — so
     the f-string SQL stays injection-safe.
     """
-    if len(words) != 2:
+    if len(words) < 2:
         return {}
     if fts_table not in ("paragraphs_fts", "paragraphs_fts_exact"):
         raise ValueError(f"unsupported fts_table: {fts_table!r}")
@@ -393,35 +413,82 @@ def _augment_near_adjacent_strict(
             }
         per_word.append(per_ev)
 
-    if not per_word or not per_word[0] or not per_word[1]:
+    if not per_word or any(not m for m in per_word):
         return {}
 
-    common_ids = set(per_word[0].keys()) & set(per_word[1].keys())
+    # Events that contain EVERY query word in at least one paragraph.
+    common_ids: set = set(per_word[0].keys())
+    for m in per_word[1:]:
+        common_ids &= set(m.keys())
+
     events: dict = {}
     for ev_id in common_ids:
-        wa = per_word[0][ev_id]
-        wb = per_word[1][ev_id]
-        best: tuple[int, int, int, dict, dict] | None = None  # (dist, seq_a, seq_b, info_a, info_b)
-        for seq_a, info_a in wa.items():
-            for delta in (-1, 1):
-                seq_b = seq_a + delta
-                if seq_b == seq_a or seq_b not in wb:
-                    continue
-                info_b = wb[seq_b]
-                if delta == 1:
-                    last_a = max(info_a['positions'])
-                    first_b = min(info_b['positions'])
-                    dist = (info_a['token_count'] - 1 - last_a) + first_b
-                else:
-                    first_a = min(info_a['positions'])
-                    last_b = max(info_b['positions'])
-                    dist = (info_b['token_count'] - 1 - last_b) + first_a
-                if dist <= near_dist and (best is None or dist < best[0]):
-                    best = (dist, seq_a, seq_b, info_a, info_b)
-        if best is None:
-            continue
+        # For every consecutive pair (seq_x, seq_x+1) in this event, check
+        # if those two paragraphs together cover all N query words. If yes,
+        # compute the span across the two paragraphs and keep the best.
+        # The 2-word case is just N=2 of this same algorithm.
+        seqs_per_word = [set(per_word[i][ev_id].keys()) for i in range(len(words))]
+        seqs_with_any_word: set[int] = set().union(*seqs_per_word)
 
-        _, seq_a, seq_b, info_a, info_b = best
+        best_span = near_dist + 1
+        best_pair: tuple[int, int, dict[int, dict]] | None = None  # (seq_x, seq_y, infos_by_word_idx_then_para)
+        for seq_x in seqs_with_any_word:
+            seq_y = seq_x + 1
+            if seq_y not in seqs_with_any_word:
+                continue
+            # Per word: which of the two paragraphs contains it (could be both).
+            coverage: list[list[int]] = []
+            for i in range(len(words)):
+                hits = []
+                if seq_x in seqs_per_word[i]:
+                    hits.append(seq_x)
+                if seq_y in seqs_per_word[i]:
+                    hits.append(seq_y)
+                if not hits:
+                    coverage = []
+                    break
+                coverage.append(hits)
+            if not coverage:
+                continue
+            info_x = {i: per_word[i][ev_id].get(seq_x) for i in range(len(words))}
+            info_y = {i: per_word[i][ev_id].get(seq_y) for i in range(len(words))}
+            token_count_x = next(
+                (v['token_count'] for v in info_x.values() if v), 0
+            )
+            # Span calculation: each word contributes its earliest position
+            # in p_x (if present) or its earliest position in p_y offset by
+            # p_x's token count. Take the min across the resulting picks for
+            # the LEFTMOST end, and similarly the max for the RIGHTMOST. The
+            # tightest span is exactly max - min. The check is conservative:
+            # if this bound <= near_dist, an in-window arrangement exists.
+            mins, maxs = [], []
+            covers_x, covers_y = False, False
+            for i in range(len(words)):
+                positions = []
+                if info_x[i]:
+                    positions.extend(info_x[i]['positions'])
+                    covers_x = True
+                if info_y[i]:
+                    positions.extend(p + token_count_x for p in info_y[i]['positions'])
+                    covers_y = True
+                if not positions:
+                    mins = None
+                    break
+                mins.append(min(positions))
+                maxs.append(max(positions))
+            if mins is None or not (covers_x and covers_y):
+                # If all words sit in one paragraph FTS5's in-row NEAR has
+                # it already; skip to avoid double-counting.
+                continue
+            span = max(maxs) - min(mins)
+            if span <= near_dist and span < best_span:
+                best_span = span
+                best_pair = (seq_x, seq_y, {i: (info_x[i], info_y[i]) for i in range(len(words))})
+
+        if best_pair is None:
+            continue
+        seq_x, seq_y, _ = best_pair
+
         ev_row = conn.execute(
             "SELECT title, date, location, language, "
             "translated_from, source_short FROM events WHERE id = ?",
@@ -430,23 +497,32 @@ def _augment_near_adjacent_strict(
         if not ev_row:
             continue
 
+        # Build display hits from p_x and p_y (whichever actually had words).
         hits = []
-        for seq, info in sorted([(seq_a, info_a), (seq_b, info_b)]):
+        for seq in (seq_x, seq_y):
+            info = next(
+                (per_word[i][ev_id].get(seq) for i in range(len(words))
+                 if per_word[i][ev_id].get(seq) is not None),
+                None,
+            )
+            if not info:
+                continue
             content = _strip_shailendra(info['content'] or '')
             is_meta = (
                 seq == 0
                 or content.lower().startswith('event page in sannyas')
             )
-            if not is_meta:
-                hit: dict = {
-                    'paragraph_id': info['pid'],
-                    'sequence_number': seq,
-                    'content': content,
-                    'hl': None,
-                }
-                if info.get('role'):
-                    hit['role'] = info['role']
-                hits.append(hit)
+            if is_meta:
+                continue
+            hit: dict = {
+                'paragraph_id': info['pid'],
+                'sequence_number': seq,
+                'content': content,
+                'hl': None,
+            }
+            if info.get('role'):
+                hit['role'] = info['role']
+            hits.append(hit)
 
         events[ev_id] = {
             'event_id': ev_id,
@@ -457,7 +533,7 @@ def _augment_near_adjacent_strict(
             'translated_from': ev_row[4],
             'source_short': ev_row[5],
             'rank': 0.0,
-            'hit_count': 2,
+            'hit_count': len(words),
             'hits': hits,
             '_cross_para': True,
         }
@@ -748,8 +824,16 @@ def search(
     filter_params: list = []
 
     if language:
-        filters.append("LOWER(e.language) = LOWER(?)")
-        filter_params.append(language)
+        # Accept either form the corpus might use: the full name
+        # ("English", "Hindi" — what the ingester writes after _LANG_MAP)
+        # or the bare ISO code ("en", "hi" — what a non-normalising
+        # ingest can leave in events.language). Mixing the two used to
+        # mean filtering by "English" returned zero rows when the DB
+        # contained "en". See _LANGUAGE_ALIASES.
+        aliases = _expand_language_aliases(language)
+        placeholders = ",".join(["LOWER(?)"] * len(aliases))
+        filters.append(f"LOWER(e.language) IN ({placeholders})")
+        filter_params.extend(aliases)
     if original:
         # Originals: either the column isn't present (legacy rows) or its
         # value is the explicit "none" Antar writes into the @-headers.
@@ -862,11 +946,13 @@ def search(
         augmented_cross_para = False
         if near_parsed:
             near_words, near_dist = near_parsed
-            # Strict adjacent-paragraph augmentation (2-word NEAR only).
-            # Catches matches where the two terms straddle a paragraph break
-            # but are still within `near_dist` actual tokens of each other —
-            # something FTS5's row-bound NEAR cannot find on its own.
-            if len(near_words) == 2:
+            # Strict adjacent-paragraph augmentation for any N-word NEAR.
+            # Catches matches where the query terms straddle a paragraph
+            # break but stay within `near_dist` actual tokens of each
+            # other — something FTS5's row-bound NEAR cannot find on its
+            # own. Generalised 2026-05-31 (Sugit report: 3-word NEAR at
+            # narrow distance missed cross-paragraph hits).
+            if len(near_words) >= 2:
                 adj = _augment_near_adjacent_strict(
                     conn, near_words, near_dist, where_extra, filter_params,
                     fts_table=fts_table,
@@ -1154,8 +1240,10 @@ def admin_events(
             where_parts.append("(e.title LIKE ? OR e.location LIKE ?)")
             params += [f"%{q}%", f"%{q}%"]
         if language:
-            where_parts.append("LOWER(e.language) = LOWER(?)")
-            params.append(language)
+            aliases = _expand_language_aliases(language)
+            placeholders = ",".join(["LOWER(?)"] * len(aliases))
+            where_parts.append(f"LOWER(e.language) IN ({placeholders})")
+            params.extend(aliases)
         if tag and has_tags:
             where_parts.append("EXISTS (SELECT 1 FROM event_tags et WHERE et.event_id = e.id AND et.tag = ?)")
             params.append(tag)

@@ -133,6 +133,14 @@ def _seed_db(path: str) -> None:
          "Beyond good and evil — Nietzsche saw clearly what others could not."),
         # Fewer Nietzsche mentions in The Messiah
         (19, "p2", 5, "Nietzsche once said that God is dead."),
+        # Three-word NEAR cross-paragraph test (Sugit 2026-05-31).
+        # Words "enlightenment", "trust", "love" are split across two
+        # adjacent paragraphs of p2 (each holds one or two of the three).
+        # FTS5's in-row NEAR alone can't find this; the augmentation must.
+        (100, "p2", 30,
+         "He said the path begins with enlightenment and trust."),
+        (101, "p2", 31,
+         "From there love arises naturally."),
         # Politicians and mafia proximity test
         (20, "p1", 20,
          "The politicians have always been in alliance with the mafia."),
