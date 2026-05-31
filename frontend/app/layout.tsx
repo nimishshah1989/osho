@@ -73,10 +73,8 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className={`${inter.variable} ${notoDevanagari.variable} font-sans`}>
-        {/* Analytics is omitted from the desktop build: it's an offline
-            app (nothing to phone home to), and the gtag script is
-            cross-origin, which the desktop's `require-corp` policy
-            (needed for OPFS) would block anyway. */}
+        {/* Analytics is omitted from the desktop build — it's an offline
+            app, so there's nothing to phone home to (and no network). */}
         {!IS_DESKTOP && (
           <>
             <Script

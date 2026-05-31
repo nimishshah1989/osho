@@ -11,13 +11,13 @@ on:
   workflow_dispatch:
 
 jobs:
-  # Gate: prove the offline OPFS path actually works before we spend time
-  # building installers. The desktop app stores the corpus in OPFS via
-  # sqlite-wasm, which only works when desktop/server.js sets the
-  # cross-origin-isolation headers. This headless-Chromium check (Electron's
-  # renderer IS Chromium) opens a real OPFS database under those headers and
-  # fails the whole workflow if it can't — so a build that would show
-  # "sqlite-wasm built without OPFS support." never produces installers.
+  # Gate: prove the offline archive actually opens before we spend time
+  # building installers. This builds the real static export and drives it
+  # through the real desktop server in headless Chromium (Electron's
+  # renderer IS Chromium) — installing + opening the corpus via the OPFS
+  # SAHPool VFS and running a real query. If the archive can't be opened
+  # (the app would show "Couldn't set up the archive"), the whole workflow
+  # fails and no installers are produced.
   verify-offline:
     runs-on: ubuntu-latest
     steps:
@@ -25,9 +25,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install sqlite-wasm (frontend dep used by the probe)
+      - name: Build the static frontend (same as the installer build)
         working-directory: frontend
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: |
+          npm install --ignore-scripts --no-audit --no-fund
+          rm -rf app/api app/ask
+          DESKTOP_BUILD=true npx next build
       - name: Install desktop deps + Chromium
         working-directory: desktop
         run: |
@@ -36,7 +39,7 @@ jobs:
       - name: Check all runtime-required modules are packaged
         working-directory: desktop
         run: npm run check:bundle
-      - name: Verify offline OPFS path
+      - name: Verify the offline archive opens end-to-end
         working-directory: desktop
         run: npm run verify:offline
 

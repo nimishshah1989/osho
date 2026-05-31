@@ -54,9 +54,6 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
-  // The COOP/COEP headers set inside startServer() are what enable OPFS
-  // in the renderer — see desktop/server.js. Without them the app can't
-  // open the bundled archive.
   ({ origin } = await startServer(APP_DIR));
   createWindow();
   app.on('activate', () => {

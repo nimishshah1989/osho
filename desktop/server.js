@@ -3,37 +3,24 @@
 /**
  * The desktop app's local static server — extracted from main.js so it
  * carries NO electron dependency and can be exercised directly by the
- * offline-verification test (test/verify-opfs.mjs).
+ * offline-verification test (test/verify-offline.mjs).
  *
- * CRITICAL: the two cross-origin-isolation headers below are what make
- * the renderer `crossOriginIsolated`, which is the ONLY thing that
- * switches on sqlite-wasm's OPFS storage engine. Without them the app
- * throws "sqlite-wasm built without OPFS support." on first launch
- * (the bug fixed 2026-05-30). Electron's renderer is Chromium and
- * treats http://127.0.0.1 as a secure context, so these headers take
- * effect exactly as they do in a browser.
- *
- * DO NOT remove or weaken these without updating test/verify-opfs.mjs —
- * that test fails the desktop build in CI if OPFS can't be opened.
+ * NOTE on storage: the app stores the corpus via sqlite-wasm's OPFS
+ * **SAHPool** VFS (see frontend/lib/search/worker/dbWorker.ts), which
+ * uses synchronous OPFS access handles directly in the worker. It needs
+ * neither SharedArrayBuffer nor cross-origin isolation. We deliberately
+ * do NOT send COOP/COEP here: those make the renderer crossOriginIsolated,
+ * which makes sqlite-wasm try to auto-init its *default* "opfs" VFS — a
+ * nested async-proxy worker that can't be resolved in the Next.js-bundled
+ * build and throws "Expecting vfs=opfs|opfs-wl URL argument for this
+ * worker" (the 2026-05-30 desktop failure). SAHPool sidesteps all of it.
  */
 const http = require('node:http');
 const handler = require('serve-handler');
 
-const COI_HEADERS = {
-  'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'require-corp',
-};
-
-/**
- * Build (but don't listen on) the HTTP server that serves `rootDir`.
- * `withCoiHeaders=false` exists only so the test can run a negative
- * control proving the headers are what make OPFS work.
- */
-function createOshoServer(rootDir, { withCoiHeaders = true } = {}) {
+/** Build (but don't listen on) the HTTP server that serves `rootDir`. */
+function createOshoServer(rootDir) {
   return http.createServer((req, res) => {
-    if (withCoiHeaders) {
-      for (const [k, v] of Object.entries(COI_HEADERS)) res.setHeader(k, v);
-    }
     handler(req, res, {
       public: rootDir,
       cleanUrls: false,
@@ -44,9 +31,9 @@ function createOshoServer(rootDir, { withCoiHeaders = true } = {}) {
 }
 
 /** Start the server on a free 127.0.0.1 port. Resolves {server, origin}. */
-function startServer(rootDir, opts = {}) {
+function startServer(rootDir) {
   return new Promise((resolve, reject) => {
-    const server = createOshoServer(rootDir, opts);
+    const server = createOshoServer(rootDir);
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
       resolve({ server, origin: `http://127.0.0.1:${server.address().port}` });
@@ -54,4 +41,4 @@ function startServer(rootDir, opts = {}) {
   });
 }
 
-module.exports = { createOshoServer, startServer, COI_HEADERS };
+module.exports = { createOshoServer, startServer };

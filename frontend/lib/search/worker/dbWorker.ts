@@ -90,6 +90,47 @@ async function ensureSqlite(): Promise<Sqlite3> {
 }
 
 
+// The corpus is stored and read through the OPFS **SAHPool** VFS, NOT the
+// default "opfs" VFS. The default VFS spawns a nested async-proxy worker
+// (sqlite3-opfs-async-proxy.js) and needs SharedArrayBuffer + cross-origin
+// isolation; when sqlite-wasm is bundled by Next.js/webpack that proxy
+// worker's URL can't be resolved, so it throws "Expecting vfs=opfs|opfs-wl
+// URL argument for this worker" and the archive never opens (the
+// 2026-05-30 desktop failure). SAHPool uses synchronous OPFS access
+// handles directly in this worker — no proxy worker, no SharedArrayBuffer,
+// no COI requirement — so it survives bundling and is far more robust.
+type PoolUtil = {
+  importDb(
+    name: string,
+    bytesOrCb: Uint8Array | (() => Promise<Uint8Array | undefined>),
+  ): Promise<number>;
+  getFileNames(): string[];
+  OpfsSAHPoolDb: new (name: string) => Sqlite3Db;
+  unlink(name: string): boolean;
+};
+
+let pool: PoolUtil | null = null;
+
+async function ensurePool(): Promise<PoolUtil> {
+  if (pool) return pool;
+  const sq = await ensureSqlite() as Sqlite3 & {
+    installOpfsSAHPoolVfs?: (opts: object) => Promise<PoolUtil>;
+  };
+  if (typeof sq.installOpfsSAHPoolVfs !== 'function') {
+    throw makeErr('unsupported', 'sqlite-wasm built without OPFS SAHPool support.');
+  }
+  // initialCapacity covers the corpus DB plus any transient rollback/WAL
+  // handle SQLite may open; search is read-only so this is comfortable.
+  pool = await sq.installOpfsSAHPoolVfs({ name: 'osho-corpus-pool', initialCapacity: 6 });
+  return pool;
+}
+
+/** SAHPool stores files under leading-slash names; keep one convention. */
+function poolName(filename: string): string {
+  return filename.startsWith('/') ? filename : `/${filename}`;
+}
+
+
 /** Wrap a sqlite-wasm `OO1` DB in the engine's `Database` interface. */
 function makeAdapter(handle: Sqlite3Db): Database {
   return {
@@ -120,10 +161,16 @@ function makeAdapter(handle: Sqlite3Db): Database {
 
 
 async function corpusExists(filename: string): Promise<boolean> {
+  // Installed if either: the freshly-streamed plain OPFS file is present
+  // (not yet imported into the pool), OR it's already in the SAHPool.
   try {
     const root = await navigator.storage.getDirectory();
     await root.getFileHandle(filename, { create: false });
     return true;
+  } catch { /* not a plain OPFS file — check the pool next */ }
+  try {
+    const p = await ensurePool();
+    return p.getFileNames().includes(poolName(filename));
   } catch {
     return false;
   }
@@ -347,23 +394,64 @@ async function copyOpfsFile(
 
 
 async function openDb(filename: string): Promise<void> {
-  const sq = await ensureSqlite();
-  if (!sq.oo1?.OpfsDb) {
-    throw makeErr('unsupported', 'sqlite-wasm built without OPFS support.');
-  }
+  const p = await ensurePool();
   // Close any previously-open handle first — repeated `open` calls
-  // (e.g. after the user re-installs the corpus) would otherwise leak
-  // an OPFS file lock and the new open would fail with SQLITE_BUSY.
+  // (e.g. after the user re-installs the corpus) would otherwise leak a
+  // file lock and the new open would fail with SQLITE_BUSY.
   closeDb();
+
+  const name = poolName(filename);
+  // First open after an install: import the plain OPFS file the streamer
+  // wrote into the SAHPool, then drop the plain copy to reclaim space.
+  // Streamed in chunks so we never hold the whole (~1.6 GB) DB in memory.
+  if (!p.getFileNames().includes(name)) {
+    await importPlainFileIntoPool(filename, name, p);
+  }
+
   try {
-    // Flags: 'c' = create-if-missing. We deliberately drop the 't' the
-    // first cut had — that flag enables SQL trace logging on every
-    // statement, which we don't want in a production worker.
-    db = new sq.oo1.OpfsDb(`/${filename}`, 'c') as Sqlite3Db;
+    db = new p.OpfsSAHPoolDb(name) as Sqlite3Db;
   } catch (e) {
-    throw makeErr('storage', `Could not open OPFS DB: ${(e as Error).message}`);
+    throw makeErr('storage', `Could not open corpus DB: ${(e as Error).message}`);
   }
   dbAdapter = makeAdapter(db);
+}
+
+
+async function importPlainFileIntoPool(
+  filename: string,
+  name: string,
+  p: PoolUtil,
+): Promise<void> {
+  const root = await navigator.storage.getDirectory();
+  let handle: FileSystemFileHandle;
+  try {
+    handle = await root.getFileHandle(filename, { create: false });
+  } catch {
+    throw makeErr('storage', 'Corpus file missing — please reinstall the archive.');
+  }
+  const sah = await (handle as unknown as {
+    createSyncAccessHandle(): Promise<FileSystemSyncAccessHandle>;
+  }).createSyncAccessHandle();
+  const size = sah.getSize();
+  let offset = 0;
+  const CHUNK = 8 * 1024 * 1024;
+  const pull = async (): Promise<Uint8Array | undefined> => {
+    if (offset >= size) return undefined;
+    const n = Math.min(CHUNK, size - offset);
+    const buf = new Uint8Array(n);
+    sah.read(buf, { at: offset });
+    offset += n;
+    return buf;
+  };
+  try {
+    await p.importDb(name, pull);
+  } catch (e) {
+    throw makeErr('storage', `Could not import corpus into storage: ${(e as Error).message}`);
+  } finally {
+    sah.close();
+  }
+  // The pool now owns the data; free the plain copy.
+  try { await root.removeEntry(filename); } catch { /* harmless if already gone */ }
 }
 
 
