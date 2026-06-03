@@ -747,3 +747,40 @@ def test_discourse_by_title(app_client):
 def test_discourse_not_found(app_client):
     r = app_client.get("/api/discourse?event_id=nonexistent")
     assert r.status_code == 404
+
+
+def test_discourse_near_highlights_only_window_paragraphs(app_client):
+    """Bug 11b: NEAR query on the discourse endpoint must highlight only the
+    paragraphs forming the proximity window, not every paragraph containing
+    any of the search words.
+
+    Seed event e2 has 'politicians' in seq 4 and 'mafia' in seq 5 — a
+    cross-paragraph NEAR. FTS5's in-paragraph NEAR finds nothing; the
+    _near_hl_for_discourse fallback must kick in and restrict hl to those two
+    paragraphs.  The other paragraphs (seq 7: love/alchemy, seq 60:
+    women's liberation) must NOT have hl markers.
+    """
+    r = app_client.get("/api/discourse?event_id=e2&q=NEAR(politicians mafia, 30)")
+    assert r.status_code == 200
+    paras = r.json()["paragraphs"]
+    hl_seqs = [p["sequence_number"] for p in paras if p.get("hl")]
+    assert set(hl_seqs) == {4, 5}, (
+        f"Expected only the window paragraphs (seq 4,5) highlighted, got {hl_seqs}"
+    )
+
+
+def test_discourse_near_single_paragraph_highlights_correct(app_client):
+    """When both NEAR words appear in the same paragraph, the standard FTS5
+    NEAR highlight must be used — only that paragraph gets hl, not the whole
+    discourse.
+
+    Seed event p1 has 'politicians' and 'mafia' together in seq 20.  The
+    Nietzsche paragraphs (seq 1, 3, 7, 12) must be unhighlighted.
+    """
+    r = app_client.get("/api/discourse?event_id=p1&q=NEAR(politicians mafia, 30)")
+    assert r.status_code == 200
+    paras = r.json()["paragraphs"]
+    hl_seqs = [p["sequence_number"] for p in paras if p.get("hl")]
+    assert hl_seqs == [20], (
+        f"Expected only seq 20 highlighted, got {hl_seqs}"
+    )
