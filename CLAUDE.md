@@ -276,8 +276,8 @@ the box is reproducible.
 
 ## Security posture
 
-- **`ADMIN_KEY`** — env var on the VPS, read from `/home/osho/osho/.env` (see
-  `cloud_api.py` `load_dotenv`). The default `"osho-admin"` MUST never be live in
+- **`ADMIN_KEY`** — env var on the VPS, read from `/etc/osho/backend.env` (via
+  `EnvironmentFile=` in the systemd unit). The default `"osho-admin"` MUST never be live in
   production. Backend hard-fails on startup if `OSHO_ENV=production` and the key
   is default/missing.
 - CORS: `ALLOWED_ORIGINS` env var (code default `https://oshoarchives.com`).
