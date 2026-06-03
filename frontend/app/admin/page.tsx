@@ -41,6 +41,15 @@ function api(path: string, key: string, opts?: RequestInit) {
   });
 }
 
+function apiForm(path: string, key: string, formData: FormData) {
+  // Let the browser set Content-Type (multipart/form-data with boundary).
+  return fetch(`/api/admin/${path}`, {
+    method: 'POST',
+    headers: { 'x-admin-key': key },
+    body: formData,
+  });
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TagPicker({
@@ -347,6 +356,191 @@ function BrowseTab({ adminKey }: { adminKey: string }) {
   );
 }
 
+// ─── Corpus Update Tab ────────────────────────────────────────────────────────
+
+type CorpusMode = 'bulk' | 'update';
+
+interface BulkResult {
+  ok: boolean; dry_run: boolean; processed: number; failed: number;
+  corpus_version: string | null; failures: { file: string; error: string }[];
+}
+interface UpdateResult {
+  ok: boolean; dry_run: boolean; corpus_version: string | null; report: string;
+  added: number; modified: number; deleted: number; failed: number;
+  failures: { action: string; file: string; error: string }[];
+}
+
+function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
+  const [mode, setMode] = useState<CorpusMode>('bulk');
+  const [file, setFile] = useState<File | null>(null);
+  const [corpusVersion, setCorpusVersion] = useState('');
+  const [dryRun, setDryRun] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showFailures, setShowFailures] = useState(false);
+
+  const reset = () => {
+    setBulkResult(null); setUpdateResult(null);
+    setError(null); setShowFailures(false);
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) { setError('Please select a .zip file.'); return; }
+    reset();
+    setLoading(true);
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('dry_run', dryRun ? 'true' : 'false');
+    if (corpusVersion.trim()) fd.append('corpus_version', corpusVersion.trim());
+    const endpoint = mode === 'bulk' ? 'upload-docx' : 'batch-update';
+    try {
+      const res = await apiForm(endpoint, adminKey, fd);
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail ?? 'Request failed.'); return; }
+      if (mode === 'bulk') setBulkResult(data as BulkResult);
+      else setUpdateResult(data as UpdateResult);
+    } catch {
+      setError('Network error — could not reach the server.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const btnLabel = loading
+    ? 'Processing…'
+    : dryRun
+    ? 'Run Dry Run'
+    : mode === 'bulk'
+    ? 'Upload & Ingest'
+    : 'Upload & Process';
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      {/* Mode toggle */}
+      <div className="flex gap-1 bg-stone-100 rounded-lg p-1 w-fit">
+        {(['bulk', 'update'] as CorpusMode[]).map((m) => (
+          <button key={m} type="button" onClick={() => { setMode(m); reset(); }}
+            className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
+              mode === m ? 'bg-white shadow text-stone-800' : 'text-stone-500 hover:text-stone-700'
+            }`}>
+            {m === 'bulk' ? 'Bulk ingest' : 'Structured update (Add / Modify / Delete)'}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-[13px] text-stone-500">
+        {mode === 'bulk'
+          ? 'Upload a .zip of .docx files (any subdirectory layout). Every file is upserted — safe to re-run. Use for the initial corpus load or a full re-sync.'
+          : 'Upload a .zip containing Add/, Modify/, and/or Delete/ subfolders. All-or-nothing — any failure rolls back the whole batch.'}
+      </p>
+
+      <form onSubmit={submit} className="space-y-4">
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-stone-600 uppercase tracking-wider">Zip file *</span>
+          <input type="file" accept=".zip"
+            onChange={(e) => { setFile(e.target.files?.[0] ?? null); reset(); }}
+            className="block w-full text-sm text-stone-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-stone-300 file:bg-stone-50 file:text-xs hover:file:bg-stone-100 cursor-pointer" />
+        </label>
+
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-stone-600 uppercase tracking-wider">
+            Corpus version date <span className="normal-case text-stone-400">(optional)</span>
+          </span>
+          <input type="text" value={corpusVersion} onChange={(e) => setCorpusVersion(e.target.value)}
+            placeholder="e.g. 2026-05-24"
+            className="w-full px-3 py-1.5 text-sm border border-stone-300 rounded focus:outline-none focus:border-amber-500" />
+          <p className="text-xs text-stone-400">Saved to the database on a successful (non-dry-run) run with zero failures. Shown on the Help page.</p>
+        </label>
+
+        <label className="flex items-center gap-2 cursor-pointer select-none">
+          <input type="checkbox" checked={dryRun} onChange={(e) => setDryRun(e.target.checked)}
+            className="w-4 h-4 accent-amber-600" />
+          <span className="text-sm text-stone-600">Dry run — process and report, but don't write to the database</span>
+        </label>
+
+        <div className="flex items-center gap-4">
+          <button type="submit" disabled={loading || !file}
+            className="px-5 py-2 bg-amber-600 text-white text-sm rounded hover:bg-amber-700 disabled:opacity-50 transition-colors">
+            {btnLabel}
+          </button>
+        </div>
+      </form>
+
+      {/* Error */}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {/* Bulk result */}
+      {bulkResult && (
+        <div className="border border-stone-200 rounded-lg p-4 space-y-3">
+          {bulkResult.dry_run && (
+            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-800">
+              Dry run — no changes were written to the database.
+            </div>
+          )}
+          <p className={`text-sm font-medium ${bulkResult.failed > 0 ? 'text-amber-700' : 'text-green-700'}`}>
+            {bulkResult.failed === 0 ? '✓' : '⚠'}{' '}
+            {bulkResult.processed.toLocaleString()} talks ingested · {bulkResult.failed} failed
+            {bulkResult.corpus_version ? ` · corpus version set to ${bulkResult.corpus_version}` : ''}
+          </p>
+          {bulkResult.failures.length > 0 && (
+            <div>
+              <button type="button" onClick={() => setShowFailures((v) => !v)}
+                className="text-xs text-stone-500 underline">
+                {showFailures ? 'Hide' : 'Show'} {bulkResult.failures.length} failure{bulkResult.failures.length !== 1 ? 's' : ''}
+              </button>
+              {showFailures && (
+                <ul className="mt-2 space-y-1 max-h-48 overflow-y-auto text-xs font-mono text-red-700">
+                  {bulkResult.failures.map((f, i) => (
+                    <li key={i} className="truncate" title={f.error}>{f.file}: {f.error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Batch-update result */}
+      {updateResult && (
+        <div className="border border-stone-200 rounded-lg p-4 space-y-3">
+          {updateResult.dry_run && (
+            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-xs text-amber-800">
+              Dry run — no changes were written to the database.
+            </div>
+          )}
+          <p className={`text-sm font-medium ${updateResult.failed > 0 ? 'text-red-700' : 'text-green-700'}`}>
+            {updateResult.failed === 0 ? '✓' : '✗'}{' '}
+            Added: {updateResult.added} · Modified: {updateResult.modified} · Deleted: {updateResult.deleted} · Failed: {updateResult.failed}
+            {updateResult.corpus_version ? ` · corpus version set to ${updateResult.corpus_version}` : ''}
+          </p>
+          <pre className="bg-stone-50 border border-stone-200 rounded px-3 py-2 text-xs font-mono overflow-y-auto max-h-72 whitespace-pre-wrap">
+            {updateResult.report}
+          </pre>
+          {updateResult.failures.length > 0 && (
+            <div>
+              <button type="button" onClick={() => setShowFailures((v) => !v)}
+                className="text-xs text-stone-500 underline">
+                {showFailures ? 'Hide' : 'Show'} {updateResult.failures.length} failure{updateResult.failures.length !== 1 ? 's' : ''}
+              </button>
+              {showFailures && (
+                <ul className="mt-2 space-y-1 max-h-48 overflow-y-auto text-xs font-mono text-red-700">
+                  {updateResult.failures.map((f, i) => (
+                    <li key={i}>[{f.action}] {f.file}: {f.error}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Login screen ─────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }: { onLogin: (k: string) => void }) {
@@ -394,7 +588,13 @@ function LoginScreen({ onLogin }: { onLogin: (k: string) => void }) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-type Tab = 'upload' | 'browse';
+type Tab = 'upload' | 'browse' | 'corpus';
+
+const TAB_LABELS: Record<Tab, string> = {
+  upload: 'Upload New Talk',
+  browse: 'Browse & Edit',
+  corpus: 'Corpus Update',
+};
 
 export default function AdminPage() {
   const [adminKey, setAdminKey] = useAdminKey();
@@ -417,18 +617,19 @@ export default function AdminPage() {
       <div className="max-w-4xl mx-auto px-6 py-8 space-y-6">
         {/* Tabs */}
         <div className="flex gap-1 border-b border-stone-200 pb-3">
-          {(['upload', 'browse'] as Tab[]).map((t) => (
+          {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               className={`px-4 py-1.5 text-sm rounded transition-colors ${
                 tab === t
                   ? 'bg-amber-600 text-white'
                   : 'text-stone-500 hover:text-stone-800'
-              }`}>{t === 'upload' ? 'Upload New Talk' : 'Browse & Edit'}</button>
+              }`}>{TAB_LABELS[t]}</button>
           ))}
         </div>
 
         {tab === 'upload' && <UploadTab adminKey={adminKey} />}
         {tab === 'browse' && <BrowseTab adminKey={adminKey} />}
+        {tab === 'corpus' && <CorpusUpdateTab adminKey={adminKey} />}
       </div>
     </div>
   );

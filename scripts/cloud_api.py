@@ -1,14 +1,17 @@
-from fastapi import Body, FastAPI, HTTPException, Query, Request
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
 import heapq
+import io
 import math
 import os
 import re
 import sqlite3
 import sys
+import tempfile
 import unicodedata
 import uuid
+import zipfile
 from collections import Counter
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -25,6 +28,13 @@ except ImportError:
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, 'data/osho.db')
+
+# Make ingest_docx / word_update importable (they live alongside this file
+# and import from build_fts using bare module names, so scripts/ must be on
+# sys.path, not just the repo root).
+_SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 ALLOWED_ORIGINS = [
     o.strip()
@@ -122,6 +132,27 @@ def _ensure_event_tags(conn: sqlite3.Connection) -> None:
             event_id TEXT, tag TEXT, PRIMARY KEY (event_id, tag)
         )
     """)
+
+
+def _ensure_corpus_meta(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS corpus_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+    )
+    conn.commit()
+
+
+def _get_corpus_meta(conn: sqlite3.Connection, key: str) -> Optional[str]:
+    row = conn.execute(
+        "SELECT value FROM corpus_meta WHERE key = ?", (key,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _set_corpus_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO corpus_meta (key, value) VALUES (?, ?)", (key, value)
+    )
+    conn.commit()
 
 
 def _auto_classify(title: str, content: str) -> list[str]:
@@ -876,6 +907,7 @@ async def lifespan(app: FastAPI):
             _ensure_paragraph_role_column(conn)
             _ensure_events_translated_from_column(conn)
             _ensure_events_source_short_column(conn)
+            _ensure_corpus_meta(conn)
         if has_fts:
             print("Ask Engine: FTS5 index present, keyword search ready.", flush=True)
         else:
@@ -1674,6 +1706,220 @@ async def admin_ingest(request: Request, body: dict = Body(...)):
         conn.commit()
 
     return {"ok": True, "event_id": event_id, "paragraphs": len(paragraphs), "tags": all_tags}
+
+
+@app.get("/api/version")
+def api_version():
+    """Public endpoint — returns the corpus data version date set by the last
+    successful bulk ingest or batch-update, or null if never set."""
+    if not os.path.exists(DB_PATH):
+        return {"corpus_version": None}
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        if not _table_exists(conn, "corpus_meta"):
+            return {"corpus_version": None}
+        version = _get_corpus_meta(conn, "corpus_version")
+    return {"corpus_version": version}
+
+
+def _find_update_root(tmpdir: str) -> Optional[str]:
+    """Locate the directory containing Add/, Modify/, Delete/ subfolders.
+
+    Checks the extracted root first, then one level deep (the WordDB YYYY-MM-DD/
+    dated-folder convention Antar uses).
+    """
+    _UPDATE_DIRS = ("Add", "Modify", "Delete")
+    if any(os.path.isdir(os.path.join(tmpdir, d)) for d in _UPDATE_DIRS):
+        return tmpdir
+    for entry in os.listdir(tmpdir):
+        sub = os.path.join(tmpdir, entry)
+        if os.path.isdir(sub) and any(
+            os.path.isdir(os.path.join(sub, d)) for d in _UPDATE_DIRS
+        ):
+            return sub
+    return None
+
+
+@app.post("/admin/upload-docx")
+async def admin_upload_docx(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: str = Form("false"),
+    corpus_version: str = Form(""),
+    skip_dirs: str = Form("Texts by Others"),
+):
+    """Bulk-ingest a zip of .docx files (best-effort: failed files are skipped
+    and reported; successful ones are committed unless dry_run=true).
+
+    Used for the initial full corpus load or a complete re-sync. Mirrors
+    ingest_docx.py's upsert-on-(title, language) semantics.
+    """
+    _check_admin(request)
+    is_dry_run = dry_run.lower() == "true"
+    skip_set = {d.strip().lower() for d in skip_dirs.split(",") if d.strip()}
+
+    raw = await file.read()
+    if len(raw) > 200 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Zip too large (max 200 MB)")
+    if raw[:4] != b"PK\x03\x04":
+        raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+
+    try:
+        import ingest_docx as _ingest
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail=f"ingest_docx module unavailable: {exc}")
+
+    processed = 0
+    failed = 0
+    failures: list[dict] = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                zf.extractall(tmpdir)
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+
+        docx_paths = []
+        for dirpath, dirnames, filenames in os.walk(tmpdir):
+            rel = os.path.relpath(dirpath, tmpdir)
+            parts = rel.split(os.sep) if rel != "." else []
+            if any(p.lower() in skip_set for p in parts):
+                dirnames.clear()
+                continue
+            dirnames[:] = [d for d in dirnames if d.lower() not in skip_set]
+            for fn in filenames:
+                if fn.startswith("~$") or not fn.lower().endswith(".docx"):
+                    continue
+                docx_paths.append(os.path.join(dirpath, fn))
+
+        if not docx_paths:
+            raise HTTPException(status_code=400, detail="No .docx files found in zip")
+
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            _ingest._ensure_translated_from_column(conn)
+            _ingest._ensure_source_short_column(conn)
+            _ingest._ensure_role_column(conn)
+
+            for path in docx_paths:
+                rel_path = os.path.relpath(path, tmpdir)
+                try:
+                    conn.execute("SAVEPOINT sp_file")
+                    talk = _ingest.parse_docx(path)
+                    _ingest.upsert(conn, talk)
+                    conn.execute("RELEASE SAVEPOINT sp_file")
+                    processed += 1
+                except Exception as ex:
+                    conn.execute("ROLLBACK TO SAVEPOINT sp_file")
+                    conn.execute("RELEASE SAVEPOINT sp_file")
+                    failed += 1
+                    if len(failures) < 50:
+                        failures.append({"file": rel_path, "error": str(ex)})
+
+            if is_dry_run:
+                conn.rollback()
+            else:
+                conn.commit()
+
+        saved_version: Optional[str] = None
+        cv = corpus_version.strip()
+        if cv and not is_dry_run and failed == 0:
+            with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+                _ensure_corpus_meta(conn)
+                _set_corpus_meta(conn, "corpus_version", cv)
+            saved_version = cv
+
+    return {
+        "ok": True,
+        "dry_run": is_dry_run,
+        "processed": processed,
+        "failed": failed,
+        "corpus_version": saved_version,
+        "failures": failures,
+    }
+
+
+@app.post("/admin/batch-update")
+async def admin_batch_update(
+    request: Request,
+    file: UploadFile = File(...),
+    dry_run: str = Form("false"),
+    corpus_version: str = Form(""),
+):
+    """Apply a structured Add/Modify/Delete update batch (all-or-nothing).
+
+    The zip must contain Add/, Modify/, Delete/ subfolders — either at the
+    top level or one level deep inside a dated folder like
+    WordDB 2027-01-01/. Mirrors word_update.py's run_update() semantics.
+    """
+    _check_admin(request)
+    is_dry_run = dry_run.lower() == "true"
+
+    raw = await file.read()
+    if len(raw) > 200 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Zip too large (max 200 MB)")
+    if raw[:4] != b"PK\x03\x04":
+        raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+
+    try:
+        from word_update import run_update, Action as UpdateAction
+    except ImportError as exc:
+        raise HTTPException(status_code=500, detail=f"word_update module unavailable: {exc}")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+                zf.extractall(tmpdir)
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+
+        update_root = _find_update_root(tmpdir)
+        if not update_root:
+            raise HTTPException(
+                status_code=400,
+                detail="Zip must contain Add/, Modify/, or Delete/ subfolders",
+            )
+
+        import pathlib
+        report = run_update(
+            pathlib.Path(update_root),
+            pathlib.Path(DB_PATH),
+            dry_run=is_dry_run,
+        )
+
+    counts: dict[str, int] = {a.value: 0 for a in UpdateAction}
+    failed = 0
+    failures: list[dict] = []
+    for r in report.results:
+        if r.ok:
+            counts[r.action.value] += 1
+        else:
+            failed += 1
+            if len(failures) < 50:
+                failures.append({
+                    "action": r.action.value,
+                    "file": r.path.name,
+                    "error": r.error or "",
+                })
+
+    saved_version: Optional[str] = None
+    cv = corpus_version.strip()
+    if cv and not is_dry_run and failed == 0:
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+            _ensure_corpus_meta(conn)
+            _set_corpus_meta(conn, "corpus_version", cv)
+        saved_version = cv
+
+    return {
+        "ok": True,
+        "dry_run": is_dry_run,
+        "corpus_version": saved_version,
+        "report": report.render(),
+        "added": counts.get("Add", 0),
+        "modified": counts.get("Modify", 0),
+        "deleted": counts.get("Delete", 0),
+        "failed": failed,
+        "failures": failures,
+    }
 
 
 if __name__ == "__main__":
