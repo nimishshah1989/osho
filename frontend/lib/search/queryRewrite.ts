@@ -167,8 +167,15 @@ export function parseQueryUnits(userQuery: string, exact = false): string[] | nu
     }
   }
 
-  for (const u of units) {
-    if (BOOLEAN_OP_RE.test(u.trim())) return null;
+  // With implicit whitespace split, a bare "OR"/"AND" etc. between terms
+  // means the query had a shape we don't model (e.g. `a OR b` without parens).
+  // With explicit " AND " separators (the Hindi variant-expansion shape),
+  // each part is an intended search token — "Or" in "Agyat Ki Or" is the
+  // Hindi word ओर (towards), not the FTS5 operator.
+  if (!hasExplicitAnd) {
+    for (const u of units) {
+      if (BOOLEAN_OP_RE.test(u.trim())) return null;
+    }
   }
   if (units.length < 2) return null;
   return units;

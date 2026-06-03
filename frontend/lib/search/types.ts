@@ -8,9 +8,7 @@ export interface SearchHit {
   paragraph_id: number;
   sequence_number: number;
   content: string;
-  /** FTS5-highlighted content with «…» around matched terms. Absent
-   *  when the hit came from a code path that doesn't have a usable
-   *  highlight (e.g. the cross-paragraph NEAR augmentation). */
+  /** FTS5-highlighted content with «…» around matched terms. */
   hl?: string;
   role?: string;
 }
