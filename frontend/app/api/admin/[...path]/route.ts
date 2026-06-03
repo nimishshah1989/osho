@@ -13,13 +13,25 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
   const url = new URL(request.url);
   const target = `${API_BASE}/admin/${path}${url.search}`;
 
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const contentType = request.headers.get('content-type') ?? '';
+  const isMultipart = contentType.startsWith('multipart/form-data');
+
+  const headers: Record<string, string> = {};
   const adminKey = request.headers.get('x-admin-key');
   if (adminKey) headers['x-admin-key'] = adminKey;
 
+  // For multipart uploads, preserve the original Content-Type (it carries the
+  // boundary token that the backend needs to parse form fields + file).
+  // For everything else, keep the existing JSON behaviour.
+  if (isMultipart) {
+    headers['content-type'] = contentType;
+  } else {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const init: RequestInit = { method: request.method, headers };
   if (!['GET', 'HEAD'].includes(request.method)) {
-    init.body = await request.text();
+    init.body = isMultipart ? await request.arrayBuffer() : await request.text();
   }
 
   try {

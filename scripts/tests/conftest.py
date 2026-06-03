@@ -43,7 +43,8 @@ def _seed_db(path: str) -> None:
             event_id TEXT NOT NULL,
             sequence_number INTEGER NOT NULL,
             content TEXT NOT NULL,
-            role TEXT
+            role TEXT,
+            is_embedded INTEGER DEFAULT 0
         );
         -- Tokenizer strings match scripts/build_fts.py exactly. `remove_diacritics 1`
         -- strips only Latin combining marks (é → e), never Devanagari matras —

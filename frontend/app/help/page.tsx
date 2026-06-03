@@ -1,4 +1,5 @@
 import Nav from '../../components/Nav';
+import CorpusVersionBadge from '../../components/CorpusVersionBadge';
 
 export const metadata = {
   title: 'Help — Osho Discourse Search',
@@ -183,6 +184,8 @@ export default function HelpPage() {
               each discourse series, dates, and locations.
             </p>
           </Section>
+
+          <CorpusVersionBadge />
 
         </div>
       </main>
