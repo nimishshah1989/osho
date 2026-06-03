@@ -798,6 +798,37 @@ def _record_level_search(
     return events, true_total_events, total_hits
 
 
+def _near_hl_for_discourse(
+    conn: sqlite3.Connection,
+    units: list[str],
+    near_dist: int,
+    ev_id: str,
+    fts_table: str = "paragraphs_fts",
+) -> dict[int, str]:
+    """Return paragraph_id → «»-marked hl for only the paragraphs that form
+    the NEAR proximity window in a single discourse.
+
+    Called from the /api/discourse endpoint when the standard FTS5 NEAR MATCH
+    finds no in-paragraph hits (cross-paragraph proximity case). Uses
+    _record_level_search restricted to the single event so the window logic is
+    shared with the search ranking path.
+    """
+    events, _, _ = _record_level_search(
+        conn, units, near_dist,
+        "AND e.id = ?", [ev_id],
+        fts_table=fts_table,
+    )
+    ev = events.get(ev_id)
+    if not ev:
+        return {}
+    result: dict[int, str] = {}
+    for hit in ev.get("hits", []):
+        hl = hit.get("hl")
+        if hl:
+            result[hit["paragraph_id"]] = hl
+    return result
+
+
 def _ensure_paragraph_role_column(conn: sqlite3.Connection) -> None:
     """Idempotent migration. Older DBs (built before the Word-style ingester)
     don't have `paragraphs.role`; add it on startup so the API can SELECT it
@@ -1421,6 +1452,15 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
                     )
             except sqlite3.OperationalError:
                 pass
+            # For NEAR queries: if FTS5's in-paragraph NEAR match returned no
+            # highlights (cross-paragraph proximity case), fall back to the
+            # window-aware record-level search so only the proximate passage
+            # is highlighted — not every occurrence of each word in the talk.
+            if not hl_map:
+                near_parsed = _parse_near(fts_query)
+                if near_parsed:
+                    near_units, near_dist = near_parsed
+                    hl_map = _near_hl_for_discourse(conn, near_units, near_dist, ev["id"])
 
         paragraphs = [
             {
