@@ -249,17 +249,37 @@ function SearchPageInner() {
   // regex would over-highlight standalone words in NEAR queries.
   const { matchIndices, hasBackendHl } = useMemo(() => {
     if (!discourse) return { matchIndices: [] as number[], hasBackendHl: false };
+    // Exclude sequence_number 0 (the title / meta row) from navigation.
+    // A search term that matches the discourse title should be highlighted
+    // visually but must not become a navigation stop — otherwise the arrow
+    // keys halt on the title of every discourse whose name contains the
+    // search word (Issue 3 regression, Sugit 2026-06-03).
+    const isNavParagraph = (p: Paragraph) => p.sequence_number !== 0;
     const fromHl = discourse.paragraphs
-      .map((p, idx) => (p.hl ? idx : -1))
+      .map((p, idx) => (p.hl && isNavParagraph(p) ? idx : -1))
       .filter((idx) => idx >= 0);
     if (fromHl.length > 0) return { matchIndices: fromHl, hasBackendHl: true };
+
+    // For cross-paragraph NEAR queries the discourse endpoint's FTS5
+    // NEAR match produces no hl markers (no single paragraph contains all
+    // words within N tokens). Fall back to the search-result hit paragraphs
+    // so arrow-key navigation still lands on the correct passages.
+    const selectedEvent = results?.events.find((e) => e.event_id === selectedEventId);
+    if (selectedEvent && selectedEvent.hits.length > 0) {
+      const hitSeqs = new Set(selectedEvent.hits.map((h) => h.sequence_number));
+      const fromHits = discourse.paragraphs
+        .map((p, idx) => (hitSeqs.has(p.sequence_number) && isNavParagraph(p) ? idx : -1))
+        .filter((idx) => idx >= 0);
+      if (fromHits.length > 0) return { matchIndices: fromHits, hasBackendHl: false };
+    }
+
     if (!highlightPattern) return { matchIndices: [] as number[], hasBackendHl: false };
     const re = new RegExp(highlightPattern.source, 'i');
     const indices = discourse.paragraphs
-      .map((p, idx) => (re.test(p.content) ? idx : -1))
+      .map((p, idx) => (re.test(p.content) && isNavParagraph(p) ? idx : -1))
       .filter((idx) => idx >= 0);
     return { matchIndices: indices, hasBackendHl: false };
-  }, [discourse, highlightPattern]);
+  }, [discourse, highlightPattern, results, selectedEventId]);
 
   const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
 
@@ -306,8 +326,14 @@ function SearchPageInner() {
       // the language normalisation.
       const langKey = (langFilter || '').trim().toLowerCase();
       const explicitEnglish = langKey === 'english' || langKey === 'en';
+      // In NEAR mode, only auto-transliterate if the raw query already has
+      // some Devanagari — a pure-Roman NEAR query ("enlightenment trust love")
+      // is almost certainly English, not romanised Hindi, so we leave it alone.
+      // For all-words and phrase modes the existing behaviour is preserved.
+      const rawHasDevanagari = HAS_DEVANAGARI.test(raw);
       const isRoman =
-        locale === 'hi' && !explicitEnglish && /[a-zA-Z]/.test(raw);
+        locale === 'hi' && !explicitEnglish && /[a-zA-Z]/.test(raw)
+        && (m !== 'near' || rawHasDevanagari);
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
       const isSingleWord = !/\s/.test(devanagari.trim());
@@ -907,7 +933,7 @@ function SearchPageInner() {
                 behaviour the right pane already has. */}
             <section
               aria-label="Results"
-              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-14rem)] overflow-y-auto"
+              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
             >
               {!results && !loading && !error && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">
@@ -987,7 +1013,7 @@ function SearchPageInner() {
             <section
               ref={detailRef}
               aria-label="Selected discourse"
-              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-14rem)] overflow-y-auto"
+              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
             >
               {!selectedEvent && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">

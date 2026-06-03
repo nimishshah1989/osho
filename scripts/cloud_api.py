@@ -362,11 +362,15 @@ def _parse_query_units(user_query: str, exact: bool = False):
             else:
                 units.extend(part.split())
 
-    # Reject if a unit is a bare boolean operator (would mean the query
-    # had a shape we don't model, e.g. `a OR b` without grouping).
-    for u in units:
-        if u.strip().upper() in ('OR', 'AND', 'NOT', 'NEAR'):
-            return None
+    # Reject if a unit is a bare boolean operator — but only for whitespace-
+    # split queries where `a OR b` (without parens) would emit ["a", "OR",
+    # "b"]. With explicit " AND " separators (the frontend's Hindi variant-
+    # expansion shape), each part is an intended search token: "Or" in
+    # "Agyat Ki Or" is the Hindi word ओर (towards), not the FTS5 operator.
+    if not has_explicit_and:
+        for u in units:
+            if u.strip().upper() in ('OR', 'AND', 'NOT', 'NEAR'):
+                return None
     if len(units) < 2:
         return None
     return units
@@ -603,6 +607,7 @@ def _record_level_search(
             'pid': r['paragraph_id'],
             'content': r['content'],
             'role': r['role'],
+            'hl': r['hl'] or '',
             'positions': positions,
             'token_count': total,
         }

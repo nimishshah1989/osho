@@ -32,4 +32,22 @@ describe('buildHindiFtsQuery (#5 — Stemmed-mode OR expansion must be FTS5-safe
     }
     db.close();
   });
+
+  it('handles mixed Roman+Devanagari queries without FTS5 keyword collision', () => {
+    // "Agyat Ki Or समझाया" — "Or" is an FTS5 keyword that must not be treated
+    // as an operator inside an explicit-AND unit list (Bug 12/13).
+    const db = new BetterSqlite3(':memory:');
+    db.exec(
+      "CREATE VIRTUAL TABLE fts USING fts5(content, "
+      + "tokenize=\"porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'\")",
+    );
+    db.prepare('INSERT INTO fts(content) VALUES (?)').run('Agyat Ki Or समझाया अंधकारपूर्ण test');
+
+    for (const q of ['Agyat Ki Or समझाया', 'Agyat Ki Or अंधकारपूर्ण', 'Ki And Not']) {
+      const fts = rewriteQuery(buildHindiFtsQuery(q));
+      // Must not throw a syntax error even though "Or", "And", "Not" look like FTS5 keywords.
+      expect(() => db.prepare('SELECT count(*) FROM fts WHERE fts MATCH ?').get(fts)).not.toThrow();
+    }
+    db.close();
+  });
 });

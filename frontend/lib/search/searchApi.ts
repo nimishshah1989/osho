@@ -55,6 +55,9 @@ export async function searchApi(
   if (!r.ok) {
     throw new Error((body && body.error) || `Archive unreachable (HTTP ${r.status})`);
   }
+  if (!body) {
+    throw new Error('Archive returned an empty response.');
+  }
   return body as SearchResponse;
 }
 

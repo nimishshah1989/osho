@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseNear, rewriteQuery, scopeWordToContent } from '../queryRewrite';
+import { parseNear, parseQueryUnits, rewriteQuery, scopeWordToContent } from '../queryRewrite';
 
 describe('rewriteQuery', () => {
   it('rewrites title:foo to title_search:foo and leaves it alone', () => {
@@ -83,5 +83,38 @@ describe('parseNear', () => {
 describe('scopeWordToContent', () => {
   it('wraps a word in the FTS5 content-column filter', () => {
     expect(scopeWordToContent('politicians')).toBe('{content} : (politicians)');
+  });
+});
+
+
+describe('parseQueryUnits', () => {
+  it('splits a plain multi-word query into units', () => {
+    expect(parseQueryUnits('love trust awareness')).toEqual(['love', 'trust', 'awareness']);
+  });
+
+  it('splits explicit-AND Hindi OR-expansion into units', () => {
+    const units = parseQueryUnits('अनंत AND (प्रेम OR प्रेमा)');
+    expect(units).toContain('अनंत');
+    expect(units).toContain('प्रेम OR प्रेमा');
+  });
+
+  it('allows FTS5-keyword tokens when they come from explicit AND splitting (Bug 12/13)', () => {
+    // "Agyat Ki Or" — "Or" is the Hindi word ओर (towards), not the FTS5 OR
+    // operator. With explicit " AND " separators the backend must treat it
+    // as a literal term, not bail to the legacy single-MATCH path.
+    const units = parseQueryUnits('Agyat AND Ki AND Or AND समझाया');
+    expect(units).not.toBeNull();
+    expect(units).toContain('Or');
+  });
+
+  it('still bails on bare OR/AND/NOT between whitespace-split terms', () => {
+    // `a OR b` without explicit AND separators — "OR" is a real operator here.
+    expect(parseQueryUnits('a OR b')).toBeNull();
+    expect(parseQueryUnits('love AND awareness')).not.toBeNull(); // AND as separator is fine
+  });
+
+  it('returns null for phrases and title-scoped queries', () => {
+    expect(parseQueryUnits('"exact phrase"')).toBeNull();
+    expect(parseQueryUnits('title:Satyam Shivam')).toBeNull();
   });
 });
