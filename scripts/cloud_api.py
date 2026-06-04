@@ -1758,8 +1758,8 @@ async def admin_upload_docx(
     skip_set = {d.strip().lower() for d in skip_dirs.split(",") if d.strip()}
 
     raw = await file.read()
-    if len(raw) > 200 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Zip too large (max 200 MB)")
+    if len(raw) > 2 * 1024 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
     if raw[:4] != b"PK\x03\x04":
         raise HTTPException(status_code=400, detail="File is not a valid zip archive")
 
@@ -1855,8 +1855,8 @@ async def admin_batch_update(
     is_dry_run = dry_run.lower() == "true"
 
     raw = await file.read()
-    if len(raw) > 200 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Zip too large (max 200 MB)")
+    if len(raw) > 2 * 1024 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
     if raw[:4] != b"PK\x03\x04":
         raise HTTPException(status_code=400, detail="File is not a valid zip archive")
 
