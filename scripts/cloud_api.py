@@ -1051,13 +1051,15 @@ def search(
     filters: list[str] = []
     filter_params: list = []
 
-    if language:
+    if language and language.lower() not in ('all', '*', ''):
         # Accept either form the corpus might use: the full name
         # ("English", "Hindi" — what the ingester writes after _LANG_MAP)
         # or the bare ISO code ("en", "hi" — what a non-normalising
         # ingest can leave in events.language). Mixing the two used to
         # mean filtering by "English" returned zero rows when the DB
         # contained "en". See _LANGUAGE_ALIASES.
+        # "all" and "*" mean no restriction — skip the filter entirely so
+        # the frontend can always send language=all without breaking results.
         aliases = _expand_language_aliases(language)
         placeholders = ",".join(["LOWER(?)"] * len(aliases))
         filters.append(f"LOWER(e.language) IN ({placeholders})")

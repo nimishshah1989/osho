@@ -86,10 +86,12 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
 
   const filters: string[] = [];
   const filterParams: unknown[] = [];
-  if (language) {
+  if (language && !['all', '*', ''].includes(language.toLowerCase())) {
     // Accept both full names and ISO codes — see cloud_api.py's
     // `_expand_language_aliases` for the same logic. Keeps the offline
     // engine tolerant to whatever the DB happens to hold.
+    // "all" and "*" mean no restriction — skip the filter so the frontend
+    // can safely send language="all" without getting zero results.
     const aliases = expandLanguageAliases(language);
     const placeholders = aliases.map(() => 'LOWER(?)').join(',');
     filters.push(`LOWER(e.language) IN (${placeholders})`);
