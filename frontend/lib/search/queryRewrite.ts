@@ -113,7 +113,9 @@ export function scopeWordToContent(word: string): string {
 // A `(g1) AND (g2) AND …` separator — the shape the frontend's Hindi
 // OR-expansion (buildHindiFtsQuery) emits. Mirrors `_AND_SPLIT_RE`.
 const AND_SPLIT_RE = /\s+AND\s+/;
-const BOOLEAN_OP_RE = /^(OR|AND|NOT|NEAR)$/i;
+// FTS5 keywords are case-SENSITIVE — only all-uppercase OR/AND/NOT/NEAR are
+// operators. Mixed-case "Or", "And" etc. are literal tokens (e.g. Hindi ओर).
+const BOOLEAN_OP_RE = /^(OR|AND|NOT|NEAR)$/;
 
 
 /**

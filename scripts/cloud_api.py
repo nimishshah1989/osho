@@ -399,9 +399,15 @@ def _parse_query_units(user_query: str, exact: bool = False):
     # "b"]. With explicit " AND " separators (the frontend's Hindi variant-
     # expansion shape), each part is an intended search token: "Or" in
     # "Agyat Ki Or" is the Hindi word ओर (towards), not the FTS5 operator.
+    #
+    # FTS5 keywords are case-SENSITIVE: only "OR", "AND", "NOT", "NEAR" (all
+    # uppercase) are operators. Mixed-case "Or", "And" etc. are literal tokens
+    # and must NOT be rejected — otherwise "Agyat Ki Or समझाया" falls back to
+    # paragraph-level AND (requiring all words in one paragraph) instead of
+    # discourse-level AND (words anywhere in the same discourse).
     if not has_explicit_and:
         for u in units:
-            if u.strip().upper() in ('OR', 'AND', 'NOT', 'NEAR'):
+            if u.strip() in ('OR', 'AND', 'NOT', 'NEAR'):
                 return None
     if len(units) < 2:
         return None
