@@ -29,9 +29,17 @@ async function proxy(request: NextRequest, { params }: { params: { path: string[
     headers['Content-Type'] = 'application/json';
   }
 
-  const init: RequestInit = { method: request.method, headers };
+  // RequestInit extended with duplex which Node fetch requires for streaming bodies.
+  const init = { method: request.method, headers } as RequestInit & { duplex?: string };
   if (!['GET', 'HEAD'].includes(request.method)) {
-    init.body = isMultipart ? await request.arrayBuffer() : await request.text();
+    if (isMultipart) {
+      // Stream directly — avoids buffering the entire upload in memory.
+      // duplex: 'half' is required by Node.js fetch when body is a ReadableStream.
+      init.body = request.body;
+      init.duplex = 'half';
+    } else {
+      init.body = await request.text();
+    }
   }
 
   try {
