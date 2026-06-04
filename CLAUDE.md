@@ -39,7 +39,7 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
         ├── /archive     — tree explorer             (components/Archive/TreeExplorer.tsx)
         ├── /constellation — clustered visualization (components/Constellation/Constellation.tsx)
         ├── /read        — full discourse reader     (app/read/page.tsx)
-        ├── /help        — search guide              (app/help/page.tsx)
+        ├── /help        — search guide + corpus version badge  (app/help/page.tsx)
         ├── /downloadapp — offline / desktop setup    (app/downloadapp/page.tsx)
         └── /admin       — ADMIN_KEY-protected ops   (app/admin/page.tsx)
 
@@ -48,20 +48,26 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
         ├── /api/discourse — single discourse, w/ optional q for FTS highlights
         ├── /api/catalog   — full event list
         ├── /api/languages
+        ├── /api/version   — corpus data version date (no auth)
         └── /api/admin/*   — admin ops (forwards x-admin-key header)
 
 127.0.0.1:8000 (FastAPI on the same VPS, /home/osho/osho)
   └── uvicorn scripts.cloud_api:app
         ├── /api/search      — BM25-ranked FTS5 search
         ├── /api/discourse   — paragraphs w/ FTS5 highlight markers \x02 \x03 → «»
+        ├── /api/version     — returns corpus_meta["corpus_version"] (no auth)
         ├── /api/catalog, /api/tags, /api/clusters, …
         └── /admin/*         — ingest, edit, tag, delete (x-admin-key required)
+              ├── /admin/ingest          — paste a single talk (JSON)
+              ├── /admin/upload-docx     — bulk zip of .docx files (multipart)
+              └── /admin/batch-update    — Add/Modify/Delete zip batch (multipart)
 
         DB: data/osho.db (SQLite, ~1.6 GB)
           ├── events          (id, title, date, location, language)
           ├── paragraphs      (id, event_id, sequence_number, content)
           ├── paragraphs_fts  (FTS5 virtual table — see Tokenizer below)
-          └── event_tags      (event_id, tag) — auto-classified topic tags
+          ├── event_tags      (event_id, tag) — auto-classified topic tags
+          └── corpus_meta     (key, value) — e.g. corpus_version → "2026-05-24"
 ```
 
 ---
@@ -270,8 +276,8 @@ the box is reproducible.
 
 ## Security posture
 
-- **`ADMIN_KEY`** — env var on the VPS, read from `/home/osho/osho/.env` (see
-  `cloud_api.py` `load_dotenv`). The default `"osho-admin"` MUST never be live in
+- **`ADMIN_KEY`** — env var on the VPS, read from `/etc/osho/backend.env` (via
+  `EnvironmentFile=` in the systemd unit). The default `"osho-admin"` MUST never be live in
   production. Backend hard-fails on startup if `OSHO_ENV=production` and the key
   is default/missing.
 - CORS: `ALLOWED_ORIGINS` env var (code default `https://oshoarchives.com`).
@@ -282,18 +288,45 @@ the box is reproducible.
 
 ## Data freshness
 
-Adding new talks:
+### Self-service ingestion (preferred — no SSH needed)
 
-**Preferred — bulk `.docx`**: drop `*.docx` files with `@field=` headers into a
-directory and run `python3 scripts/ingest_docx.py <dir>` (walks recursively;
-`--dry-run` to parse-only). Upserts by `(title, language)`. The
-Add/Modify/Delete folder pipeline (`scripts/word_update.py`,
-`scripts/make_staging.py`, `scripts/diff_db.py`) supports transactional,
-reviewable batch updates with a staging snapshot + per-record diff.
+The admin UI at `/admin` → **Corpus Update** tab exposes the full pipeline to
+non-technical archivists. Two modes, both require the `ADMIN_KEY`:
 
-**Quick fixes — admin UI**: paste the talk into `/admin/` → New event form. The
-admin ingest applies `_normalize_devanagari` to both title and content before
-FTS insert.
+**Bulk ingest** (`POST /admin/upload-docx`) — for the initial corpus load or a
+full re-sync. Upload a `.zip` of `.docx` files in any subdirectory layout
+(e.g. `English/`, `Hindi/`). Every file is upserted idempotently on
+`(title, language)`. `Texts by Others/` is silently skipped. Best-effort: file
+parse errors are recorded and reported but don't abort the rest. Supports
+dry-run.
+
+**Structured update** (`POST /admin/batch-update`) — for Antar's monthly
+`WordDB YYYY-MM-DD/` batches. Upload a `.zip` containing `Add/`, `Modify/`,
+`Delete/` subfolders (top-level or one level inside a dated wrapper folder).
+All-or-nothing transaction: any failure rolls back the whole batch. Supports
+dry-run.
+
+Both modes accept an optional **corpus version date** (e.g. `"2026-05-24"`)
+that is saved to `corpus_meta` on a successful non-dry-run and shown on the
+Help page as "Data version YYYY-MM-DD" via `CorpusVersionBadge`.
+
+### CLI (SSH required, for large corpus or scripting)
+
+**Bulk `.docx`**: `python3 scripts/ingest_docx.py <dir>` (walks recursively;
+`--dry-run` to parse-only). Upserts by `(title, language)`.
+
+**Batch update**: `python3 scripts/word_update.py <root>` where `<root>`
+contains `Add/`, `Modify/`, `Delete/` subfolders. Transactional.
+
+**Staging/review**: `scripts/make_staging.py` copies live DB → `staging.db`;
+`scripts/diff_db.py` diffs them before cutover.
+
+### Quick fixes — admin UI
+
+Paste a single talk into `/admin/` → **Upload New Talk** tab. The
+`/admin/ingest` endpoint applies `_normalize_devanagari` before FTS insert.
+
+### Note on the DB
 
 The data lives only on the VPS (`/home/osho/osho/data/osho.db`) and is
 gitignored — moved between machines by rsync, never committed.
@@ -328,12 +361,17 @@ gitignored — moved between machines by rsync, never committed.
 
 ---
 
-## Open known-issues backlog (audited 2026-05-22)
+## Open known-issues backlog (audited 2026-06-03)
 
-Resolved since the 2026-05-11 audit:
-- ADMIN_KEY production hard-fail (was CRITICAL #1)
-- Deploy workflow now E2E-ready / automated (was CRITICAL #2)
-- `.docx` ingestion pipeline built (was CRITICAL #3)
+Resolved since the 2026-05-22 audit (Sugit's feedback batch, PRs #85–87):
+- Bug 8: null crash "can't access property 'total'" — `searchApi` null guard
+- Bug 10: no highlights in top-matches card for NEAR/All-words — `_record_level_search` now stores `hl`
+- Bug 11a: arrow key navigation halts on discourse title (seq 0) — `isNavParagraph` guard
+- Bug 11b: full discourse view highlights every word occurrence for NEAR queries — `_near_hl_for_discourse` scopes hl to proximity window only (PR #86)
+- Bug 12/13: FTS5 keyword collision ("Or"/"And" in Hindi queries like "Agyat Ki Or") — `_parse_query_units` only rejects keyword units for whitespace-split, not explicit-AND
+- Issue 3 / Sub-bug 1: arrow nav + NEAR + pure-Roman queries in Hindi mode
+- Self-service ingestion: Antar/Sugit can now upload Word DB batches via `/admin` Corpus Update tab — no SSH needed (PR #87)
+- Corpus version display: Help page shows "Data version YYYY-MM-DD" after each ingest
 
 Still open, high-impact first:
 
@@ -344,3 +382,5 @@ Still open, high-impact first:
 5. MINOR — `total_hits` over-reports for narrow NEAR queries
 6. OPS — Provisioning scripts (`02-setup-single-vps.sh`,
    `refresh-cloudflare-ips.sh`) live only on the box, not in the repo.
+7. OPS — Initial corpus load: zip `\English\` + `\Hindi\` from Sugit's NAS
+   and upload via `/admin` → Corpus Update → Bulk ingest with version `2026-05-24`.
