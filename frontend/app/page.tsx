@@ -151,7 +151,10 @@ function extractHighlights(query: string): RegExp | null {
 
 function Highlighted({ text, hl, pattern }: { text: string; hl?: string; pattern: RegExp | null }) {
   // Backend sends FTS5 highlight markers «...» that correctly reflect porter-stemmed matches.
-  if (hl) {
+  // Guard: only use hl when it actually contains markers — plain content without «»
+  // (e.g. from a title_search-only match or a FTS5 highlight edge case) should fall
+  // through to the regex fallback so words are still highlighted in the text.
+  if (hl && hl.includes('«')) {
     const parts = hl.split(/(«[^»]*»)/);
     return (
       <>
@@ -256,7 +259,7 @@ function SearchPageInner() {
     // search word (Issue 3 regression, Sugit 2026-06-03).
     const isNavParagraph = (p: Paragraph) => p.sequence_number !== 0;
     const fromHl = discourse.paragraphs
-      .map((p, idx) => (p.hl && isNavParagraph(p) ? idx : -1))
+      .map((p, idx) => (p.hl && p.hl.includes('«') && isNavParagraph(p) ? idx : -1))
       .filter((idx) => idx >= 0);
     if (fromHl.length > 0) return { matchIndices: fromHl, hasBackendHl: true };
 
@@ -331,9 +334,15 @@ function SearchPageInner() {
       // is almost certainly English, not romanised Hindi, so we leave it alone.
       // For all-words and phrase modes the existing behaviour is preserved.
       const rawHasDevanagari = HAS_DEVANAGARI.test(raw);
+      // Don't transliterate when the query ALREADY contains Devanagari — that
+      // signals a mixed-script query like "Agyat Ki Or समझाया" that must be sent
+      // verbatim. Only auto-romanise pure-Latin input.
+      // For NEAR mode we keep the existing guard: only transliterate when there
+      // IS Devanagari already present (pure-Latin NEAR queries like
+      // "enlightenment trust" are almost always English, not romanised Hindi).
       const isRoman =
         locale === 'hi' && !explicitEnglish && /[a-zA-Z]/.test(raw)
-        && (m !== 'near' || rawHasDevanagari);
+        && (m === 'near' ? rawHasDevanagari : !rawHasDevanagari);
       const devanagari = isRoman ? romanToDevanagari(raw) : raw;
       const hasDevanagari = HAS_DEVANAGARI.test(devanagari);
       const isSingleWord = !/\s/.test(devanagari.trim());
@@ -395,10 +404,10 @@ function SearchPageInner() {
           mode: m,
           language: langFilter || 'all',
           proxDist: m === 'near' ? prox : undefined,
-          resultCount: sr.total ?? 0,
-          hitCount: sr.total_hits ?? 0,
+          resultCount: sr?.total ?? 0,
+          hitCount: sr?.total_hits ?? 0,
         });
-        if ((sr.total ?? 0) === 0) trackSearchEmpty(rawQ, m);
+        if ((sr?.total ?? 0) === 0) trackSearchEmpty(rawQ, m);
       } catch (err) {
         setResults(null);
         setError(err instanceof Error ? err.message : 'Archive unreachable.');
@@ -933,7 +942,7 @@ function SearchPageInner() {
                 behaviour the right pane already has. */}
             <section
               aria-label="Results"
-              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
+              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-20rem)] overflow-y-auto"
             >
               {!results && !loading && !error && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">
@@ -1013,7 +1022,7 @@ function SearchPageInner() {
             <section
               ref={detailRef}
               aria-label="Selected discourse"
-              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
+              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-20rem)] overflow-y-auto"
             >
               {!selectedEvent && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">

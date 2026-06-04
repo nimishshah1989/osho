@@ -519,6 +519,7 @@ def _record_level_search(
     where_extra: str,
     filter_params: list,
     fts_table: str = "paragraphs_fts",
+    _max_hits: Optional[int] = 3,
 ) -> tuple[dict, int, int]:
     """Record-level All-words / Within-N matching (OCTP semantics).
 
@@ -619,10 +620,11 @@ def _record_level_search(
             WHERE {fts_table} MATCH ?
             AND f.event_id IN ({placeholders})
             {where_extra}
+            LIMIT 100000
             """,
             ([gather_fts] + common_list + filter_params),
         ).fetchall()
-    except sqlite3.OperationalError:
+    except Exception:
         return {}, 0, 0
 
     # event_id -> { seq: {pid, content, role, positions, token_count} }
@@ -777,12 +779,13 @@ def _record_level_search(
             hit_count = len(para_map)
         total_hits += hit_count
 
-        # Display hits: up to 3 paragraphs from display_seqs, ordered by
+        # Display hits: up to _max_hits paragraphs from display_seqs, ordered by
         # sequence_number, with «»-highlight conversion. (para_map is
-        # already meta-filtered at gather time.)
+        # already meta-filtered at gather time.) _max_hits=None means no cap
+        # (used by _near_hl_for_discourse to illuminate the full window).
         hits = []
         for seq in display_seqs:
-            if len(hits) >= 3:
+            if _max_hits is not None and len(hits) >= _max_hits:
                 break
             info = para_map.get(seq)
             if info is None:
@@ -849,14 +852,18 @@ def _near_hl_for_discourse(
         conn, units, near_dist,
         "AND e.id = ?", [ev_id],
         fts_table=fts_table,
+        _max_hits=None,  # include ALL proximity-window paragraphs, not just first 3
     )
     ev = events.get(ev_id)
     if not ev:
         return {}
     result: dict[int, str] = {}
     for hit in ev.get("hits", []):
-        hl = hit.get("hl")
-        if hl:
+        hl = hit.get("hl", "")
+        # Only return hl that actually contains «» markers — plain content
+        # without markers (e.g. when FTS5 highlight can't resolve the match)
+        # would suppress the frontend's regex fallback without adding value.
+        if hl and '«' in hl:
             result[hit["paragraph_id"]] = hl
     return result
 
@@ -1113,14 +1120,17 @@ def search(
         conn.row_factory = sqlite3.Row
 
         if record_units is not None:
-            events, total_events, total_hits = _record_level_search(
-                conn,
-                record_units,
-                record_near_dist,
-                where_extra,
-                filter_params,
-                fts_table=fts_table,
-            )
+            try:
+                events, total_events, total_hits = _record_level_search(
+                    conn,
+                    record_units,
+                    record_near_dist,
+                    where_extra,
+                    filter_params,
+                    fts_table=fts_table,
+                )
+            except Exception:
+                events, total_events, total_hits = {}, 0, 0
 
             for ev in events.values():
                 hit_bonus = math.log1p(ev.get("hit_count", 1))
@@ -1478,6 +1488,14 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
                 ).fetchall()
                 for row in hl_rows:
                     raw_hl = row["hl"] or ''
+                    # Only add hl when there are actual match markers — a row
+                    # matched via title_search (not content) yields a content
+                    # highlight with no \x02\x03 marks. Storing it would set
+                    # p.hl on every paragraph in such a discourse, making every
+                    # paragraph a nav stop even though none contains the word
+                    # in its text (Bug @3, Sugit 2026-06-03).
+                    if '\x02' not in raw_hl:
+                        continue
                     hl_map[row["paragraph_id"]] = (
                         _strip_shailendra(raw_hl)
                         .replace('\x02', '«')
