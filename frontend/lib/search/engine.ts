@@ -135,8 +135,15 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   let recordUnits: string[] | null;
   let recordNearDist: number | null;
   if (nearParsed) {
-    recordUnits = nearParsed.words;
-    recordNearDist = nearParsed.distance;
+    // Record-level cross-paragraph proximity only for N >= 100.
+    // Narrow NEAR (N < 100) uses FTS5 in-paragraph NEAR to match OCTP semantics.
+    if (nearParsed.distance >= 100) {
+      recordUnits = nearParsed.words;
+      recordNearDist = nearParsed.distance;
+    } else {
+      recordUnits = null;
+      recordNearDist = null;
+    }
   } else {
     const parsed = parseQueryUnits(q, exact);
     recordUnits = parsed && parsed.length >= 2 ? parsed : null;

@@ -1116,13 +1116,27 @@ def search(
     # This activates ONLY for NEAR and for multi-unit All-words queries —
     # single-word, phrase, and explicit `title:` queries keep the existing
     # single-MATCH path so we minimise regression to the rest of the suite.
+    #
+    # NEAR threshold: record-level cross-paragraph proximity only for N >= 100.
+    # For narrow NEAR (N < 100), words almost always sit in the same paragraph,
+    # so FTS5's built-in in-paragraph NEAR is both faster and more accurate —
+    # it matches OCTP's per-paragraph semantics. Cross-paragraph was only ever
+    # intended for wide windows (the 2026-05-16 "N >= 100" design). Using it
+    # for N=20 produces false positives (words spread across paragraphs counted
+    # as "within 20 tokens") — Sugit 2026-06-04.
     if near_parsed:
-        record_units = list(near_parsed[0])
-        record_near_dist = near_parsed[1]
+        units_p, dist_p = near_parsed
+        if dist_p >= 100:
+            record_units = list(units_p)
+            record_near_dist = dist_p
+        else:
+            record_units = None   # fall through to FTS5 in-paragraph NEAR
+            record_near_dist = None
     else:
         parsed = _parse_query_units(q, exact=exact)
         record_units = parsed if (parsed and len(parsed) >= 2) else None
         record_near_dist = None
+
 
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
