@@ -5,6 +5,7 @@ import heapq
 import io
 import math
 import os
+from pathlib import Path
 import re
 import sqlite3
 import sys
@@ -1804,7 +1805,7 @@ async def admin_upload_docx(
                 rel_path = os.path.relpath(path, tmpdir)
                 try:
                     conn.execute("SAVEPOINT sp_file")
-                    talk = _ingest.parse_docx(path)
+                    talk = _ingest.parse_docx(Path(path))
                     _ingest.upsert(conn, talk)
                     conn.execute("RELEASE SAVEPOINT sp_file")
                     processed += 1
@@ -1822,7 +1823,7 @@ async def admin_upload_docx(
 
         saved_version: Optional[str] = None
         cv = corpus_version.strip()
-        if cv and not is_dry_run and failed == 0:
+        if cv and not is_dry_run and processed > 0:
             with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
                 _ensure_corpus_meta(conn)
                 _set_corpus_meta(conn, "corpus_version", cv)
