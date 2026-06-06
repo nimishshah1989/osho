@@ -249,6 +249,15 @@ _TITLE_FILTER_RE = re.compile(r'\btitle\s*:\s*', re.IGNORECASE)
 # query where matching the title would just inflate the count with the
 # discourse-series name (Sugit 2026-05-16: "Satyam Shivam").
 _PHRASE_ONLY_RE = re.compile(r'^\s*"[^"]+"\s*$')
+# Matches an English possessive apostrophe-s ("women's", "it's") so we can
+# strip it before the generic apostrophe→space replacement. Without this,
+# "women's liberation" becomes "women s liberation": the lone "s" token
+# matches every paragraph that contains any apostrophe word (women's, it's,
+# that's…), inflating hit counts into the thousands. Stripping "'s" first
+# gives "women liberation" — a clean 2-token AND query. Both straight (')
+# and curly (') apostrophes are handled; the 's' is case-insensitive to
+# cover "Boss'S" etc.
+_POSSESSIVE_RE = re.compile(r"[''][Ss]\b")
 
 
 def _rewrite_query(user_query: str, exact: bool = False) -> str:
@@ -276,14 +285,17 @@ def _rewrite_query(user_query: str, exact: bool = False) -> str:
     # or if the entire query is a single quoted phrase.
     if 'title_search:' in q or _PHRASE_ONLY_RE.match(q):
         return q
-    # An apostrophe in an un-quoted term (e.g. "women's") is a hard FTS5
-    # grammar error: `fts5: syntax error near "'"`. The unicode61
-    # tokenizer already splits on apostrophe at index time (women's →
-    # women + s), so replacing it with a space here yields the same
-    # matched tokens without the crash. Phrases ("…") are left untouched
-    # above — FTS5 accepts an apostrophe inside a quoted string. Both the
-    # straight (U+0027) and curly (U+2019) forms are handled.
-    q = q.replace("’", " ").replace("'", " ").strip()
+    # Strip English possessives first ("women’s" → "women", "it’s" → "it").
+    # Without this the lone "s" token from "women’s" → "women s" matches
+    # every paragraph that has any apostrophe word, producing thousands of
+    # false hits. Phrases are exempt (handled by the early return above).
+    q = _POSSESSIVE_RE.sub(‘’, q)
+    # Replace remaining apostrophes with a space (e.g. "rock’n’roll" →
+    # "rock n roll"). The unicode61 tokenizer splits on apostrophe at index
+    # time so spaces and apostrophes yield the same tokens — but FTS5 treats
+    # a bare apostrophe as a grammar error, so we must replace rather than
+    # leave. Both straight (U+0027) and curly (U+2019) forms.
+    q = q.replace("’", " ").replace("’", " ").strip()
     # A query of nothing but apostrophes collapses to empty here — return
     # empty rather than wrapping `{content} : ()`, which FTS5 also rejects.
     if not q:
@@ -357,9 +369,10 @@ def _parse_query_units(user_query: str, exact: bool = False):
         return None
     if not exact:
         q = _normalize_devanagari(q)
-    # An apostrophe is dropped the same way _rewrite_query does (the
-    # tokenizer splits on it anyway), so `women's` → `women s`.
-    q = q.replace("’", " ").replace("'", " ").strip()
+    # Possessive "’s" stripped first (women’s → women), then remaining
+    # apostrophes replaced with space — mirrors _rewrite_query.
+    q = _POSSESSIVE_RE.sub(‘’, q)
+    q = q.replace("’", " ").replace("’", " ").strip()
     if not q:
         return None
 
@@ -1117,16 +1130,16 @@ def search(
     # single-word, phrase, and explicit `title:` queries keep the existing
     # single-MATCH path so we minimise regression to the rest of the suite.
     #
-    # NEAR threshold: record-level cross-paragraph proximity only for N >= 100.
-    # For narrow NEAR (N < 100), words almost always sit in the same paragraph,
-    # so FTS5's built-in in-paragraph NEAR is both faster and more accurate —
-    # it matches OCTP's per-paragraph semantics. Cross-paragraph was only ever
-    # intended for wide windows (the 2026-05-16 "N >= 100" design). Using it
-    # for N=20 produces false positives (words spread across paragraphs counted
-    # as "within 20 tokens") — Sugit 2026-06-04.
+    # NEAR threshold: record-level cross-paragraph proximity only for N > 100.
+    # For N <= 100 (the full range of the UI slider), FTS5's built-in
+    # in-paragraph NEAR is used — it matches OCTP's per-paragraph semantics
+    # and avoids false positives from words spread across paragraphs being
+    # counted as "within N tokens". Cross-paragraph is reserved for very wide
+    # windows (N > 100) where the words are almost certainly in different
+    # paragraphs — Sugit 2026-06-06.
     if near_parsed:
         units_p, dist_p = near_parsed
-        if dist_p >= 100:
+        if dist_p > 100:
             record_units = list(units_p)
             record_near_dist = dist_p
         else:
@@ -1460,13 +1473,19 @@ def clusters(lens: str = "themes", limit: int = 20):
 
 
 @app.get("/api/discourse")
-def discourse(title: str | None = None, event_id: str | None = None, q: str | None = None):
+def discourse(
+    title: str | None = None,
+    event_id: str | None = None,
+    q: str | None = None,
+    exact: bool = False,
+):
     if not title and not event_id:
         raise HTTPException(status_code=400, detail="Provide title or event_id")
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="Discourse store unavailable")
 
-    fts_query = _rewrite_query(q) if q else None
+    fts_table = "paragraphs_fts_exact" if exact else "paragraphs_fts"
+    fts_query = _rewrite_query(q, exact=exact) if q else None
 
     with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         conn.row_factory = sqlite3.Row
@@ -1500,10 +1519,10 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
         if fts_query:
             try:
                 hl_rows = conn.execute(
-                    """
-                    SELECT f.paragraph_id, highlight(paragraphs_fts, 0, '\x02', '\x03') AS hl
-                    FROM paragraphs_fts f
-                    WHERE paragraphs_fts MATCH ?
+                    f"""
+                    SELECT f.paragraph_id, highlight({fts_table}, 0, '\x02', '\x03') AS hl
+                    FROM {fts_table} f
+                    WHERE {fts_table} MATCH ?
                     AND f.event_id = ?
                     """,
                     (fts_query, ev["id"]),
@@ -1533,7 +1552,9 @@ def discourse(title: str | None = None, event_id: str | None = None, q: str | No
                 near_parsed = _parse_near(fts_query)
                 if near_parsed:
                     near_units, near_dist = near_parsed
-                    hl_map = _near_hl_for_discourse(conn, near_units, near_dist, ev["id"])
+                    hl_map = _near_hl_for_discourse(
+                        conn, near_units, near_dist, ev["id"], fts_table=fts_table,
+                    )
 
         paragraphs = [
             {

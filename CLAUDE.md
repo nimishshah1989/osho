@@ -361,26 +361,54 @@ gitignored — moved between machines by rsync, never committed.
 
 ---
 
-## Open known-issues backlog (audited 2026-06-03)
+## Open known-issues backlog (audited 2026-06-06)
 
-Resolved since the 2026-05-22 audit (Sugit's feedback batch, PRs #85–87):
-- Bug 8: null crash "can't access property 'total'" — `searchApi` null guard
-- Bug 10: no highlights in top-matches card for NEAR/All-words — `_record_level_search` now stores `hl`
-- Bug 11a: arrow key navigation halts on discourse title (seq 0) — `isNavParagraph` guard
-- Bug 11b: full discourse view highlights every word occurrence for NEAR queries — `_near_hl_for_discourse` scopes hl to proximity window only (PR #86)
-- Bug 12/13: FTS5 keyword collision ("Or"/"And" in Hindi queries like "Agyat Ki Or") — `_parse_query_units` only rejects keyword units for whitespace-split, not explicit-AND
-- Issue 3 / Sub-bug 1: arrow nav + NEAR + pure-Roman queries in Hindi mode
-- Self-service ingestion: Antar/Sugit can now upload Word DB batches via `/admin` Corpus Update tab — no SSH needed (PR #87)
-- Corpus version display: Help page shows "Data version YYYY-MM-DD" after each ingest
+### Resolved — PRs #85–87 (2026-05-22 audit, Sugit's first feedback batch)
+- `searchApi` null crash ("can't access property 'total'") — null guard
+- No highlights in top-matches card for NEAR/All-words — `_record_level_search` stores `hl`
+- Arrow nav halts on discourse title (seq 0) — `isNavParagraph` guard
+- Full discourse over-highlights every word for NEAR — `_near_hl_for_discourse` scopes to window
+- FTS5 keyword collision ("Or"/"And" in Hindi): `_parse_query_units` only rejects uppercase keywords for whitespace-split
+- Self-service ingestion via `/admin` (no SSH needed) — PR #87
+- Corpus version badge on Help page
 
-Still open, high-impact first:
+### Resolved — PRs #91–95 (2026-06-03 to 2026-06-06, Sugit's second feedback batch)
 
-1. MODERATE — Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
-2. MODERATE — Archive / Constellation / Help skip `t(...)` (English-only in Hindi locale)
-3. MODERATE — Date range inputs don't auto-refresh
-4. MINOR — Dead routes: `/ask`, `/nebula`, `/zen-tree`
-5. MINOR — `total_hits` over-reports for narrow NEAR queries
-6. OPS — Provisioning scripts (`02-setup-single-vps.sh`,
-   `refresh-cloudflare-ips.sh`) live only on the box, not in the repo.
-7. OPS — Initial corpus load: zip `\English\` + `\Hindi\` from Sugit's NAS
-   and upload via `/admin` → Corpus Update → Bulk ingest with version `2026-05-24`.
+**PR #91** — title_search hl leak, record-level improvements
+- `paragraphs_fts` title_search column generated spurious hl markers → every paragraph was a nav stop when a title word matched. Fixed: discourse endpoint now skips hl rows with no `\x02` markers.
+- `_record_level_search` added `LIMIT 100000` and broad `except Exception` to survive timeout on common Hindi words.
+- `_max_hits=None` for `_near_hl_for_discourse` so full proximity window is highlighted.
+- `Highlighted` component and `matchIndices` now guard `hl.includes('«')` to skip title-only matches.
+
+**PR #92** — `language=all` returning 0 results
+- Backend treated "all" as a literal language name. Fixed: `language.lower() not in ('all', '*', '')` skip.
+- Same fix in offline TS engine.
+
+**PR #93** — Mixed-case "Or"/"And" rejected as FTS5 keywords
+- `_parse_query_units` used `.upper()` before keyword check. FTS5 keywords are case-sensitive (only `OR`, `AND`, `NOT`, `NEAR` are operators). Fixed: exact string comparison, `re.IGNORECASE` flag removed from TS regex.
+
+**PR #94** — Narrow NEAR (N < 100) false positives via cross-paragraph
+- Cross-paragraph record-level NEAR was firing for all N. For N < 100, words in different paragraphs were counted as "within N tokens" producing false positives. Fixed: cross-paragraph only for N > 100 (slider max is 100, so all UI NEAR queries now use FTS5 in-paragraph).
+
+**PR #95** — Sugit's second email: @6 @11 @14–@16 @17
+- @6/@11: NEAR=100 exact giving wrong counts vs OCTP. Same fix as PR #94 (threshold now `> 100` not `>= 100`).
+- @14/@16: Discourse endpoint ignored `exact` flag — highlights used stemmed FTS even in exact mode. Fixed: `/api/discourse` now accepts `exact` param, uses `paragraphs_fts_exact`, forwarded through proxy route + API client + offline engine.
+- @15: "women's liberation" → ~9900 hits. Apostrophe handling in `_rewrite_query` / `_parse_query_units` was replacing `'s` with space, emitting a lone "s" token that matches everything. Fixed: strip possessive `'s` first (`_POSSESSIVE_RE`), then replace remaining apostrophes. Same fix in TS `queryRewrite.ts`.
+- @17: Full discourse + right arrow now navigates to next discourse (was: stepped through match paragraphs). When `<details>` is open, `←`/`→` call `navigateEvent`; when closed, original `jumpToMatchAcross` behaviour is kept.
+
+### Still open (as of 2026-06-06)
+
+**High priority (archivist-visible):**
+1. **@5** — `परमात्मा की तरफ जिसे जाना` All-words Exact returns 2270 results / 100000 hits (793 KB response). May timeout in the frontend → NetworkError. Root cause: very common Hindi particles (की, जिसे) match almost every Hindi discourse; intersection is huge in exact mode. Possible fix: cap `_RECORD_LEVEL_EVENT_CAP` lower in exact mode, or display a "too many results" warning instead of loading them all.
+2. **@3** — Intermittent: title match on title row occasionally still lands arrow-key nav on seq=0. Believed fixed in PR #91 but Sugit may encounter it on a different query type; needs confirmation.
+
+**Moderate priority (UX):**
+3. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
+4. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
+5. Date range inputs don't auto-refresh after typing (requires explicit submit)
+
+**Minor / ops:**
+6. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
+7. `total_hits` over-reports for narrow NEAR (N < 20) — FTS5 in-paragraph NEAR only counts per-paragraph but the display shows the per-event total
+8. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
+9. Corpus version 2025-04-28 (matching OCTP) was overwritten by 2026-05-24 upload — no backup. Sugit said may not be strictly needed.

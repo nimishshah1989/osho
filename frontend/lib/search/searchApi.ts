@@ -75,6 +75,7 @@ export async function discourseApi(
   if (opts.title)   params.set('title',   opts.title);
   if (opts.eventId) params.set('event_id', opts.eventId);
   if (opts.q)       params.set('q', opts.q);
+  if (opts.exact)   params.set('exact',   'true');
   const r = await fetch(`/api/discourse?${params.toString()}`);
   const body = await r.json().catch(() => null);
   if (!r.ok) {

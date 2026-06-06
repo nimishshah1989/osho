@@ -11,6 +11,13 @@ import { normalizeDevanagari } from './devanagari';
 // the FTS5 schema.
 const TITLE_FILTER_RE = /\btitle\s*:\s*/gi;
 
+// Strips English possessive "'s" (straight or curly) before the generic
+// apostrophe→space replacement. Prevents "women's liberation" from becoming
+// "women s liberation" — the lone "s" token would match every paragraph with
+// any apostrophe word, producing thousands of false hits. Mirrors _POSSESSIVE_RE
+// in cloud_api.py.
+const POSSESSIVE_RE = /['']\s*[Ss]\b/g;
+
 // A query that's exactly one quoted phrase and nothing else. Phrase
 // mode keeps the title column searchable because that's how a user
 // looks up a series by name (Sugit 2026-05-16).
@@ -59,12 +66,12 @@ export function rewriteQuery(userQuery: string, opts: RewriteOptions = {}): stri
   if (!opts.exact) q = normalizeDevanagari(q);
   if (!q) return q;
   if (q.includes('title_search:') || PHRASE_ONLY_RE.test(q)) return q;
-  // An apostrophe in an un-quoted term ("women's") is a hard FTS5 grammar
-  // error. The unicode61 tokenizer splits on apostrophe at index time
-  // (women's → women + s), so replacing it with a space yields the same
-  // tokens without the crash. Mirrors _rewrite_query in cloud_api.py.
-  // Phrases keep their apostrophes (handled by the early return above).
-  q = q.replace(/[’']/g, ' ').trim();
+  // Strip possessives first ("women’s" → "women") before the generic
+  // apostrophe→space replacement. Mirrors _POSSESSIVE_RE in cloud_api.py.
+  q = q.replace(POSSESSIVE_RE, ‘’);
+  // Replace remaining apostrophes with space (e.g. "rock’n’roll" → tokens).
+  // FTS5 treats a bare apostrophe as a grammar error; space gives same tokens.
+  q = q.replace(/[‘’]/g, ‘ ‘).trim();
   // A query of nothing but apostrophes collapses to empty here — return
   // empty rather than wrapping `{content} : ()`, which FTS5 also rejects.
   if (!q) return '';
@@ -145,9 +152,9 @@ export function parseQueryUnits(userQuery: string, exact = false): string[] | nu
   }
   TITLE_FILTER_RE.lastIndex = 0;
   if (!exact) q = normalizeDevanagari(q);
-  // Drop apostrophes the same way rewriteQuery does (tokenizer splits on
-  // them anyway), so `women's` → `women s`.
-  q = q.replace(/[’']/g, ' ').trim();
+  // Possessive "’s" stripped first (women’s → women), then remaining
+  // apostrophes replaced with space — mirrors rewriteQuery.
+  q = q.replace(POSSESSIVE_RE, ‘’).replace(/[‘’]/g, ‘ ‘).trim();
   if (!q) return null;
 
   const hasExplicitAnd = AND_SPLIT_RE.test(q);

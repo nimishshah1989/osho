@@ -135,9 +135,10 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   let recordUnits: string[] | null;
   let recordNearDist: number | null;
   if (nearParsed) {
-    // Record-level cross-paragraph proximity only for N >= 100.
-    // Narrow NEAR (N < 100) uses FTS5 in-paragraph NEAR to match OCTP semantics.
-    if (nearParsed.distance >= 100) {
+    // Record-level cross-paragraph proximity only for N > 100.
+    // N <= 100 (full UI slider range) uses FTS5 in-paragraph NEAR to match
+    // OCTP semantics and avoid cross-paragraph false positives.
+    if (nearParsed.distance > 100) {
       recordUnits = nearParsed.words;
       recordNearDist = nearParsed.distance;
     } else {
@@ -728,6 +729,8 @@ export interface DiscourseOptions {
   eventId?: string;
   /** If provided, include FTS5 highlight markers on matching paragraphs. */
   q?: string;
+  /** When true, highlight against the un-stemmed exact index (mirrors search exact mode). */
+  exact?: boolean;
 }
 
 interface DiscourseEventRow {
@@ -741,7 +744,7 @@ interface DiscourseEventRow {
 }
 
 export function discourse(db: Database, opts: DiscourseOptions): DiscourseResponse {
-  const { title, eventId, q } = opts;
+  const { title, eventId, q, exact } = opts;
   if (!title && !eventId) throw new SearchError('Provide title or event_id', 400);
 
   const evRow = eventId
@@ -762,14 +765,15 @@ export function discourse(db: Database, opts: DiscourseOptions): DiscourseRespon
     [evRow.id],
   );
 
+  const ftsTable = exact ? 'paragraphs_fts_exact' : 'paragraphs_fts';
   const hlMap = new Map<number, string>();
   if (q) {
-    const ftsQuery = rewriteQuery(q);
+    const ftsQuery = rewriteQuery(q, { exact: exact ?? false });
     try {
       const hlRows = db.all<{ paragraph_id: number; hl: string }>(
-        `SELECT f.paragraph_id, highlight(paragraphs_fts, 0, ?, ?) AS hl
-         FROM paragraphs_fts f
-         WHERE paragraphs_fts MATCH ?
+        `SELECT f.paragraph_id, highlight(${ftsTable}, 0, ?, ?) AS hl
+         FROM ${ftsTable} f
+         WHERE ${ftsTable} MATCH ?
            AND f.event_id = ?`,
         [HL_OPEN, HL_CLOSE, ftsQuery, evRow.id],
       );

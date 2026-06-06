@@ -18,11 +18,13 @@ export async function GET(req: Request) {
   }
 
   const q = searchParams.get('q');
+  const exact = searchParams.get('exact');
 
   const upstream = new URL(`${API_BASE}/api/discourse`);
   if (title) upstream.searchParams.set('title', title);
   if (eventId) upstream.searchParams.set('event_id', eventId);
   if (q) upstream.searchParams.set('q', q);
+  if (exact === 'true') upstream.searchParams.set('exact', 'true');
 
   try {
     const response = await fetch(upstream.toString(), { cache: 'no-store' });
