@@ -68,10 +68,10 @@ export function rewriteQuery(userQuery: string, opts: RewriteOptions = {}): stri
   if (q.includes('title_search:') || PHRASE_ONLY_RE.test(q)) return q;
   // Strip possessives first ("women’s" → "women") before the generic
   // apostrophe→space replacement. Mirrors _POSSESSIVE_RE in cloud_api.py.
-  q = q.replace(POSSESSIVE_RE, ‘’);
+  q = q.replace(POSSESSIVE_RE, '');
   // Replace remaining apostrophes with space (e.g. "rock’n’roll" → tokens).
   // FTS5 treats a bare apostrophe as a grammar error; space gives same tokens.
-  q = q.replace(/[‘’]/g, ‘ ‘).trim();
+  q = q.replace(/[‘’]/g, ' ').trim();
   // A query of nothing but apostrophes collapses to empty here — return
   // empty rather than wrapping `{content} : ()`, which FTS5 also rejects.
   if (!q) return '';
@@ -154,7 +154,7 @@ export function parseQueryUnits(userQuery: string, exact = false): string[] | nu
   if (!exact) q = normalizeDevanagari(q);
   // Possessive "’s" stripped first (women’s → women), then remaining
   // apostrophes replaced with space — mirrors rewriteQuery.
-  q = q.replace(POSSESSIVE_RE, ‘’).replace(/[‘’]/g, ‘ ‘).trim();
+  q = q.replace(POSSESSIVE_RE, '').replace(/[‘’]/g, ' ').trim();
   if (!q) return null;
 
   const hasExplicitAnd = AND_SPLIT_RE.test(q);
