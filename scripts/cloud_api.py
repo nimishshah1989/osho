@@ -289,7 +289,7 @@ def _rewrite_query(user_query: str, exact: bool = False) -> str:
     # Without this the lone "s" token from "women’s" → "women s" matches
     # every paragraph that has any apostrophe word, producing thousands of
     # false hits. Phrases are exempt (handled by the early return above).
-    q = _POSSESSIVE_RE.sub(‘’, q)
+    q = _POSSESSIVE_RE.sub('', q)
     # Replace remaining apostrophes with a space (e.g. "rock’n’roll" →
     # "rock n roll"). The unicode61 tokenizer splits on apostrophe at index
     # time so spaces and apostrophes yield the same tokens — but FTS5 treats
@@ -371,7 +371,7 @@ def _parse_query_units(user_query: str, exact: bool = False):
         q = _normalize_devanagari(q)
     # Possessive "’s" stripped first (women’s → women), then remaining
     # apostrophes replaced with space — mirrors _rewrite_query.
-    q = _POSSESSIVE_RE.sub(‘’, q)
+    q = _POSSESSIVE_RE.sub('', q)
     q = q.replace("’", " ").replace("’", " ").strip()
     if not q:
         return None
