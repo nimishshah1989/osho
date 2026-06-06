@@ -446,7 +446,7 @@ function SearchPageInner() {
     setDiscourseLoading(true);
     setDiscourseError(null);
     discourseApi(
-      { eventId: selectedEventId, q: submittedQuery || undefined },
+      { eventId: selectedEventId, q: submittedQuery || undefined, exact: exactMatch || undefined },
       offlineEngine,
     )
       .then((body) => {
@@ -639,8 +639,11 @@ function SearchPageInner() {
   };
 
   // Keyboard shortcuts:
-  //   ← / →           — step one match back / forward, crossing into the
-  //                     adjacent discourse at the boundary (Sugit 2026-05-16).
+  //   ← / →           — when the full discourse is open: navigate to the
+  //                     previous / next discourse in the result list. When
+  //                     only the top-matches panel is shown: step one match
+  //                     back / forward, crossing into the adjacent discourse
+  //                     at the boundary (Sugit 2026-05-16).
   //   j / n           — step forward, within current discourse only.
   //   k / p           — step back,   within current discourse only.
   //   Alt+↑ / Alt+↓   — jump to previous / next discourse in the result list.
@@ -649,10 +652,18 @@ function SearchPageInner() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        jumpToMatchAcross(1);
+        if (discourseDetailsRef.current?.open) {
+          navigateEvent(1);
+        } else {
+          jumpToMatchAcross(1);
+        }
       } else if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        jumpToMatchAcross(-1);
+        if (discourseDetailsRef.current?.open) {
+          navigateEvent(-1);
+        } else {
+          jumpToMatchAcross(-1);
+        }
       } else if (e.key === 'n' || e.key === 'j') {
         e.preventDefault();
         jumpToMatch(currentMatchPos + 1);
