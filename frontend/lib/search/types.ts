@@ -35,6 +35,10 @@ export interface SearchResponse {
   query: string;
   total: number;
   total_hits: number;
+  /** Set when the query matches more discourses than can be usefully returned.
+   *  The events list is still populated (top N by rank) but hits contain no
+   *  paragraph text — the user should refine their query. */
+  too_many?: boolean;
   events: SearchEvent[];
 }
 

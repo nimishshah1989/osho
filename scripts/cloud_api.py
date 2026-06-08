@@ -505,6 +505,10 @@ def _min_token_window(positions_per_unit: list[list[int]]) -> tuple[int, int, in
 # blowing up memory. Far above any realistic discourse-count for a real
 # multi-word query.
 _RECORD_LEVEL_EVENT_CAP = 2000
+# When a query matches more than this many discourses, the response is
+# trimmed to metadata-only hits (no paragraph text) and flagged
+# too_many=true so the frontend can warn the user.
+_TOO_MANY_THRESHOLD = 500
 
 
 # SQL fragment mirroring _is_meta_paragraph for use inside FTS MATCH
@@ -1189,10 +1193,19 @@ def search(
                 ev.pop("best_rank", None)
                 ev.pop("_record_level", None)
 
+            too_many = total_events > _TOO_MANY_THRESHOLD
+            if too_many:
+                for ev in out:
+                    if ev.get("hits"):
+                        ev["hits"] = ev["hits"][:1]
+                        for h in ev["hits"]:
+                            h.pop("content", None)
+
             return {
                 "query": q,
                 "total": total_events,
                 "total_hits": total_hits,
+                "too_many": too_many,
                 "events": out,
             }
 

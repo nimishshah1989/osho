@@ -941,6 +941,14 @@ function SearchPageInner() {
             <div className="mb-6 text-sm text-stone-700 dark:text-ivory/85">{error}</div>
           )}
 
+          {results?.too_many && (
+            <div className="mb-4 px-3 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-200">
+              {locale === 'hi'
+                ? `यह खोज बहुत व्यापक है — ${results.total.toLocaleString()} प्रवचन मिले। कृपया और शब्द जोड़कर खोज सीमित करें।`
+                : `Query matched ${results.total.toLocaleString()} discourses — too broad to show previews. Add more specific words to narrow results.`}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-6 md:gap-10">
             {/* Left: results list.
                 `self-start` stops the CSS grid from stretching this column

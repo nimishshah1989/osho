@@ -174,10 +174,18 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
         return t || (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
       });
     }
+    const tooMany = totalEvents > TOO_MANY_THRESHOLD;
+    if (tooMany) {
+      for (const ev of out) {
+        if (ev.hits.length > 1) ev.hits = ev.hits.slice(0, 1);
+        for (const h of ev.hits) delete (h as unknown as Record<string, unknown>)['content'];
+      }
+    }
     return {
       query: q,
       total: totalEvents,
       total_hits: totalHits,
+      too_many: tooMany || undefined,
       events: out.map(toSearchEvent),
     };
   }
@@ -411,6 +419,8 @@ function minTokenWindow(positionsPerUnit: number[][]): [number, number, number] 
 // Safety cap on how many common events we do the paragraph-gather +
 // token-offset work for. Mirror of `_RECORD_LEVEL_EVENT_CAP`.
 const RECORD_LEVEL_EVENT_CAP = 2000;
+// Mirror of `_TOO_MANY_THRESHOLD`: flag and trim when results are this broad.
+const TOO_MANY_THRESHOLD = 500;
 
 // SQL fragment mirroring isMetaParagraph for use inside FTS MATCH queries —
 // drop the title row (seq 0) and the sannyas-wiki marker so they never
