@@ -25,7 +25,7 @@
 
 ---
 
-## Recent Completed Work (PRs #85–98)
+## Recent Completed Work (PRs #85–100)
 
 | PR | Summary | Date |
 |----|---------|------|
@@ -39,21 +39,24 @@
 | #96 | Hotfix: U+2018/U+2019 curly-quote SyntaxError crashed backend | 2026-06-06 |
 | #97 | Hotfix: same curly-quote bug crashed frontend build | 2026-06-06 |
 | #98 | @5: broad Hindi query (>500 events) → amber warning + trimmed response | 2026-06-08 |
+| #99 | Sugit batch 3: re-enable cross-paragraph NEAR, @13 Hindi NEAR, @17-A/B/C discourse view fixes | 2026-06-12 |
+| #100 | Fix stale FTS positions causing false NEAR matches; @6 exact 20→10 (OCTP: 10 ✓) | 2026-06-12 |
 
 ---
 
-## Open Issues (as of 2026-06-08)
+## Open Issues (as of 2026-06-12)
 
 **High priority:**
 1. **@3** — Intermittent seq=0 arrow-key nav on title-matched discourses. Believed fixed in PR #91; needs Sugit confirmation.
+2. **FTS rebuild on VPS** — `paragraphs_fts_exact` is contentless on production → exact-mode NEAR returns 0 for genuine matches (@11 needs this to show OCTP's 1 result). Also permanently clears all stale FTS entries. Run: `python3 scripts/build_fts.py` on VPS (~5-10 min).
 
 **Moderate priority:**
-2. Hindi Enter-without-space submits Roman text (HindiInput stale closure)
-3. Archive / Constellation / Help pages English-only (missing `t(...)` i18n)
-4. Date range inputs don't auto-refresh on typing
+3. Hindi Enter-without-space submits Roman text (HindiInput stale closure)
+4. Archive / Constellation / Help pages English-only (missing `t(...)` i18n)
+5. Date range inputs don't auto-refresh on typing
 
 **Minor / ops:**
-5. Dead routes `/ask`, `/nebula`, `/zen-tree` → 404, should redirect to `/`
-6. `total_hits` over-reports for narrow NEAR (N < 20)
-7. Provisioning scripts not in repo (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`)
-8. `highlight()` on `paragraphs_fts_exact` silent on production (contentless table) — client-side fallback covers it; full fix: `python3 scripts/build_fts.py` on VPS
+6. Dead routes `/ask`, `/nebula`, `/zen-tree` → 404, should redirect to `/`
+7. `total_hits` over-reports for narrow NEAR (N < 20)
+8. Provisioning scripts not in repo (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`)
+9. Stale FTS entries accumulate on each ingest. Long-term fix: also delete from FTS when paragraphs are removed. Short-term: run `build_fts.py` after each Antar batch.
