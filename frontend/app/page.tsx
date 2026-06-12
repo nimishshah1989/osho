@@ -241,6 +241,9 @@ function SearchPageInner() {
   const detailRef = useRef<HTMLDivElement | null>(null);
   const firstMatchRef = useRef<HTMLParagraphElement | null>(null);
   const discourseDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  // Set to true when the user navigates cross-discourse while details are open;
+  // cleared after the new discourse mounts and details are programmatically opened.
+  const pendingOpenDetailsRef = useRef(false);
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
@@ -304,6 +307,12 @@ function SearchPageInner() {
       pendingJumpRef.current === 'last' ? matchIndices.length - 1 : 0;
     setCurrentMatchPos(pos);
     pendingJumpRef.current = null;
+    // When the user arrow-navigated cross-discourse while details were open,
+    // re-open the details panel in the new discourse automatically.
+    if (pendingOpenDetailsRef.current && discourseDetailsRef.current) {
+      discourseDetailsRef.current.open = true;
+      pendingOpenDetailsRef.current = false;
+    }
   }, [matchIndices]);
 
   const jumpToMatch = useCallback(
@@ -639,11 +648,10 @@ function SearchPageInner() {
   };
 
   // Keyboard shortcuts:
-  //   ← / →           — when the full discourse is open: navigate to the
-  //                     previous / next discourse in the result list. When
-  //                     only the top-matches panel is shown: step one match
-  //                     back / forward, crossing into the adjacent discourse
-  //                     at the boundary (Sugit 2026-05-16).
+  //   ← / →           — step one match forward/back; cross into the adjacent
+  //                     discourse at the boundary. When the full discourse is
+  //                     open, continues stepping through its hits before
+  //                     crossing, and auto-opens details in the next discourse.
   //   j / n           — step forward, within current discourse only.
   //   k / p           — step back,   within current discourse only.
   //   Alt+↑ / Alt+↓   — jump to previous / next discourse in the result list.
@@ -653,14 +661,20 @@ function SearchPageInner() {
       if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (discourseDetailsRef.current?.open) {
-          navigateEvent(1);
+          // Step through hits in current discourse; when crossing to the next
+          // discourse mark that details should auto-open there too.
+          const next = currentMatchPos + 1;
+          if (next >= matchIndices.length) pendingOpenDetailsRef.current = true;
+          jumpToMatchAcross(1);
         } else {
           jumpToMatchAcross(1);
         }
       } else if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         if (discourseDetailsRef.current?.open) {
-          navigateEvent(-1);
+          const next = currentMatchPos - 1;
+          if (next < 0) pendingOpenDetailsRef.current = true;
+          jumpToMatchAcross(-1);
         } else {
           jumpToMatchAcross(-1);
         }
@@ -1199,7 +1213,7 @@ function SearchPageInner() {
                               <Highlighted
                                 text={p.content}
                                 hl={p.hl}
-                                pattern={hasBackendHl ? null : highlightPattern}
+                                pattern={isMatch ? highlightPattern : null}
                               />
                             </p>
                           );

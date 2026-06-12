@@ -135,16 +135,11 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   let recordUnits: string[] | null;
   let recordNearDist: number | null;
   if (nearParsed) {
-    // Record-level cross-paragraph proximity only for N > 100.
-    // N <= 100 (full UI slider range) uses FTS5 in-paragraph NEAR to match
-    // OCTP semantics and avoid cross-paragraph false positives.
-    if (nearParsed.distance > 100) {
-      recordUnits = nearParsed.words;
-      recordNearDist = nearParsed.distance;
-    } else {
-      recordUnits = null;
-      recordNearDist = null;
-    }
+    // All NEAR queries use record-level cross-paragraph proximity.
+    // OCTP (Folio Views) finds words within N words across paragraph
+    // boundaries — confirmed by Sugit 2026-06-12.
+    recordUnits = nearParsed.words;
+    recordNearDist = nearParsed.distance;
   } else {
     const parsed = parseQueryUnits(q, exact);
     recordUnits = parsed && parsed.length >= 2 ? parsed : null;
@@ -650,7 +645,7 @@ function recordLevelSearch(
         [...posSeq.entries()].filter(([p]) => p >= lo && p <= hi).map(([, s]) => s),
       )].sort((a, b) => a - b);
       const inMap = windowSeqs.filter((s) => paraMap.has(s));
-      displaySeqs = inMap.length ? inMap : windowSeqs;
+      displaySeqs = inMap;
     }
 
     const evRow = db.get<{

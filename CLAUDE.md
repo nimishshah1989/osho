@@ -396,19 +396,28 @@ gitignored — moved between machines by rsync, never committed.
 - @15: "women's liberation" → ~9900 hits. Apostrophe handling in `_rewrite_query` / `_parse_query_units` was replacing `'s` with space, emitting a lone "s" token that matches everything. Fixed: strip possessive `'s` first (`_POSSESSIVE_RE`), then replace remaining apostrophes. Same fix in TS `queryRewrite.ts`.
 - @17: Full discourse + right arrow now navigates to next discourse (was: stepped through match paragraphs). When `<details>` is open, `←`/`→` call `navigateEvent`; when closed, original `jumpToMatchAcross` behaviour is kept.
 
-### Still open (as of 2026-06-06)
+**PR #96** — Backend SyntaxError hotfix (2026-06-06)
+- `cloud_api.py` lines 292 and 374 had U+2018/U+2019 (curly apostrophes) used as Python string delimiters in `_POSSESSIVE_RE.sub('', q)`. Python 3 rejects non-ASCII quote characters as string delimiters → `SyntaxError` → 502 on every API request. Fixed: replaced with ASCII straight-quote empty strings.
+
+**PR #97** — Frontend build SyntaxError hotfix (2026-06-06)
+- `frontend/lib/search/queryRewrite.ts` had same curly-quote delimiter bug on lines 71, 74, 157. TypeScript/webpack rejects non-ASCII string delimiters → `Build failed`. Fixed: ASCII straight quotes; curly quotes inside regex character classes (`/['']/g`) left untouched (they intentionally match U+2018/U+2019 in user queries).
+
+**PR #98** — @5: broad Hindi query warning (2026-06-08)
+- `परमात्मा की तरफ जिसे जाना` All-words Exact was returning 2270 events / 811 KB response → NetworkError. Fixed: `_TOO_MANY_THRESHOLD = 500`. When `true_total_events > 500`, API sets `too_many: true`, trims to 1 hit per event, strips paragraph `content` (keeps `hl`). Frontend shows amber warning: "Query matched N discourses — add more specific words." Applied to both backend and offline TS engine.
+
+### Still open (as of 2026-06-08)
 
 **High priority (archivist-visible):**
-1. **@5** — `परमात्मा की तरफ जिसे जाना` All-words Exact returns 2270 results / 100000 hits (793 KB response). May timeout in the frontend → NetworkError. Root cause: very common Hindi particles (की, जिसे) match almost every Hindi discourse; intersection is huge in exact mode. Possible fix: cap `_RECORD_LEVEL_EVENT_CAP` lower in exact mode, or display a "too many results" warning instead of loading them all.
-2. **@3** — Intermittent: title match on title row occasionally still lands arrow-key nav on seq=0. Believed fixed in PR #91 but Sugit may encounter it on a different query type; needs confirmation.
+1. **@3** — Intermittent: title match on title row occasionally still lands arrow-key nav on seq=0. Believed fixed in PR #91 but Sugit may encounter it on a different query type; needs confirmation.
 
 **Moderate priority (UX):**
-3. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
-4. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
-5. Date range inputs don't auto-refresh after typing (requires explicit submit)
+2. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
+3. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
+4. Date range inputs don't auto-refresh after typing (requires explicit submit)
 
 **Minor / ops:**
-6. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
-7. `total_hits` over-reports for narrow NEAR (N < 20) — FTS5 in-paragraph NEAR only counts per-paragraph but the display shows the per-event total
-8. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
-9. Corpus version 2025-04-28 (matching OCTP) was overwritten by 2026-05-24 upload — no backup. Sugit said may not be strictly needed.
+5. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
+6. `total_hits` over-reports for narrow NEAR (N < 20) — FTS5 in-paragraph NEAR only counts per-paragraph but the display shows the per-event total
+7. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
+8. Corpus version 2025-04-28 (matching OCTP) was overwritten by 2026-05-24 upload — no backup. Sugit said may not be strictly needed.
+9. `highlight()` on `paragraphs_fts_exact` returns no markers on production — likely contentless table. Client-side regex fallback covers it. Full fix: rebuild FTS index on VPS (`python3 scripts/build_fts.py`).

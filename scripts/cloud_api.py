@@ -779,7 +779,10 @@ def _record_level_search(
             # The hit is the passage spanning [lo, hi]: the paragraphs whose
             # matched positions fall inside the window.
             window_seqs = sorted({s for p, s in pos_seq.items() if lo <= p <= hi})
-            display_seqs = [s for s in window_seqs if s in para_map] or window_seqs
+            # Only show paragraphs that the FTS gather query actually matched.
+            # The `or window_seqs` fallback was including context paragraphs
+            # (e.g. seq N+1 between two matched paragraphs) with no real hit.
+            display_seqs = [s for s in window_seqs if s in para_map] or []
 
         ev_row = conn.execute(
             "SELECT title, date, location, language, "
@@ -1134,21 +1137,13 @@ def search(
     # single-word, phrase, and explicit `title:` queries keep the existing
     # single-MATCH path so we minimise regression to the rest of the suite.
     #
-    # NEAR threshold: record-level cross-paragraph proximity only for N > 100.
-    # For N <= 100 (the full range of the UI slider), FTS5's built-in
-    # in-paragraph NEAR is used — it matches OCTP's per-paragraph semantics
-    # and avoids false positives from words spread across paragraphs being
-    # counted as "within N tokens". Cross-paragraph is reserved for very wide
-    # windows (N > 100) where the words are almost certainly in different
-    # paragraphs — Sugit 2026-06-06.
+    # All NEAR queries use record-level cross-paragraph proximity.
+    # OCTP (Folio Views) finds words within N words across paragraph
+    # boundaries — confirmed by Sugit 2026-06-12.
     if near_parsed:
         units_p, dist_p = near_parsed
-        if dist_p > 100:
-            record_units = list(units_p)
-            record_near_dist = dist_p
-        else:
-            record_units = None   # fall through to FTS5 in-paragraph NEAR
-            record_near_dist = None
+        record_units = list(units_p)
+        record_near_dist = dist_p
     else:
         parsed = _parse_query_units(q, exact=exact)
         record_units = parsed if (parsed and len(parsed) >= 2) else None

@@ -1,35 +1,45 @@
-# Osho Wisdom Engine
+# Osho Archives Search Engine
 
 ## What This Is
-A state-of-the-art, student-centric interactive platform for the 1.14GB Osho corpus. The goal is to create a "Living Library" that supports deep search, AI-driven synthesis, and bilingual (Hindi/English) exploration.
+
+A production search engine and archive for Osho's complete discourses — ~75,000 paragraphs across ~10,000 events in English and Hindi. Live at **oshoarchives.com**.
+
+## Two User Audiences
+
+1. **Sannyasins worldwide** — search and read Osho's words verbatim, in English and Hindi, with exact-match and proximity search
+2. **Archivists (Antar, Rudra, et al.)** — ingest new talks, fix metadata, cross-check results against OCTP (Osho Complete Text Program — the reference CD-ROM tool)
 
 ## Core Value
-To provide an architectural masterpiece for navigating the profound wisdom of Osho. A highly reliable, memory-efficient, and visually 'Zen' application, built for global scale (e.g. Oxford University).
 
-## Context
-### Why are we building this?
-To transcend simple reading and offer a dynamic, contextual, and exploratory wisdom engine. It requires structural integrity, modularity, and enterprise-grade code cleanliness.
+Faithful, fast, bilingual full-text search of the complete Osho corpus. The reference standard for archivists is OCTP (a 1994 CD-ROM running Folio Views). Our search semantics are reverse-engineered to match OCTP: record-level all-words, in-paragraph NEAR (N ≤ 100), exact mode, one hit per discourse.
 
-### What are the main constraints or edges?
-- Performance with a massive dataset (1.14GB CSV locally).
-- Memory-efficient streaming architecture during data ingestion.
-- Embedding costs and semantic search speed.
+## Stack
 
-## Requirements
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14 app router, TypeScript, Tailwind |
+| Backend | FastAPI + raw sqlite3 (no ORM) |
+| Search | SQLite FTS5 (porter stemming + unicode61 + custom Hindi tokenizer) |
+| Hosting | E2E Networks VPS 164.52.223.241, Ubuntu 24.04 |
+| CDN/TLS | Cloudflare (DNS + edge proxy, Cloudflare-only ingress) |
+| Offline | PWA (sqlite-wasm + OPFS in web worker) + Electron desktop app |
 
-### Validated
-(None yet — ship to validate)
+## Key Pages
 
-### Active
-- [ ] Memory-efficient streaming ingest of the `.mer`/`.csv` file.
-- [ ] Relational schema (SQLite) for rapid multidimensional filtering (Location, Date, Language).
-- [ ] Hybrid search system (Meilisearch + Vector DB embeddings).
-- [ ] "Ask Osho" conversational RAG using local or API-based LLMs.
-- [ ] Next.js 14 Web Frontend utilizing a custom Zen-Minimalist CSS framework.
-- [ ] Knowledge Graph (Conceptual Constellation) visuals.
+| Route | Purpose |
+|-------|---------|
+| `/` | Main search interface |
+| `/archive` | Tree explorer — browse by year/series/place/theme |
+| `/constellation` | Clustered visual by city × year × theme |
+| `/read` | Full discourse reader |
+| `/help` | Search guide + corpus version badge |
+| `/downloadapp` | Offline / desktop setup |
+| `/admin` | ADMIN_KEY-protected: ingest, edit, tag, batch update |
 
-### Out of Scope
-- [ ] Real-time massive cloud database scaling (focusing on local/robust offline-first SQLite architectural scaling first).
+## Constraints
 
-## Evolution
-This document evolves at phase transitions and milestone boundaries.
+- DB lives only on the VPS (gitignored) — moved by rsync, never committed
+- Cloudflare is the only allowed ingress — direct-IP requests return 403
+- ADMIN_KEY must never be the default "osho-admin" in production
+- Any change to the FTS5 tokenizer requires a full index rebuild (~5–10 min)
+- Frontend and backend share the box — Next.js proxies to FastAPI over loopback, never the public IP
