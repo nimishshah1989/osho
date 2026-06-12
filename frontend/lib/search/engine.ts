@@ -631,7 +631,8 @@ function recordLevelSearch(
         if (!bySeq || bySeq.size === 0) { ok = false; break; }
         const recPositions: number[] = [];
         for (const [seq, plist] of bySeq) {
-          const base = seqOff.get(seq) ?? 0;
+          const base = seqOff.get(seq);
+          if (base === undefined) continue; // stale FTS entry - skip to avoid false NEAR matches
           for (const p of plist) { const rp = base + p; recPositions.push(rp); posSeq.set(rp, seq); }
         }
         if (!recPositions.length) { ok = false; break; }

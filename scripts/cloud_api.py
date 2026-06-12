@@ -761,7 +761,13 @@ def _record_level_search(
                     break
                 rec_positions: list[int] = []
                 for seq, plist in seq_positions.items():
-                    base = seq_off.get(seq, 0)
+                    base = seq_off.get(seq)
+                    if base is None:
+                        # Stale FTS entry: paragraph was deleted from the
+                        # paragraphs table but not from the FTS index.
+                        # Defaulting to 0 would collapse all positions near
+                        # zero and create false NEAR matches, so skip.
+                        continue
                     for p in plist:
                         rp = base + p
                         rec_positions.append(rp)
