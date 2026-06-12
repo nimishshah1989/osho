@@ -20,7 +20,7 @@ Repro: `enlightenment trust love` Within 20, **Spelling=Exact**.
 - Stemmed: 9 discourses · 11 hits, but Sugit reports those are all *within one
   paragraph* — i.e. the cross-paragraph augmentation isn't actually contributing.
 Confirmed on prod: exact=1 → total=2; stemmed → total=9.
-**Status: 🔍 (see Root cause: record-vs-paragraph, shared with #6/#7)**
+**Status: ✅ fixed (PR #100, verified on prod 2026-06-12)** — root cause was stale FTS entries from re-ingested paragraphs defaulting positions to 0, creating false matches. After fix + FTS rebuild: **5 discourses · 5 hits** (OCTP: 5 ✓).
 
 ---
 
@@ -42,21 +42,21 @@ Confirmed on prod: returns `{"detail": ...}` non-result (Invalid search syntax).
 
 ---
 
-## #5 — Hindi + Spelling=Stemmed → "Invalid search syntax"
+## #5 — Hindi + Spelling=Stemmed → "Invalid search syntax" / broad query crash
 Repro: `परमात्मा की तरफ जिसे जाना`, All words.
 - Exact: 18 discourses, 19 hits. Stemmed: "Invalid search syntax".
 Suggestion from Sugit: if not fixable, disable Stemmed in the UI for Hindi input.
-**Status: ⬜ to reproduce in-container**
+**Status: ✅ partially fixed (PR #91 + PR #98)** — Hindi stemmed syntax crash fixed in PR #91. Broad exact Hindi queries (>500 events) that caused NetworkError/timeout now return an amber warning: "Query matched N discourses — add more specific words." and a trimmed response (1 hit per event, content stripped) instead of crashing (PR #98).
 
 ---
 
 ## #6 — "Within 100 words" finds MORE hits than "All words"
-Repro: `love intelligence awareness`.
+Repro: `love intelligence awareness` (later extended to `love intelligence awareness meditation`).
 - All words (exact): 26 (Sugit) / now 54 on prod. Within 100: 88 disc · 306
   (Sugit) / 320 disc · 1306 on prod. OCTP Within-100: 52 hits.
 Logically All-words (anywhere in record) should be a superset of Within-100.
 Confirmed on prod: All=54, Within100=320 — inverted.
-**Status: 🔍 (record-vs-paragraph + augmentation over-count)**
+**Status: ✅ fixed (PRs #95 + #100, verified on prod 2026-06-12)** — root causes: (1) cross-paragraph gate overcorrection fixed in PR #99; (2) stale FTS positions causing false matches fixed in PR #100. After fix + FTS rebuild: `love intelligence awareness meditation` NEAR=100 exact → **10 discourses** (OCTP: 10 ✓).
 
 ---
 
@@ -98,6 +98,29 @@ correctly (resizes with the window).
     accurate but `total_hits` is a lower bound over the first 2000; a
     pre-existing underscore tokenizer difference between the Python and TS
     engines is low-impact and left unchanged.
+
+---
+
+---
+
+## Post-rebuild verification (2026-06-12)
+
+FTS index rebuilt on VPS (`python3 scripts/build_fts.py`). All stale entries cleared; `paragraphs_fts_exact` now content-bearing. Results verified against OCTP:
+
+| Query | Mode | Before fix | After fix | OCTP | Result |
+|-------|------|-----------|-----------|------|--------|
+| `enlightenment trust love` | NEAR=20 Exact | 2 | **5** | 5 | ✓ |
+| `love intelligence awareness meditation` | NEAR=100 Exact | 20 | **10** | 10 | ✓ |
+| `enlightenment trust love awareness` | NEAR=100 Exact | 2 | **1** | 1 | ✓ |
+| `Agyat Ki Or अंधकारपूर्ण` (mixed-script) | NEAR=100 | 0 | **1** | 1 | ✓ |
+| `परमात्मा की तरफ जिसे जाना` (broad Hindi) | All words Exact | crash | amber warning | — | ✓ |
+
+Root cause of false NEAR matches (issues #2, #6): `_record_level_search` used `seq_off.get(seq, 0)`, which collapsed stale (deleted) paragraph positions near zero, trivially passing any window check. Fixed: `seq_off.get(seq)` — `None` seqs are skipped.
+
+Additional fixes shipped in PRs #99–100 (same release):
+- Discourse view exact-phrase highlights restored (per-paragraph, not globally suppressed)
+- Arrow key navigation steps through matched paragraphs before advancing to next discourse
+- NEAR proximity border box excludes context-only paragraphs
 
 ---
 

@@ -31,6 +31,15 @@
 - Curly-quote SyntaxError hotfixes (backend + frontend)
 - Broad Hindi query (>500 events) → amber warning + trimmed response, no NetworkError
 
+### NEAR Accuracy + Discourse View (PRs #99–100, 2026-06-12)
+- Re-enabled cross-paragraph NEAR for all N (PR #94's `dist_p > 100` gate was an overcorrection; OCTP does match across paragraph boundaries)
+- Fixed stale FTS positions: paragraphs deleted during re-ingest leave ghost rows in `paragraphs_fts`; `seq_off.get(seq, 0)` was defaulting to 0 and creating false matches. Fix: skip `None` seqs. @6 NEAR=100: 20→10 ✓, @2 NEAR=20: 13→5 ✓, @11 NEAR=100: 2→1 ✓ (all match OCTP)
+- FTS rebuild completed on VPS: `paragraphs_fts_exact` now fully populated; all stale entries cleared
+- Discourse exact-phrase highlights now per-paragraph (was globally suppressed when any paragraph had backend markers)
+- Arrow key navigation through discourse hits: → steps through matched paragraphs before advancing to next discourse
+- NEAR proximity border box no longer shows context-only paragraphs — only actual hit paragraphs shown
+- Hindi NEAR=100 cross-paragraph queries now work (@13: `Agyat Ki Or अंधकारपूर्ण` → 1, OCTP: 1 ✓)
+
 ---
 
 ## Active — Open Issues
@@ -49,4 +58,4 @@ These are ideas that have come up but have no committed timeline:
 4. **Date range auto-refresh** — currently requires explicit submit after typing.
 5. **HindiInput stale closure** — Enter without space submits Roman text.
 6. **Provisioning scripts in repo** — `02-setup-single-vps.sh` and `refresh-cloudflare-ips.sh` exist only on the VPS.
-7. **FTS exact table highlight()** — production table is likely contentless; rebuild FTS index to restore server-side highlights in exact mode.
+7. ~~**FTS exact table highlight()**~~ — completed 2026-06-12: FTS rebuilt on VPS, `paragraphs_fts_exact` now content-bearing.

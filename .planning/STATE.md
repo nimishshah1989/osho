@@ -1,7 +1,7 @@
 # State: Osho Archives Search Engine
 
 **Status:** Production — Live at oshoarchives.com
-**Last Updated:** 2026-06-08
+**Last Updated:** 2026-06-12
 
 ---
 
@@ -48,15 +48,14 @@
 
 **High priority:**
 1. **@3** — Intermittent seq=0 arrow-key nav on title-matched discourses. Believed fixed in PR #91; needs Sugit confirmation.
-2. **FTS rebuild on VPS** — `paragraphs_fts_exact` is contentless on production → exact-mode NEAR returns 0 for genuine matches (@11 needs this to show OCTP's 1 result). Also permanently clears all stale FTS entries. Run: `python3 scripts/build_fts.py` on VPS (~5-10 min).
 
 **Moderate priority:**
-3. Hindi Enter-without-space submits Roman text (HindiInput stale closure)
-4. Archive / Constellation / Help pages English-only (missing `t(...)` i18n)
-5. Date range inputs don't auto-refresh on typing
+2. Hindi Enter-without-space submits Roman text (HindiInput stale closure)
+3. Archive / Constellation / Help pages English-only (missing `t(...)` i18n)
+4. Date range inputs don't auto-refresh on typing
 
 **Minor / ops:**
-6. Dead routes `/ask`, `/nebula`, `/zen-tree` → 404, should redirect to `/`
-7. `total_hits` over-reports for narrow NEAR (N < 20)
-8. Provisioning scripts not in repo (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`)
-9. Stale FTS entries accumulate on each ingest. Long-term fix: also delete from FTS when paragraphs are removed. Short-term: run `build_fts.py` after each Antar batch.
+5. Dead routes `/ask`, `/nebula`, `/zen-tree` → 404, should redirect to `/`
+6. `total_hits` over-reports for narrow NEAR (N < 20)
+7. Provisioning scripts not in repo (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`)
+8. Stale FTS entries accumulate on each ingest (long-term code fix needed: also `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when paragraphs are removed). Short-term: run `build_fts.py` after each Antar batch. **FTS rebuild was completed on VPS 2026-06-12** — `paragraphs_fts_exact` is now fully populated and all prior stale entries cleared.

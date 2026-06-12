@@ -7,8 +7,7 @@ The archivist reference tool is OCTP (Osho Complete Text Program, 1994 CD-ROM, F
 | Behaviour | Spec |
 |-----------|------|
 | All-words | Discourse qualifies if every search word appears anywhere in its text (record-level AND) |
-| NEAR (N ≤ 100) | Both words must appear within N tokens in the same paragraph (FTS5 in-paragraph NEAR) |
-| NEAR (N > 100) | Cross-paragraph record-level proximity |
+| NEAR (any N) | Cross-paragraph record-level proximity (`_augment_near_cross_paragraph`). FTS5 in-paragraph NEAR is used for initial candidate retrieval; the record-level window check is always applied. |
 | Exact mode | No stemming, no variant matching — `paragraphs_fts_exact` table |
 | Hit count | All-words: number of matched paragraphs; NEAR: 1 per discourse |
 | One result per discourse | Deduplication at event level |
@@ -26,6 +25,8 @@ tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
 - `categories 'L* N* Co Mn Mc'` — includes Mn (virama, anusvara, nukta) and Mc (vowel matras, visarga). Without Mn/Mc, every Hindi word splits at every matra/virama → false matches.
 
 Any tokenizer change requires full index rebuild on VPS (~5–10 min).
+
+**Index maintenance:** Paragraphs deleted during re-ingest leave stale rows in `paragraphs_fts` / `paragraphs_fts_exact`. Stale rows with positions that default to 0 create false NEAR matches. Long-term fix: `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when removing paragraphs. Short-term: run `python3 scripts/build_fts.py` after each Antar batch (clears all stale entries, ~5–10 min). Last rebuild: 2026-06-12.
 
 ## Devanagari Normalisation (must stay in sync)
 
