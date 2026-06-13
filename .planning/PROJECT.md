@@ -11,7 +11,7 @@ A production search engine and archive for Osho's complete discourses — ~75,00
 
 ## Core Value
 
-Faithful, fast, bilingual full-text search of the complete Osho corpus. The reference standard for archivists is OCTP (a 1994 CD-ROM running Folio Views). Our search semantics are reverse-engineered to match OCTP: record-level all-words, in-paragraph NEAR (N ≤ 100), exact mode, one hit per discourse.
+Faithful, fast, bilingual full-text search of the complete Osho corpus. The reference standard for archivists is OCTP (a 1994 CD-ROM running Folio Views). Our search semantics are reverse-engineered to match OCTP: record-level all-words, cross-paragraph NEAR (any N), exact mode, one hit per discourse.
 
 ## Stack
 
