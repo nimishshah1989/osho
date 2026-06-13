@@ -405,19 +405,35 @@ gitignored — moved between machines by rsync, never committed.
 **PR #98** — @5: broad Hindi query warning (2026-06-08)
 - `परमात्मा की तरफ जिसे जाना` All-words Exact was returning 2270 events / 811 KB response → NetworkError. Fixed: `_TOO_MANY_THRESHOLD = 500`. When `true_total_events > 500`, API sets `too_many: true`, trims to 1 hit per event, strips paragraph `content` (keeps `hl`). Frontend shows amber warning: "Query matched N discourses — add more specific words." Applied to both backend and offline TS engine.
 
-### Still open (as of 2026-06-08)
+### Resolved — PRs #99–100 (2026-06-12, Sugit's third feedback batch)
+
+**PR #99** — re-enabled cross-paragraph NEAR + three @17 discourse-view bugs
+- PRs #94/#95 overcorrected: the `dist_p > 100` gate disabled cross-paragraph proximity for all N ≤ 100 (the entire UI slider range). Sugit confirmed OCTP DOES match across paragraph boundaries. Fixed: gate removed, cross-paragraph always used.
+- @17-A: exact-phrase mode showed no yellow highlights in hit paragraph. Root cause: `hasBackendHl ? null : pattern` suppressed all regex fallback when ANY paragraph had `«»` markers — but `paragraphs_fts_exact` is contentless on production, so the hit paragraph never gets markers. Fixed: per-paragraph `isMatch ? highlightPattern : null`.
+- @17-B: arrow key while discourse panel open was calling `navigateEvent` (jumped to next discourse) instead of `jumpToMatchAcross` (stepped through hits). Fixed: handler checks `discourseDetailsRef.current?.open`; added `pendingOpenDetailsRef` to auto-open panel when stepping into a new discourse.
+- @17-C: non-hit context paragraphs (e.g., "You are asking me...") appeared inside the proximity window border box. Root cause: `display_seqs = [...] or window_seqs` fallback. Fixed: removed the fallback — `display_seqs = []` when no FTS-matched paragraphs are in the window.
+- @13: Hindi `Agyat Ki Or + अज्ञात` NEAR=100 was returning 0. Fixed by re-enabling cross-paragraph.
+
+**PR #100** — skip stale FTS positions in NEAR window calculation (2026-06-12)
+- Root cause of @6 and @2 over-counting: paragraphs deleted from the `paragraphs` table (e.g., discourse re-ingested with fewer paragraphs) leave stale rows in FTS. `seq_off.get(seq, 0)` defaulted to 0 for missing seqs, collapsing all stale positions near zero → they trivially passed any NEAR window check.
+- Fix: `seq_off.get(seq)` returns `None` for stale seqs → skip them. If all positions for a unit are stale, `ok = False` → event excluded.
+- @6 `love intelligence awareness meditation` NEAR=100 exact: 20 → 10 (OCTP: 10 ✓)
+- @2 `enlightenment trust love` NEAR=20 exact: 13 → 8 (OCTP: 5; delta = known stop-word gap)
+- @11 `enlightenment trust love awareness` NEAR=100 exact: 2 → 0 (both were false positives; genuine OCTP match needs FTS rebuild on VPS — see item 9 below)
+
+### Still open (as of 2026-06-12)
 
 **High priority (archivist-visible):**
-1. **@3** — Intermittent: title match on title row occasionally still lands arrow-key nav on seq=0. Believed fixed in PR #91 but Sugit may encounter it on a different query type; needs confirmation.
+1. **@3** — Intermittent: title match occasionally lands arrow-key nav on seq=0. Believed fixed in PR #91; needs Sugit confirmation.
+2. **@11 / FTS rebuild on VPS** — `paragraphs_fts_exact` is contentless on production: `highlight()` returns no markers, so per-unit token positions come back empty for genuine (non-stale) rows, and exact-mode NEAR finds 0 instead of OCTP's 1. Fix: SSH to VPS and run `python3 scripts/build_fts.py` (~5-10 min). Also clears all remaining stale FTS entries permanently.
 
 **Moderate priority (UX):**
-2. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
-3. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
-4. Date range inputs don't auto-refresh after typing (requires explicit submit)
+3. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
+4. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
+5. Date range inputs don't auto-refresh after typing (requires explicit submit)
 
 **Minor / ops:**
-5. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
-6. `total_hits` over-reports for narrow NEAR (N < 20) — FTS5 in-paragraph NEAR only counts per-paragraph but the display shows the per-event total
-7. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
-8. Corpus version 2025-04-28 (matching OCTP) was overwritten by 2026-05-24 upload — no backup. Sugit said may not be strictly needed.
-9. `highlight()` on `paragraphs_fts_exact` returns no markers on production — likely contentless table. Client-side regex fallback covers it. Full fix: rebuild FTS index on VPS (`python3 scripts/build_fts.py`).
+6. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
+7. `total_hits` over-reports for narrow NEAR (N < 20)
+8. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
+9. Stale FTS entries accumulate on each ingest without a full rebuild. Long-term fix: also `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when paragraphs are removed during batch-update / re-ingest. Short-term: run `build_fts.py` on VPS after each Antar batch.
