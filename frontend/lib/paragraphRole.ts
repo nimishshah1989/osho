@@ -28,11 +28,13 @@ export type ParagraphRole =
   | 'event_info';
 
 const ROLE_CLASSES: Record<string, string> = {
-  // The talk itself — plain body, no class.
-  osho_talking: '',
-  // Interviewers / questioners — italic, slightly offset.
-  other_talking_1: 'italic text-stone-700 dark:text-ivory/85',
-  other_talking_2: 'italic text-stone-700 dark:text-ivory/85',
+  // The talk itself — book style (Sugit #33): no blank line between
+  // paragraphs (see paragraphGapClass); a first-line indent marks each new
+  // paragraph instead.
+  osho_talking: '[text-indent:1.5em]',
+  // Interviewers / questioners — italic, first-line indent (Sugit #34).
+  other_talking_1: 'italic [text-indent:1.5em] text-stone-700 dark:text-ivory/85',
+  other_talking_2: 'italic [text-indent:1.5em] text-stone-700 dark:text-ivory/85',
   // Sutras and questions Osho is commenting on — italic, gold-accented, indented.
   sutra_question: 'italic pl-4 border-l-2 border-gold/40 text-stone-700 dark:text-ivory/90',
   // Poems / verses — italic, centred (best-effort: small left padding).
@@ -54,6 +56,35 @@ const ROLE_CLASSES: Record<string, string> = {
 export function paragraphRoleClass(role: string | null | undefined): string {
   if (!role) return '';
   return ROLE_CLASSES[role] ?? '';
+}
+
+/**
+ * Per-role vertical rhythm (Sugit #31/#33), replacing a uniform `space-y-*`
+ * on the container so the layout matches the original books/CD-ROM:
+ *
+ * - `event_info` header lines sit tight together as one block.
+ * - Consecutive `osho_talking` paragraphs have NO blank line between them —
+ *   the first-line indent (see ROLE_CLASSES) marks each new paragraph, like a
+ *   printed book.
+ * - Everything else (questions, sutras, poems, comments, notes) keeps a clear
+ *   gap so it reads as a distinct block.
+ *
+ * The gap before the first body paragraph after the header block is added by
+ * the caller (it's a transition, not a property of a single role).
+ */
+export function paragraphGapClass(role: string | null | undefined): string {
+  switch (role) {
+    case 'event_info':
+    case 'title':
+      return 'mt-0.5';
+    case 'osho_talking':
+    case undefined:
+    case null:
+    case '':
+      return '';
+    default:
+      return 'mt-4';
+  }
 }
 
 /** Paragraphs that are metadata, not content — callers may want to hide

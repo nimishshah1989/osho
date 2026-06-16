@@ -44,6 +44,16 @@ body {
   font-style: normal !important;
 }
 
+/* …except inside the styled record layout, where the original books/CD-ROM
+   use italic to distinguish questioners, poems, sutras and editorial notes
+   from Osho's own words (Sugit #34/#35). Scoped to the two record containers
+   so the rest of the site stays straight type. The `!important` is required
+   to beat the global rule above. */
+.prose-osho .italic,
+.discourse-body .italic {
+  font-style: italic !important;
+}
+
 /* ── Utilities ────────────────────────────────────────────── */
 .glass-panel {
   background: rgba(var(--fg), 0.02);

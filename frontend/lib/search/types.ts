@@ -45,7 +45,7 @@ export interface SearchResponse {
 export interface SearchOptions {
   q: string;
   limit?: number;
-  sort?: 'rank' | 'title';
+  sort?: 'rank' | 'title' | 'date';
   language?: string;
   /** When true, restrict to records with translated_from NULL/'none'. */
   original?: boolean;

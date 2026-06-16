@@ -11,7 +11,8 @@ const API_BASE = process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const q = searchParams.get('q');
-  const sort = searchParams.get('sort') ?? 'rank';
+  const sortParam = searchParams.get('sort') ?? 'rank';
+  const sort = ['rank', 'title', 'date'].includes(sortParam) ? sortParam : 'rank';
 
   if (!q || typeof q !== 'string' || !q.trim()) {
     return NextResponse.json({ error: 'No query provided' }, { status: 400 });

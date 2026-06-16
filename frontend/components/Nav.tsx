@@ -18,7 +18,7 @@ export default function Nav() {
   const linkClass = (href: string) =>
     `text-[11px] md:text-[13px] tracking-[0.2em] md:tracking-[0.25em] uppercase flex items-center gap-1.5 transition-colors ${
       isActive(href)
-        ? 'text-gold'
+        ? 'text-gold font-bold'
         : 'text-stone-500 dark:text-ivory/65 hover:text-stone-900 dark:hover:text-ivory'
     }`;
 
