@@ -1045,7 +1045,7 @@ def tags():
 def search(
     q: str = Query(..., min_length=1, max_length=500),
     limit: int = Query(200, ge=1, le=500),
-    sort: str = Query('rank', pattern='^(rank|title)$'),
+    sort: str = Query('rank', pattern='^(rank|title|date)$'),
     language: Optional[str] = Query(
         None, description="Filter by language: English, Hindi"
     ),
@@ -1190,6 +1190,11 @@ def search(
             )[:limit]
             if sort == 'title':
                 out.sort(key=lambda e: ((e["title"] or "").lower(), e["event_id"]))
+            elif sort == 'date':
+                # Chronological, oldest first (Sugit #25a). Date strings are
+                # YYYY / YYYY-MM-DD, which sort lexicographically by leading
+                # year; undated records sort last via the "9999" sentinel.
+                out.sort(key=lambda e: ((e["date"] or "9999"), e["event_id"]))
             for ev in out:
                 ev.pop("best_rank", None)
                 ev.pop("_record_level", None)
@@ -1362,6 +1367,8 @@ def search(
     out = sorted(events.values(), key=lambda e: e["rank"])[:limit]
     if sort == 'title':
         out.sort(key=lambda e: (e["title"] or "").lower())
+    elif sort == 'date':
+        out.sort(key=lambda e: (e["date"] or "9999"))
 
     for ev in out:
         ev.pop("best_rank", None)

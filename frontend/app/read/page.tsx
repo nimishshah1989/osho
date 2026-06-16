@@ -27,7 +27,7 @@ function translationLine(
   return book ? `translated from ${tf} · ${book}` : `translated from ${tf}`;
 }
 import { trackDiscourseOpen, trackPageView } from '../../lib/analytics';
-import { paragraphRoleClass, isMetadataRole, cx } from '../../lib/paragraphRole';
+import { paragraphRoleClass, paragraphGapClass, isMetadataRole, cx } from '../../lib/paragraphRole';
 import { useOfflineEngine } from '../../lib/search/OfflineProvider';
 import { discourseApi } from '../../lib/search/searchApi';
 
@@ -203,15 +203,22 @@ function ReaderInner() {
             </div>
           )}
 
+          {/* Role-aware vertical rhythm (#31/#33) instead of a uniform space-y:
+              Osho's paragraphs flow book-style (indent, no blank line) while
+              questions/poems/comments keep a clear gap. */}
           {data && !loading && data.paragraphs.length > 0 && (
-            <article className="prose-osho space-y-5">
+            <article className="prose-osho">
               {data.paragraphs
                 // Title + event_info are already shown in the page header;
                 // hiding them here avoids duplication when reading a record
                 // ingested from a styled .docx.
                 .filter((p) => !isMetadataRole(p.role))
-                .map((p) => {
-                  const cls = cx('whitespace-pre-wrap leading-loose', paragraphRoleClass(p.role));
+                .map((p, idx) => {
+                  const cls = cx(
+                    'whitespace-pre-wrap leading-loose',
+                    idx > 0 ? paragraphGapClass(p.role) : null,
+                    paragraphRoleClass(p.role),
+                  );
                   return (
                     <p key={p.sequence_number} className={cls}>
                       {p.content}

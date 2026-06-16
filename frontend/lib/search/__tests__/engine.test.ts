@@ -257,6 +257,24 @@ describe('multi-year archivist date filtering', () => {
 });
 
 
+describe('sort=date — chronological (Sugit #25a)', () => {
+  it('orders matching records oldest-first', () => {
+    // Nietzsche appears only in p1 (1986-02-25) and p2 (1987-01-10).
+    const r = search(freshEngine(), { q: 'Nietzsche', sort: 'date' });
+    const titles = r.events.map((e) => e.title);
+    expect(titles.indexOf('Light on the Path ~ 29'))
+      .toBeLessThan(titles.indexOf('The Messiah Vol 1 ~ 15'));
+  });
+
+  it('is monotonic non-decreasing by date across a broad query', () => {
+    const r = search(freshEngine(), { q: 'meditation', sort: 'date' });
+    const dates = r.events.map((e) => e.date ?? '9999');
+    const sorted = [...dates].sort((a, b) => a.localeCompare(b));
+    expect(dates).toEqual(sorted);
+  });
+});
+
+
 describe('filters', () => {
   it('language=Hindi excludes English events', () => {
     const r = search(freshEngine(), { q: 'meditation', language: 'Hindi' });

@@ -168,6 +168,12 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
         const t = (a.title ?? '').toLowerCase().localeCompare((b.title ?? '').toLowerCase());
         return t || (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
       });
+    } else if (sort === 'date') {
+      // Chronological, oldest first (Sugit #25a); undated records last.
+      out = out.sort((a, b) => {
+        const d = (a.date ?? '9999').localeCompare(b.date ?? '9999');
+        return d || (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
+      });
     }
     const tooMany = totalEvents > TOO_MANY_THRESHOLD;
     if (tooMany) {
@@ -335,6 +341,8 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
   let out = [...events.values()].sort((a, b) => a.best_rank - b.best_rank).slice(0, limit);
   if (sort === 'title') {
     out = out.sort((a, b) => (a.title ?? '').toLowerCase().localeCompare((b.title ?? '').toLowerCase()));
+  } else if (sort === 'date') {
+    out = out.sort((a, b) => (a.date ?? '9999').localeCompare(b.date ?? '9999'));
   }
 
   return {

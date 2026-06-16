@@ -125,11 +125,12 @@ export default function HelpPage() {
           </Section>
 
           {/* ── Proximity / Near ── */}
-          <Section title="Proximity (Near) Search">
+          <Section title="Proximity Search (“Within N words”)">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Near mode finds discourses where two or more words appear close together —
+              Choose <span className="text-[rgb(var(--fg))]">Within N words</span> in the
+              Match filter to find records where two or more words appear close together —
               within the same sentence, paragraph, or a few paragraphs depending on the
-              distance setting.
+              distance (N) you set.
             </p>
             <Table rows={[
               ['Distance 10',  'Words within ~10 tokens (a short phrase or sentence)'],
@@ -144,13 +145,14 @@ export default function HelpPage() {
           {/* ── Language filter ── */}
           <Section title="Language Filter">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Use the <span className="text-[rgb(var(--fg))]">Lang</span> filter below the search
+              Use the <span className="text-[rgb(var(--fg))]">Language</span> filter below the search
               bar to restrict results.
             </p>
             <Table rows={[
-              ['All',     'Search both English and Hindi discourses (default)'],
-              ['English', 'English-language discourses only'],
-              ['Hindi',   'Hindi-language discourses only'],
+              ['All',      'Search both English and Hindi records (default)'],
+              ['Original', 'Original, non-translated discourses only'],
+              ['English',  'English-language records only'],
+              ['Hindi',    'Hindi-language records only'],
             ]} />
           </Section>
 
@@ -169,9 +171,11 @@ export default function HelpPage() {
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
               The full archive can be used without an internet connection. Visit{' '}
               <a href="/downloadapp" className="text-gold hover:underline">/downloadapp</a>{' '}
-              to install the site as an app or download the desktop application — both
-              bundle the complete corpus so search works entirely offline, with the same
-              modes, syntax, and Hindi support described above.
+              for setup. You can install this site as an app (PWA) on a phone, tablet,
+              or laptop — it downloads the complete corpus once over Wi-Fi and then runs
+              entirely offline — or install the desktop app, which ships with the corpus
+              bundled in from the first launch. Both offer the same search modes, syntax,
+              and English/Hindi support described above.
             </p>
           </Section>
 
@@ -181,7 +185,7 @@ export default function HelpPage() {
               Each discourse detail panel includes a{' '}
               <span className="text-gold">sannyas.wiki ↗</span> link that opens the corresponding
               page on sannyas.wiki — a community reference site with additional information about
-              each discourse series, dates, and locations.
+              each discourse: dates, locations, related books and translations, audio and video.
             </p>
           </Section>
 

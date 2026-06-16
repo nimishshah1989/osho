@@ -40,6 +40,7 @@ const EN: Dict = {
   'search.sort': 'Sort',
   'search.sort.rank': 'Rank',
   'search.sort.title': 'Title',
+  'search.sort.date': 'Time',
   // Sugit (2026-05) — "record" is the (event + language) tuple that the
   // database is actually keyed on. "Event" stays as the abstract talk
   // regardless of translation; we don't surface that word in the UI.
@@ -52,6 +53,12 @@ const EN: Dict = {
   'search.col.discourse': 'Record',
   'search.col.rankShort': 'Rank',
   'search.col.az': 'A→Z',
+  'search.col.time': 'Time',
+  // Combined result-list header + summary wording (Sugit #25b/#26).
+  'search.results.record': 'record',
+  'search.results.records': 'records',
+  'search.results.hit': 'hit',
+  'search.results.hits': 'hits',
   'search.detail.emptyWithResults':
     'Select a record on the left to read the matched passages.',
   'search.detail.emptyPristine':
@@ -62,6 +69,8 @@ const EN: Dict = {
   'search.detail.para': 'Para',
   'search.detail.loadingFull': 'loading full record…',
   'search.detail.showAll': 'Show entire record with matches highlighted ({n} paragraphs)',
+  'search.lang.label': 'Language',
+  'search.period.label': 'Period',
   'search.lang.all': 'All',
   'search.lang.original': 'Original',
   'search.lang.original.tooltip':
@@ -161,6 +170,7 @@ const HI: Dict = {
   'search.sort': 'क्रम',
   'search.sort.rank': 'मिलान से',
   'search.sort.title': 'शीर्षक से',
+  'search.sort.date': 'समय से',
   'search.results.one': '{n} प्रवचन मिला',
   'search.results.many': '{n} प्रवचन मिले',
   'search.empty.pristine':
@@ -170,6 +180,11 @@ const HI: Dict = {
   'search.col.discourse': 'प्रवचन',
   'search.col.rankShort': 'क्रम',
   'search.col.az': 'अ→ह',
+  'search.col.time': 'समय',
+  'search.results.record': 'प्रवचन',
+  'search.results.records': 'प्रवचन',
+  'search.results.hit': 'अंश',
+  'search.results.hits': 'अंश',
   'search.detail.emptyWithResults':
     'बाईं तरफ़ से कोई प्रवचन चुनो — मिले हुए अंश यहाँ खुल जाएंगे।',
   'search.detail.emptyPristine':
@@ -180,6 +195,8 @@ const HI: Dict = {
   'search.detail.para': 'Para',
   'search.detail.loadingFull': 'पूरा प्रवचन खुल रहा है…',
   'search.detail.showAll': 'पूरा प्रवचन देखो — हर मिलान हाईलाइट ({n} अनुच्छेद)',
+  'search.lang.label': 'भाषा',
+  'search.period.label': 'काल',
   'search.lang.all': 'सभी',
   'search.lang.original': 'मूल',
   'search.lang.original.tooltip':

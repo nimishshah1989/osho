@@ -20,10 +20,11 @@ import {
 } from 'lucide-react';
 import Nav from '../components/Nav';
 import HindiInput from '../components/HindiInput';
+import { FilterSelect } from '../components/FilterSelect';
 import { useLocale } from '../lib/i18n';
 import { formatReadableDate } from '../lib/dateFormat';
 import { romanToDevanagari, buildHindiFtsQuery } from '../lib/transliterate';
-import { paragraphRoleClass, cx } from '../lib/paragraphRole';
+import { paragraphRoleClass, paragraphGapClass, isMetadataRole, cx } from '../lib/paragraphRole';
 import { useOfflineEngine } from '../lib/search/OfflineProvider';
 import { discourseApi, languagesApi, searchApi } from '../lib/search/searchApi';
 import type { SearchHit, SearchEvent, SearchResponse } from '../lib/search';
@@ -58,12 +59,19 @@ interface DiscourseResponse {
   paragraphs: Paragraph[];
 }
 
-type Sort = 'rank' | 'title';
+type Sort = 'rank' | 'title' | 'date';
 type Mode = 'phrase' | 'all' | 'near';
 
 const DEFAULT_PROX = 30;
 
 const HAS_DEVANAGARI = /[\u0900-\u097F]/;
+
+// #32: the event-info block carries a line like
+//   "event page in sannyas.wiki: A Rose Is a Rose Is a Rose ~ 01."
+// We keep the prefix as plain text and turn the title that follows into a
+// link to the wiki page. Group 1 = prefix, group 2 = title (trailing "." dropped).
+const WIKI_MARKER_RE = /^(event page in sannyas\.wiki:)\s*(.+?)\.?\s*$/i;
+const SANNYAS_WIKI_BASE = 'https://www.sannyas.wiki/index.php?title=';
 
 /** Translation-provenance line for the search result + reader header.
  *  Returns null when the record is original-language ("none" or empty). */
@@ -199,7 +207,8 @@ function SearchPageInner() {
   const searchParams = useSearchParams();
 
   const initialQuery = searchParams?.get('q') ?? '';
-  const initialSort: Sort = (searchParams?.get('sort') as Sort) === 'title' ? 'title' : 'rank';
+  const sortParam = searchParams?.get('sort');
+  const initialSort: Sort = sortParam === 'title' || sortParam === 'date' ? sortParam : 'rank';
   const initialEvent = searchParams?.get('event') ?? '';
   const initialModeParam = searchParams?.get('mode');
   const initialMode: Mode =
@@ -244,6 +253,16 @@ function SearchPageInner() {
   // Set to true when the user navigates cross-discourse while details are open;
   // cleared after the new discourse mounts and details are programmatically opened.
   const pendingOpenDetailsRef = useRef(false);
+  // Result-list <button> elements keyed by event_id, so keyboard navigation
+  // can scroll the active record into view in the left list (Sugit #19).
+  const resultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  // #19: scroll a result row into view in the LEFT list. `block: 'nearest'`
+  // moves the list's own scroll container minimally and only when the row is
+  // off-screen, so it never fights the right-pane discourse scroll. Called
+  // only from keyboard navigation, never from a plain mouse click.
+  const scrollRecordIntoView = useCallback((eventId: string) => {
+    resultRefs.current.get(eventId)?.scrollIntoView({ block: 'nearest' });
+  }, []);
 
   const highlightPattern = useMemo(() => extractHighlights(submittedQuery), [submittedQuery]);
 
@@ -397,12 +416,17 @@ function SearchPageInner() {
         // records Osho gave originally in their language (translated_from
         // is none/NULL) regardless of language. Everything else is a literal
         // language filter (English, Hindi, …).
+        // #18: "Exact phrase" mode is always exact-spelling — the Spelling
+        // control is hidden in this mode, so force exact here rather than
+        // mutating exactMatch state (which would trigger a second search).
+        // Derive from the `m` argument, not state, to avoid a stale closure.
+        const effectiveExact = m === 'phrase' ? true : exactMatch;
         const sr = await searchApi({
           q: fts,
           sort: s,
           original: langFilter === 'original',
           language: langFilter && langFilter !== 'original' ? langFilter : undefined,
-          exact: exactMatch || undefined,
+          exact: effectiveExact || undefined,
           dateFrom: dateFrom || undefined,
           dateTo: dateTo || undefined,
         }, offlineEngine);
@@ -455,7 +479,9 @@ function SearchPageInner() {
     setDiscourseLoading(true);
     setDiscourseError(null);
     discourseApi(
-      { eventId: selectedEventId, q: submittedQuery || undefined, exact: exactMatch || undefined },
+      // Mirror the search's effective-exact (#18): phrase mode is always exact,
+      // so the full-record highlights use the same index the search did.
+      { eventId: selectedEventId, q: submittedQuery || undefined, exact: (mode === 'phrase' ? true : exactMatch) || undefined },
       offlineEngine,
     )
       .then((body) => {
@@ -603,7 +629,9 @@ function SearchPageInner() {
       const currentIdx = results.events.findIndex((e) => e.event_id === selectedEventId);
       const nextIdx = currentIdx + direction;
       if (nextIdx >= 0 && nextIdx < results.events.length) {
-        selectEvent(results.events[nextIdx].event_id);
+        const nextId = results.events[nextIdx].event_id;
+        selectEvent(nextId);
+        scrollRecordIntoView(nextId);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -628,7 +656,9 @@ function SearchPageInner() {
       const targetIdx = currentIdx + direction;
       if (targetIdx < 0 || targetIdx >= results.events.length) return;
       pendingJumpRef.current = direction === -1 ? 'last' : 'first';
-      selectEvent(results.events[targetIdx].event_id);
+      const targetId = results.events[targetIdx].event_id;
+      selectEvent(targetId);
+      scrollRecordIntoView(targetId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [currentMatchPos, matchIndices, jumpToMatch, results, selectedEventId],
@@ -713,11 +743,10 @@ function SearchPageInner() {
       <Nav />
       <main className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))] pt-20 md:pt-24 pb-16">
         <div className="max-w-7xl mx-auto px-4 md:px-8">
-          <header className="mb-6">
-            <h1 className="text-sm tracking-[0.35em] uppercase text-gold opacity-70 mb-4 font-medium">
-              OSHO · {locale === 'hi' ? 'प्रवचन खोज' : 'Discourse Search'}
-            </h1>
-
+          {/* #20: dropped the standalone "OSHO · Discourse Search" title —
+              the bold "Search" nav tab now carries the page identity, keeping
+              the top compact. */}
+          <header className="mb-5">
             <form onSubmit={handleSubmit} className="relative">
               {locale === 'hi' ? (
                 <div className="relative">
@@ -726,14 +755,14 @@ function SearchPageInner() {
                     onChange={setQuery}
                     onSubmit={(v) => doSearch(v ?? query)}
                     placeholder={placeholder}
-                    className="w-full bg-transparent border-b-2 border-gold/40 py-4 pr-12 text-xl md:text-2xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-3 pr-12 text-xl md:text-2xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     disabled={loading}
                     autoFocus
                     ariaLabel={t('search.submit')}
                   />
                   <button
                     type="submit"
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-gold disabled:opacity-30 z-10"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gold disabled:opacity-30 z-10"
                     disabled={loading || !query.trim()}
                     aria-label={t('search.submit')}
                   >
@@ -744,7 +773,7 @@ function SearchPageInner() {
                 <>
                   <input
                     type="text"
-                    className="w-full bg-transparent border-b-2 border-gold/40 py-4 pr-12 text-xl md:text-2xl focus:border-gold outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-3 pr-12 text-xl md:text-2xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     placeholder={placeholder}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -753,7 +782,7 @@ function SearchPageInner() {
                   />
                   <button
                     type="submit"
-                    className="absolute right-0 top-1/2 -translate-y-1/2 text-gold disabled:opacity-30"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gold disabled:opacity-30"
                     disabled={loading || !query.trim()}
                     aria-label={t('search.submit')}
                   >
@@ -770,29 +799,24 @@ function SearchPageInner() {
               </div>
             )}
 
-            <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-[13px] tracking-[0.15em] uppercase">
-              {/* Mode selector */}
-              <div className="flex items-center gap-3">
-                <span className="text-stone-500 dark:text-ivory/60">{t('search.match')}:</span>
-                {(['phrase', 'all', 'near'] as Mode[]).map((m, idx) => (
-                  <React.Fragment key={m}>
-                    {idx > 0 && <span className="opacity-20">|</span>}
-                    <button
-                      type="button"
-                      onClick={() => handleModeChange(m)}
-                      className={
-                        mode === m
-                          ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                          : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                      }
-                      aria-pressed={mode === m}
-                    >
-                      {t(`search.mode.${m}`)}
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
+            {/* Filters as compact labeled dropdowns (Sugit #22/#23). Order
+                (#24): Match · [N=] · Language · [Spelling] · Period · Sort.
+                Spelling is hidden in phrase mode (#18) — exact-phrase is
+                always exact-spelling. */}
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-[13px] tracking-[0.1em] uppercase">
+              {/* Match */}
+              <FilterSelect
+                label={t('search.match')}
+                value={mode}
+                onChange={(v) => handleModeChange(v as Mode)}
+                options={[
+                  { value: 'phrase', label: t('search.mode.phrase') },
+                  { value: 'all', label: t('search.mode.all') },
+                  { value: 'near', label: t('search.mode.near') },
+                ]}
+              />
 
+              {/* Proximity distance — only meaningful for "Within N words". */}
               {mode === 'near' && (
                 <div className="flex items-center gap-2">
                   <span className="text-stone-500 dark:text-ivory/60">{t('search.prox.label')}</span>
@@ -802,7 +826,7 @@ function SearchPageInner() {
                     max={100}
                     value={proximity}
                     onChange={(e) => handleProximityChange(Number(e.target.value))}
-                    className="w-14 bg-transparent border-b-2 border-gold/40 text-gold text-center py-1 focus:border-gold outline-none font-bold"
+                    className="w-14 bg-transparent border border-gold/40 rounded-md text-gold text-center py-1 focus:border-gold outline-none font-bold"
                     aria-label={t('search.mode.near')}
                   />
                   <span className="text-stone-400 dark:text-ivory/50">{t('search.prox.suffix')}</span>
@@ -823,104 +847,36 @@ function SearchPageInner() {
                 </div>
               )}
 
-              {/* Sort */}
-              <div className="flex items-center gap-3">
-                <span className="text-stone-500 dark:text-ivory/60">{t('search.sort')}:</span>
-                <button
-                  type="button"
-                  onClick={() => handleSortChange('rank')}
-                  className={
-                    sort === 'rank'
-                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                  }
-                >
-                  {t('search.sort.rank')}
-                </button>
-                <span className="opacity-20">|</span>
-                <button
-                  type="button"
-                  onClick={() => handleSortChange('title')}
-                  className={
-                    sort === 'title'
-                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                  }
-                >
-                  {t('search.sort.title')}
-                </button>
-              </div>
-
-              {/* Language filter — All / Original / EN / HI (Sugit 2026-05).
-                  "Original" is a sibling option, not orthogonal: selecting it
-                  filters to records Osho gave originally in their language
-                  regardless of which language that was. */}
-              <div className="flex items-center gap-3">
-                <span className="text-stone-500 dark:text-ivory/60">
-                  {locale === 'hi' ? 'भाषा' : 'Lang'}:
-                </span>
-                {([
+              {/* Language — All / Original / EN / HI. "Original" is a sibling
+                  option (records Osho gave originally in their language). */}
+              <FilterSelect
+                label={t('search.lang.label')}
+                value={langFilter}
+                onChange={handleLangFilterChange}
+                options={[
                   { value: '', label: t('search.lang.all') },
                   { value: 'original', label: t('search.lang.original'), title: t('search.lang.original.tooltip') },
                   ...(availableLanguages.length ? availableLanguages : ['English', 'Hindi']).map((l) => ({ value: l, label: l })),
-                ] as { value: string; label: string; title?: string }[]).map(({ value, label, title }) => (
-                  <button
-                    key={value || 'all'}
-                    type="button"
-                    onClick={() => handleLangFilterChange(value)}
-                    title={title}
-                    className={
-                      langFilter === value
-                        ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                        : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                    }
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+                ]}
+              />
 
-              {/* Stemmed vs Exact toggle — Sugit 2026-05-16. When off
-                  (default), porter stemming + Devanagari normalisation are
-                  applied so "teach" matches teacher/teaching/teaches and
-                  अनन्त matches अनंत. When on, the backend hits an
-                  un-stemmed/un-normalised parallel FTS index so the query
-                  matches literally — what OCTP and the CD-ROM do. */}
-              <div className="flex items-center gap-3">
-                <span className="text-stone-500 dark:text-ivory/60">
-                  {t('search.exact.label')}:
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setExactMatch(false)}
-                  title={t('search.exact.stemmed.tooltip')}
-                  className={
-                    !exactMatch
-                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                  }
-                >
-                  {t('search.exact.stemmed')}
-                </button>
-                <span className="opacity-20">|</span>
-                <button
-                  type="button"
-                  onClick={() => setExactMatch(true)}
-                  title={t('search.exact.exact.tooltip')}
-                  className={
-                    exactMatch
-                      ? 'text-gold font-bold underline underline-offset-4 decoration-2'
-                      : 'text-stone-400 dark:text-ivory/50 hover:text-[rgb(var(--fg))]'
-                  }
-                >
-                  {t('search.exact.exact')}
-                </button>
-              </div>
+              {/* Spelling — Stemmed vs Exact. Hidden in phrase mode (#18). */}
+              {mode !== 'phrase' && (
+                <FilterSelect
+                  label={t('search.exact.label')}
+                  value={exactMatch ? 'exact' : 'stemmed'}
+                  onChange={(v) => setExactMatch(v === 'exact')}
+                  options={[
+                    { value: 'stemmed', label: t('search.exact.stemmed'), title: t('search.exact.stemmed.tooltip') },
+                    { value: 'exact', label: t('search.exact.exact'), title: t('search.exact.exact.tooltip') },
+                  ]}
+                />
+              )}
 
-              {/* Date range */}
+              {/* Period (date range) */}
               <div className="flex items-center gap-2">
                 <span className="text-stone-500 dark:text-ivory/60">
-                  {locale === 'hi' ? 'काल' : 'Period'}:
+                  {t('search.period.label')}:
                 </span>
                 <input
                   type="text"
@@ -928,7 +884,7 @@ function SearchPageInner() {
                   maxLength={4}
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="w-16 bg-transparent border-b-2 border-gold/30 text-center py-0.5 focus:border-gold outline-none text-[rgb(var(--fg))]"
+                  className="w-16 bg-transparent border border-gold/30 rounded-md text-center py-0.5 focus:border-gold outline-none text-[rgb(var(--fg))]"
                 />
                 <span className="text-stone-400 dark:text-ivory/40">–</span>
                 <input
@@ -937,17 +893,21 @@ function SearchPageInner() {
                   maxLength={4}
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  className="w-16 bg-transparent border-b-2 border-gold/30 text-center py-0.5 focus:border-gold outline-none text-[rgb(var(--fg))]"
+                  className="w-16 bg-transparent border border-gold/30 rounded-md text-center py-0.5 focus:border-gold outline-none text-[rgb(var(--fg))]"
                 />
               </div>
 
-              {results && (
-                <span className="text-stone-600 dark:text-ivory/70 font-medium">
-                  {results.total} {locale === 'hi' ? 'प्रवचन' : results.total === 1 ? 'discourse' : 'discourses'}
-                  {' · '}
-                  {results.total_hits} {locale === 'hi' ? 'अंश' : results.total_hits === 1 ? 'hit' : 'hits'}
-                </span>
-              )}
+              {/* Sort — last, since it's not a filter (#24). */}
+              <FilterSelect
+                label={t('search.sort')}
+                value={sort}
+                onChange={(v) => handleSortChange(v as Sort)}
+                options={[
+                  { value: 'rank', label: t('search.sort.rank') },
+                  { value: 'date', label: t('search.sort.date') },
+                  { value: 'title', label: t('search.sort.title') },
+                ]}
+              />
             </div>
           </header>
 
@@ -959,7 +919,7 @@ function SearchPageInner() {
             <div className="mb-4 px-3 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 text-sm text-amber-800 dark:text-amber-200">
               {locale === 'hi'
                 ? `यह खोज बहुत व्यापक है — ${results.total.toLocaleString()} प्रवचन मिले। कृपया और शब्द जोड़कर खोज सीमित करें।`
-                : `Query matched ${results.total.toLocaleString()} discourses — too broad to show previews. Add more specific words to narrow results.`}
+                : `Query matched ${results.total.toLocaleString()} records — too broad to show previews. Add more specific words to narrow results.`}
             </div>
           )}
 
@@ -994,9 +954,24 @@ function SearchPageInner() {
               )}
               {results && results.events.length > 0 && (
                 <ul className="divide-y divide-gold/10">
-                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[12px] tracking-[0.2em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between">
-                    <span>{t('search.col.discourse')}</span>
-                    <span>{sort === 'rank' ? t('search.col.rankShort') : t('search.col.az')}</span>
+                  {/* #25b/#26: count + sort column folded into the list header
+                      ("75 RECORDS, 275 HITS | RANK"), replacing the old separate
+                      summary line. */}
+                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[12px] tracking-[0.2em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between gap-2">
+                    <span>
+                      {results.total}{' '}
+                      {results.total === 1 ? t('search.results.record') : t('search.results.records')}
+                      {', '}
+                      {results.total_hits}{' '}
+                      {results.total_hits === 1 ? t('search.results.hit') : t('search.results.hits')}
+                    </span>
+                    <span>
+                      {sort === 'rank'
+                        ? t('search.col.rankShort')
+                        : sort === 'date'
+                          ? t('search.col.time')
+                          : t('search.col.az')}
+                    </span>
                   </li>
                   {results.events.map((ev, i) => {
                     const active = ev.event_id === selectedEventId;
@@ -1004,6 +979,10 @@ function SearchPageInner() {
                       <li key={ev.event_id}>
                         <button
                           type="button"
+                          ref={(el) => {
+                            if (el) resultRefs.current.set(ev.event_id, el);
+                            else resultRefs.current.delete(ev.event_id);
+                          }}
                           onClick={() => selectEvent(ev.event_id)}
                           className={`w-full text-left px-4 py-3.5 transition-colors flex justify-between items-start gap-4 ${
                             active
@@ -1163,7 +1142,7 @@ function SearchPageInner() {
                             <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
                               Para {h.sequence_number}
                             </div>
-                            <div className={roleCls}>
+                            <div className={cx('discourse-body whitespace-pre-wrap', roleCls)}>
                               <Highlighted text={h.content} hl={h.hl} pattern={highlightPattern} />
                             </div>
                           </li>
@@ -1191,33 +1170,66 @@ function SearchPageInner() {
                         {t('search.detail.showAll', { n: discourse.paragraphs.length })}
                       </summary>
 
-                      <div className="mt-4 space-y-3 text-stone-800 dark:text-ivory/90 leading-relaxed text-[17px]">
-                        {discourse.paragraphs.map((p, idx) => {
-                          const isMatch = matchIndices.includes(idx);
-                          const isCurrent = matchIndices[currentMatchPos] === idx;
-                          const roleCls = paragraphRoleClass(p.role);
-                          const matchCls = isCurrent
-                            ? 'scroll-mt-4 ring-2 ring-gold/40 bg-gold/5 rounded-sm px-3 -mx-3 py-1'
-                            : isMatch
-                              ? 'scroll-mt-4 ring-1 ring-gold/15 rounded-sm px-2 -mx-2'
-                              : '';
-                          return (
-                            <p
-                              key={p.sequence_number}
-                              ref={(el) => {
-                                if (idx === firstMatchIndex && el) firstMatchRef.current = el;
-                                if (isMatch && el) matchRefs.current.set(idx, el);
-                              }}
-                              className={cx(matchCls, roleCls)}
-                            >
-                              <Highlighted
-                                text={p.content}
-                                hl={p.hl}
-                                pattern={isMatch ? highlightPattern : null}
-                              />
-                            </p>
+                      {/* `discourse-body` scopes the italic override (globals.css);
+                          `whitespace-pre-wrap` makes soft line breaks (ASCII 10,
+                          e.g. inside a poem) wrap with no extra leading (#36).
+                          Per-paragraph gaps come from paragraphGapClass so the
+                          event-info header reads as one tight block and Osho's
+                          paragraphs flow book-style with no blank line (#31/#33). */}
+                      <div className="mt-4 discourse-body whitespace-pre-wrap text-stone-800 dark:text-ivory/90 leading-relaxed text-[17px]">
+                        {(() => {
+                          // First body paragraph after the leading metadata
+                          // header block — gets extra space above it (#31).
+                          const firstBodyIdx = discourse.paragraphs.findIndex(
+                            (p) => !isMetadataRole(p.role),
                           );
-                        })}
+                          return discourse.paragraphs.map((p, idx) => {
+                            const isMatch = matchIndices.includes(idx);
+                            const isCurrent = matchIndices[currentMatchPos] === idx;
+                            const roleCls = paragraphRoleClass(p.role);
+                            const gapCls = cx(
+                              paragraphGapClass(p.role),
+                              idx === firstBodyIdx && firstBodyIdx > 0 ? 'mt-7' : null,
+                            );
+                            const matchCls = isCurrent
+                              ? 'scroll-mt-4 ring-2 ring-gold/40 bg-gold/5 rounded-sm px-3 -mx-3 py-1'
+                              : isMatch
+                                ? 'scroll-mt-4 ring-1 ring-gold/15 rounded-sm px-2 -mx-2'
+                                : '';
+                            // #32: link the title in the sannyas.wiki marker line.
+                            const wiki = !isMatch ? p.content.match(WIKI_MARKER_RE) : null;
+                            return (
+                              <p
+                                key={p.sequence_number}
+                                ref={(el) => {
+                                  if (idx === firstMatchIndex && el) firstMatchRef.current = el;
+                                  if (isMatch && el) matchRefs.current.set(idx, el);
+                                }}
+                                className={cx(gapCls, matchCls, roleCls)}
+                              >
+                                {wiki ? (
+                                  <>
+                                    {wiki[1]}{' '}
+                                    <a
+                                      href={`${SANNYAS_WIKI_BASE}${encodeURIComponent(wiki[2].replace(/ /g, '_'))}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-gold hover:underline"
+                                    >
+                                      {wiki[2]}
+                                    </a>
+                                  </>
+                                ) : (
+                                  <Highlighted
+                                    text={p.content}
+                                    hl={p.hl}
+                                    pattern={isMatch ? highlightPattern : null}
+                                  />
+                                )}
+                              </p>
+                            );
+                          });
+                        })()}
                       </div>
 
                       {/* Floating hit navigation — sticks to bottom of discourse pane.
