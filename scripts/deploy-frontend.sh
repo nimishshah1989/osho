@@ -79,14 +79,30 @@ if echo "$CHANGED" | grep -qE '^frontend/package(-lock)?\.json$'; then
   npm ci
 fi
 
+# Build from a clean slate. An in-place rebuild can leave orphaned chunks
+# when a prior build was interrupted or OOM-killed: the new HTML ends up
+# referencing chunk hashes whose files never got written (or that linger
+# from an older build), so fresh visitors get 400s and a blank page while
+# anyone with the old assets cached sees nothing wrong. Root cause of the
+# 2026-06-16 blank-page incident. Costs a cold build (a few extra minutes)
+# in exchange for a guaranteed-consistent output tree.
+echo "==> Removing stale .next before build"
+rm -rf .next
+
 echo "==> npm run build"
 npm run build
 
 echo "==> Restarting PM2 app $APP"
 pm2 restart "$APP" --update-env
 
-# Healthcheck. Loop briefly to allow `next start` to come up, then fail
-# loudly if it doesn't answer.
+# Healthcheck, two stages:
+#   1. the homepage must answer on :3000;
+#   2. every /_next/static asset the homepage references must ALSO serve
+#      200. A build that emits the HTML but not all of its chunks (e.g.
+#      OOM-killed mid-build) still answers 200 on '/', so stage 1 alone
+#      passes while fresh visitors get 400s on the missing chunks and see
+#      a blank page. Stage 2 turns that silent corruption into a loud,
+#      failed deploy. (Root cause of the 2026-06-16 blank-page incident.)
 echo "==> Healthchecking $HEALTH_URL"
 ok=0
 for i in $(seq 1 15); do
@@ -97,11 +113,34 @@ for i in $(seq 1 15); do
   fi
 done
 
-if [ "$ok" -eq 1 ]; then
-  echo "==> Frontend deploy OK"
-else
+if [ "$ok" -ne 1 ]; then
   echo "==> DEPLOY FAILED — frontend not responding on $HEALTH_URL"
   echo "==> Last 50 PM2 log lines for $APP:"
   pm2 logs "$APP" --lines 50 --nostream 2>/dev/null || true
   exit 1
 fi
+
+echo "==> Verifying homepage static assets resolve (guards against incomplete builds)"
+home_html="$(curl -fsS --max-time 5 "$HEALTH_URL" || true)"
+assets="$(printf '%s' "$home_html" | grep -oE '/_next/static/[^"]+\.(js|css)' | sort -u || true)"
+missing=0
+checked=0
+for a in $assets; do
+  checked=$((checked + 1))
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${PORT}${a}" || echo 000)"
+  if [ "$code" != "200" ]; then
+    echo "    MISSING ($code): $a" >&2
+    missing=$((missing + 1))
+  fi
+done
+
+if [ "$missing" -ne 0 ]; then
+  echo "==> DEPLOY FAILED — $missing of $checked homepage assets do not resolve." >&2
+  echo "    The served HTML references chunks that aren't on disk, so fresh" >&2
+  echo "    visitors would get a blank page. Usually an incomplete build" >&2
+  echo "    (often OOM-killed). Re-run the deploy; if it recurs, add swap or" >&2
+  echo "    raise NODE_OPTIONS=--max-old-space-size for the build step." >&2
+  exit 1
+fi
+
+echo "==> Frontend deploy OK ($checked static assets verified)"
