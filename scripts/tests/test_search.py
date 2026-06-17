@@ -513,6 +513,28 @@ def test_all_words_matches_across_paragraphs(app_client):
     assert "The Buddha Disease ~ 14" in titles
 
 
+def test_all_words_hl_lazy_post_pass_parity(app_client):
+    """Parity lock for the lazy-highlight optimisation: highlight() is now
+    computed in a post-pass for ONLY the ≤3 displayed hits, not for every
+    matched paragraph in the Step-B gather. A multi-word ALL-words query
+    must still return the same totals AND still ship «»-marked hl on its
+    displayed hits (with content emptied when markers are present, the
+    historical payload-slim behaviour). bd1 seeds love/intelligence/
+    awareness across three paragraphs → 1 discourse, 3 paragraph hits."""
+    r = app_client.get("/api/search?q=love intelligence awareness")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["total_hits"] == 3
+    # Every displayed hit carries «» markers and has content emptied.
+    marked = [h for e in data["events"] for h in e["hits"] if "«" in h["hl"]]
+    assert len(marked) == 3, (
+        f"expected 3 «»-marked displayed hits from the post-pass, got {len(marked)}"
+    )
+    for h in marked:
+        assert h["content"] == "", "content should be emptied when hl has markers"
+
+
 def test_record_level_ignores_meta_only_matches(app_client):
     """Record-level All-words must NOT count a discourse that contains the
     query words ONLY in a metadata paragraph (title row / "event page in
