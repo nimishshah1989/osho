@@ -26,8 +26,20 @@ describe('search() — basic', () => {
     const r = search(freshEngine(), { q: '"become silent"' });
     // A matched hit ships its preview in hl (with «» markers); content is
     // emptied to avoid duplicating that text in the payload.
-    const hits = r.events.flatMap((e) => e.hits.map((h) => h.hl));
-    expect(hits.some((h) => h.includes('Become silent'))).toBe(true);
+    const matched = r.events.flatMap((e) => e.hits).filter((h) => (h.hl ?? '').includes('«'));
+    expect(matched.length).toBeGreaterThanOrEqual(1);
+    expect(matched.some((h) => (h.hl ?? '').includes('Become silent'))).toBe(true);
+    for (const h of matched) expect(h.content).toBe('');
+  });
+
+  it('empties single-word hit content when hl is highlighted', () => {
+    // Single-MATCH path: hl carries «» markers (same preview text), so
+    // content is emptied to avoid shipping it twice.
+    const r = search(freshEngine(), { q: 'meditation' });
+    const matched = r.events.flatMap((e) => e.hits).filter((h) => (h.hl ?? '').includes('«'));
+    expect(matched.length).toBeGreaterThanOrEqual(1);
+    expect(matched.some((h) => (h.hl ?? '').toLowerCase().includes('meditation'))).toBe(true);
+    for (const h of matched) expect(h.content).toBe('');
   });
 
   it('handles NEAR(...)', () => {

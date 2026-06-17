@@ -250,10 +250,12 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
       events.set(r.event_id, ev);
     }
     ev.hit_count += 1;
-    const content = stripShailendra(r.content);
+    let content = stripShailendra(r.content);
     if (ev.hits.length < 3 && !isMetaParagraph(r.sequence_number, content)) {
       const rawHl = r.hl || r.content;
       const hl = markersToGuillemets(stripShailendra(rawHl));
+      // hl with «» markers duplicates content; frontend renders the preview from hl, so drop content to avoid shipping the same text twice (mirrors recordLevelSearch).
+      if (hl.includes('«')) content = '';
       const hit: SearchHit = {
         paragraph_id: r.paragraph_id,
         sequence_number: r.sequence_number,

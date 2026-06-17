@@ -1292,10 +1292,14 @@ def search(
             if len(ev["hits"]) < 3 and not is_meta:
                 raw_hl = r["hl"] or r["content"]
                 hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
+                # When hl carries «» markers it is the same preview text as
+                # content; the frontend renders from hl, so drop content to
+                # avoid doubling the payload (mirrors the record-level path).
+                hit_content = '' if '«' in hl else content
                 hit: dict = {
                     "paragraph_id": r["paragraph_id"],
                     "sequence_number": r["sequence_number"],
-                    "content": content,
+                    "content": hit_content,
                     "hl": hl,
                 }
                 if r["role"]:

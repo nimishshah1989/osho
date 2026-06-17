@@ -21,7 +21,25 @@ def test_exact_phrase(app_client):
     evs = r.json()["events"]
     # A matched hit ships its preview in hl (with «» markers); content is
     # emptied to avoid duplicating that text in the payload.
-    assert any("Become silent" in h["hl"] for e in evs for h in e["hits"])
+    matched = [h for e in evs for h in e["hits"] if "«" in h["hl"]]
+    assert matched, "expected at least one «»-marked phrase hit"
+    assert any("Become silent" in h["hl"] for h in matched)
+    # Single-MATCH path empties content when hl carries «» markers.
+    for h in matched:
+        assert h["content"] == ""
+
+
+def test_single_word_hit_content_emptied_when_highlighted(app_client):
+    """Single-word (single-MATCH) hits ship their preview in hl with «»
+    markers; content is emptied to avoid doubling the payload."""
+    r = app_client.get("/api/search?q=meditation")
+    assert r.status_code == 200
+    evs = r.json()["events"]
+    matched = [h for e in evs for h in e["hits"] if "«" in h["hl"]]
+    assert matched, "expected at least one «»-marked single-word hit"
+    assert any("meditation" in h["hl"].lower() for h in matched)
+    for h in matched:
+        assert h["content"] == ""
 
 
 def test_near_operator(app_client):
