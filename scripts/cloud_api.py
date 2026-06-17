@@ -829,6 +829,12 @@ def _record_level_search(
                 .replace('\x02', '«')
                 .replace('\x03', '»')
             )
+            # When hl carries «» markers it is the same preview text as
+            # content, just annotated; the frontend renders the preview from
+            # hl in that case, so shipping content too would just double the
+            # JSON payload. Keep content only as the rare no-marker fallback.
+            if '«' in hl:
+                content = ''
             hit: dict = {
                 'paragraph_id': info['pid'],
                 'sequence_number': seq,
