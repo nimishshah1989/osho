@@ -741,8 +741,13 @@ function SearchPageInner() {
   return (
     <>
       <Nav />
-      <main className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))] pt-20 md:pt-24 pb-16">
-        <div className="max-w-7xl mx-auto px-4 md:px-8">
+      <main className="min-h-screen bg-[rgb(var(--bg))] text-[rgb(var(--fg))] pt-20 md:pt-24 pb-8">
+        {/* Wider shell than the default max-w-7xl (1280px): the two-pane
+            results/reader layout left big dead gutters on large monitors.
+            1600px uses that space while keeping the right-pane prose line
+            length reasonable — the /read prose page intentionally stays
+            max-w-3xl. px-4/md:px-8 keeps a small, deliberate edge margin. */}
+        <div className="max-w-[1600px] mx-auto px-4 md:px-8">
           {/* #20: dropped the standalone "OSHO · Discourse Search" title —
               the bold "Search" nav tab now carries the page identity, keeping
               the top compact. */}
