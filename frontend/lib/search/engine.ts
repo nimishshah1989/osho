@@ -440,7 +440,6 @@ interface RecordMatchedPara {
   pid: number;
   content: string;
   role: string | null;
-  hl: string;
 }
 
 
@@ -519,7 +518,6 @@ function recordLevelSearch(
     paragraph_id: number;
     content: string;
     role: string | null;
-    hl: string;
   }>;
   try {
     prows = db.all(
@@ -528,15 +526,14 @@ function recordLevelSearch(
          f.sequence_number,
          f.paragraph_id,
          f.content,
-         p.role AS role,
-         highlight(${ftsTable}, 0, ?, ?) AS hl
+         p.role AS role
        FROM ${ftsTable} f
        LEFT JOIN events e ON e.id = f.event_id
        LEFT JOIN paragraphs p ON p.id = f.paragraph_id
        WHERE ${ftsTable} MATCH ?
        AND f.event_id IN (${placeholders})
        ${whereExtra}`,
-      [HL_OPEN, HL_CLOSE, gatherFts, ...commonList, ...filterParams],
+      [gatherFts, ...commonList, ...filterParams],
     );
   } catch {
     return empty;
@@ -547,6 +544,10 @@ function recordLevelSearch(
   // hit_count nor total_hits nor the NEAR window — mirrors cloud_api.py
   // (the 2026-05-31 record-level bug counted them in the totals while
   // hiding them from the snippets).
+  //
+  // highlight() is NOT computed in this gather (it's ~10× the bare MATCH
+  // and is needed only for the ≤3 hits we actually display); it is filled
+  // in by a post-pass after the per-event loop. Mirrors cloud_api.py.
   const matched = new Map<string, Map<number, RecordMatchedPara>>();
   for (const r of prows) {
     if (isMetaParagraph(r.sequence_number, r.content)) continue;
@@ -556,7 +557,6 @@ function recordLevelSearch(
       pid: r.paragraph_id,
       content: r.content,
       role: r.role,
-      hl: r.hl,
     });
   }
 
@@ -678,22 +678,22 @@ function recordLevelSearch(
     const hitCount = nearDist !== null ? 1 : paraMap.size;
     totalHits += hitCount;
 
+    // hl is filled in by the post-pass below — only for the paragraphs
+    // that survive this ≤3 cap — so we don't pay highlight() for paragraphs
+    // we never show. paraMap is already meta-filtered at gather time. The
+    // `hl: ''` placeholder is inserted here (before role) so the post-pass
+    // overwrites its value without changing key order, preserving the
+    // historical hit shape { paragraph_id, sequence_number, content, hl, role }.
     const hits: SearchHit[] = [];
     for (const seq of displaySeqs) {
       if (hits.length >= 3) break;
       const info = paraMap.get(seq);
       if (!info) continue;
-      let content = stripShailendra(info.content || '');
-      // paraMap is already meta-filtered at gather time.
-      const rawHl = info.hl || info.content;
-      const hl = markersToGuillemets(stripShailendra(rawHl || ''));
-      // hl with «» markers duplicates content; frontend renders the preview from hl, so drop content to avoid shipping the same text twice.
-      if (hl.includes('«')) content = '';
       const hit: SearchHit = {
         paragraph_id: info.pid,
         sequence_number: seq,
-        content,
-        hl,
+        content: stripShailendra(info.content || ''),
+        hl: '',
       };
       if (info.role) hit.role = info.role;
       hits.push(hit);
@@ -711,6 +711,43 @@ function recordLevelSearch(
       hit_count: hitCount,
       hits,
     });
+  }
+
+  // ── Post-pass: compute highlight() for ONLY the paragraphs we display.
+  // The gather above skips highlight() (~10× the bare MATCH); here we run
+  // it for just the ≤3 hits per event that survived the cap. Same MATCH
+  // (`gatherFts`) the gather used, restricted to the displayed paragraph
+  // ids, so the markers are identical to the old per-row highlight().
+  // Mirrors the post-pass in cloud_api.py.
+  const displayPids: number[] = [];
+  for (const ev of events.values()) for (const h of ev.hits) displayPids.push(h.paragraph_id);
+  const hlMap = new Map<number, string>();
+  for (let i = 0; i < displayPids.length; i += 5000) {
+    const chunk = displayPids.slice(i, i + 5000);
+    const ph = chunk.map(() => '?').join(',');
+    try {
+      const hrows = db.all<{ paragraph_id: number; hl: string }>(
+        `SELECT f.paragraph_id, highlight(${ftsTable}, 0, ?, ?) AS hl
+         FROM ${ftsTable} f
+         WHERE ${ftsTable} MATCH ?
+         AND f.paragraph_id IN (${ph})`,
+        [HL_OPEN, HL_CLOSE, gatherFts, ...chunk],
+      );
+      for (const r of hrows) hlMap.set(r.paragraph_id, markersToGuillemets(stripShailendra(r.hl || '')));
+    } catch {
+      // Defensive: mirror the gather's catch. On failure leave hlMap as-is
+      // so these hits fall back to their plain content.
+    }
+  }
+  for (const ev of events.values()) {
+    for (const h of ev.hits) {
+      const hl = hlMap.get(h.paragraph_id) ?? '';
+      h.hl = hl;
+      // hl with «» markers duplicates content; the frontend renders the
+      // preview from hl, so drop content to avoid shipping the same text
+      // twice. Keep content as the rare no-marker fallback.
+      if (hl.includes('«')) h.content = '';
+    }
   }
 
   // totalEvents is the true intersection size (pre-cap); totalHits is

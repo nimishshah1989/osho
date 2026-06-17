@@ -184,6 +184,20 @@ describe('record-level All-words / Within-N', () => {
     expect(titles).toContain('The Buddha Disease ~ 14');
   });
 
+  it('lazy hl post-pass parity — totals unchanged, displayed hits keep «» markers', () => {
+    // Parity lock for the lazy-highlight optimisation: highlight() now runs
+    // in a post-pass for only the ≤3 displayed hits, not the whole gather.
+    // Totals must be unchanged and displayed hits must still carry «»
+    // markers with content emptied (the payload-slim behaviour). bd1 seeds
+    // love/intelligence/awareness across three paragraphs.
+    const r = search(freshEngine(), { q: 'love intelligence awareness' });
+    expect(r.total).toBe(1);
+    expect(r.total_hits).toBe(3);
+    const marked = r.events.flatMap((e) => e.hits).filter((h) => (h.hl ?? '').includes('«'));
+    expect(marked.length).toBe(3);
+    for (const h of marked) expect(h.content).toBe('');
+  });
+
   it('ignores meta-only matches (no phantom count for title/wiki paragraphs)', () => {
     // e3 has "page"/"sannyas" only in its seq-2 meta paragraph → must not
     // be counted with an empty snippet. Mirrors the Python test.
