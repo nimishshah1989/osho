@@ -681,10 +681,12 @@ function recordLevelSearch(
       if (hits.length >= 3) break;
       const info = paraMap.get(seq);
       if (!info) continue;
-      const content = stripShailendra(info.content || '');
+      let content = stripShailendra(info.content || '');
       // paraMap is already meta-filtered at gather time.
       const rawHl = info.hl || info.content;
       const hl = markersToGuillemets(stripShailendra(rawHl || ''));
+      // hl with «» markers duplicates content; frontend renders the preview from hl, so drop content to avoid shipping the same text twice.
+      if (hl.includes('«')) content = '';
       const hit: SearchHit = {
         paragraph_id: info.pid,
         sequence_number: seq,

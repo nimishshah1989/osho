@@ -19,7 +19,9 @@ def test_exact_phrase(app_client):
     r = app_client.get('/api/search?q="become silent"')
     assert r.status_code == 200
     evs = r.json()["events"]
-    assert any("Become silent" in h["content"] for e in evs for h in e["hits"])
+    # A matched hit ships its preview in hl (with «» markers); content is
+    # emptied to avoid duplicating that text in the payload.
+    assert any("Become silent" in h["hl"] for e in evs for h in e["hits"])
 
 
 def test_near_operator(app_client):

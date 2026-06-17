@@ -24,7 +24,9 @@ describe('search() — basic', () => {
 
   it('matches exact phrase', () => {
     const r = search(freshEngine(), { q: '"become silent"' });
-    const hits = r.events.flatMap((e) => e.hits.map((h) => h.content));
+    // A matched hit ships its preview in hl (with «» markers); content is
+    // emptied to avoid duplicating that text in the payload.
+    const hits = r.events.flatMap((e) => e.hits.map((h) => h.hl));
     expect(hits.some((h) => h.includes('Become silent'))).toBe(true);
   });
 
