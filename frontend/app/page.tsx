@@ -751,7 +751,7 @@ function SearchPageInner() {
           {/* #20: dropped the standalone "OSHO · Discourse Search" title —
               the bold "Search" nav tab now carries the page identity, keeping
               the top compact. */}
-          <header className="mb-5">
+          <header className="mb-4">
             <form onSubmit={handleSubmit} className="relative">
               {locale === 'hi' ? (
                 <div className="relative">
@@ -760,7 +760,7 @@ function SearchPageInner() {
                     onChange={setQuery}
                     onSubmit={(v) => doSearch(v ?? query)}
                     placeholder={placeholder}
-                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-3 pr-12 text-xl md:text-2xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-2.5 pr-12 text-lg md:text-xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     disabled={loading}
                     autoFocus
                     ariaLabel={t('search.submit')}
@@ -778,7 +778,7 @@ function SearchPageInner() {
                 <>
                   <input
                     type="text"
-                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-3 pr-12 text-xl md:text-2xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
+                    className="w-full bg-transparent border border-gold/40 rounded-lg px-4 py-2.5 pr-12 text-lg md:text-xl focus:border-gold focus:ring-1 focus:ring-gold/30 outline-none placeholder:opacity-40 text-[rgb(var(--fg))]"
                     placeholder={placeholder}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
@@ -808,7 +808,7 @@ function SearchPageInner() {
                 (#24): Match · [N=] · Language · [Spelling] · Period · Sort.
                 Spelling is hidden in phrase mode (#18) — exact-phrase is
                 always exact-spelling. */}
-            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3 text-[13px] tracking-[0.1em] uppercase">
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2.5 text-[13px] tracking-[0.1em] uppercase">
               {/* Match */}
               <FilterSelect
                 label={t('search.match')}
@@ -940,7 +940,7 @@ function SearchPageInner() {
                 behaviour the right pane already has. */}
             <section
               aria-label="Results"
-              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-20rem)] overflow-y-auto"
+              className="self-start border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
             >
               {!results && !loading && !error && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">
@@ -962,15 +962,15 @@ function SearchPageInner() {
                   {/* #25b/#26: count + sort column folded into the list header
                       ("75 RECORDS, 275 HITS | RANK"), replacing the old separate
                       summary line. */}
-                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[12px] tracking-[0.2em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between gap-2">
-                    <span>
+                  <li className="sticky top-0 bg-[rgb(var(--bg-sticky))]/90 backdrop-blur px-4 py-2.5 text-[12px] tracking-[0.1em] uppercase text-stone-500 dark:text-ivory/55 font-medium flex justify-between items-baseline gap-2">
+                    <span className="min-w-0">
                       {results.total}{' '}
                       {results.total === 1 ? t('search.results.record') : t('search.results.records')}
                       {', '}
                       {results.total_hits}{' '}
                       {results.total_hits === 1 ? t('search.results.hit') : t('search.results.hits')}
                     </span>
-                    <span>
+                    <span className="whitespace-nowrap flex-shrink-0 pl-3">
                       {sort === 'rank'
                         ? t('search.col.rankShort')
                         : sort === 'date'
@@ -1039,7 +1039,7 @@ function SearchPageInner() {
             <section
               ref={detailRef}
               aria-label="Selected discourse"
-              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-20rem)] overflow-y-auto"
+              className="border border-gold/20 dark:border-gold/15 rounded-sm max-h-[calc(100vh-16rem)] overflow-y-auto"
             >
               {!selectedEvent && (
                 <div className="p-6 text-base text-stone-500 dark:text-ivory/60">
