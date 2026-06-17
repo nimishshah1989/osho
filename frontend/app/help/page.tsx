@@ -51,12 +51,13 @@ export default function HelpPage() {
           {/* ── Search modes ── */}
           <Section title="Search Modes">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Choose the mode using the buttons below the search bar.
+              Choose the mode using the <span className="text-[rgb(var(--fg))]">Match</span> filter
+              below the search bar.
             </p>
             <Table rows={[
-              ['All words',     'Finds discourses containing every word you type, anywhere in the text.'],
-              ['Exact phrase',  'Finds the exact sequence of words as typed, in that order.'],
-              ['Near / Distance', 'Finds discourses where the words appear within N words of each other. Adjust the distance slider.'],
+              ['All words',       'Finds records containing every word you type, anywhere in the text.'],
+              ['Exact phrase',    'Finds the exact sequence of words as typed, in that order.'],
+              ['Within N words',  'Finds records where the words appear within N words of each other. Set the distance in the N = field that appears.'],
             ]} />
           </Section>
 
@@ -68,6 +69,21 @@ export default function HelpPage() {
               ['meditat*',           'Prefix / wildcard — matches meditation, meditating, meditativeness …'],
               ['title:vigyan',       'Search only in discourse titles'],
               ['love OR compassion', 'Either word (at least one must appear)'],
+            ]} />
+          </Section>
+
+          {/* ── Spelling (stemming) ── */}
+          <Section title="Spelling (Stemmed / Exact)">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
+              In <span className="text-[rgb(var(--fg))]">All words</span> and{' '}
+              <span className="text-[rgb(var(--fg))]">Within N words</span> mode, the{' '}
+              <span className="text-[rgb(var(--fg))]">Spelling</span> filter controls how
+              closely words must match. (It is hidden in Exact-phrase mode, which is always
+              exact.)
+            </p>
+            <Table rows={[
+              ['Stemmed', 'Default. Matches word families — “teach” finds teacher, teaching, teaches; अनन्त matches अनंत.'],
+              ['Exact',   'Matches the literal word only, like OCTP and the CD-ROM — “teach” matches only “teach”.'],
             ]} />
           </Section>
 
@@ -156,6 +172,19 @@ export default function HelpPage() {
             ]} />
           </Section>
 
+          {/* ── Sort ── */}
+          <Section title="Sort Order">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
+              Use the <span className="text-[rgb(var(--fg))]">Sort</span> control (last in the
+              filter row) to order the results.
+            </p>
+            <Table rows={[
+              ['Rank',  'Most relevant first — best keyword match, weighted by how often the words appear (default).'],
+              ['Time',  'Chronological — earliest discourses first.'],
+              ['Title', 'Alphabetical by discourse title.'],
+            ]} />
+          </Section>
+
           {/* ── Date filter ── */}
           <Section title="Date / Period Filter">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
@@ -163,19 +192,6 @@ export default function HelpPage() {
               (e.g. <span className="font-mono text-gold">1974</span> –{' '}
               <span className="font-mono text-gold">1981</span>) to limit results to discourses
               given during that period. Discourses span 1962 – 1990. Leave blank to search all years.
-            </p>
-          </Section>
-
-          {/* ── Offline / app ── */}
-          <Section title="Offline Use & Desktop App">
-            <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
-              The full archive can be used without an internet connection. Visit{' '}
-              <a href="/downloadapp" className="text-gold hover:underline">/downloadapp</a>{' '}
-              for setup. You can install this site as an app (PWA) on a phone, tablet,
-              or laptop — it downloads the complete corpus once over Wi-Fi and then runs
-              entirely offline — or install the desktop app, which ships with the corpus
-              bundled in from the first launch. Both offer the same search modes, syntax,
-              and English/Hindi support described above.
             </p>
           </Section>
 

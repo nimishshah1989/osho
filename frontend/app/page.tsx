@@ -1197,7 +1197,10 @@ function SearchPageInner() {
                                 ? 'scroll-mt-4 ring-1 ring-gold/15 rounded-sm px-2 -mx-2'
                                 : '';
                             // #32: link the title in the sannyas.wiki marker line.
-                            const wiki = !isMatch ? p.content.match(WIKI_MARKER_RE) : null;
+                            // Match unconditionally so the link survives even when
+                            // the title text is itself a search hit (the title is
+                            // highlighted inside the link below).
+                            const wiki = p.content.match(WIKI_MARKER_RE);
                             return (
                               <p
                                 key={p.sequence_number}
@@ -1216,7 +1219,10 @@ function SearchPageInner() {
                                       rel="noopener noreferrer"
                                       className="text-gold hover:underline"
                                     >
-                                      {wiki[2]}
+                                      <Highlighted
+                                        text={wiki[2]}
+                                        pattern={isMatch ? highlightPattern : null}
+                                      />
                                     </a>
                                   </>
                                 ) : (

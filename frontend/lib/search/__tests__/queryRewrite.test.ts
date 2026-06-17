@@ -10,11 +10,11 @@ describe('rewriteQuery', () => {
     expect(rewriteQuery('"Satyam Shivam"')).toBe('"Satyam Shivam"');
   });
 
-  it('replaces an apostrophe in a bag-of-words query (#4)', () => {
-    // A bare apostrophe is an FTS5 syntax error; the tokenizer splits on
-    // it anyway, so women's -> women s yields the same matched tokens.
+  it('strips a possessive apostrophe in a bag-of-words query (#4)', () => {
+    // Possessive "'s" is dropped entirely (PR #95): otherwise the bare
+    // "s" token matches almost everything. women's -> women.
     expect(rewriteQuery("a new vision of women's liberation"))
-      .toBe('{content} : (a new vision of women s liberation)');
+      .toBe('{content} : (a new vision of women liberation)');
   });
 
   it('keeps the apostrophe inside a quoted phrase (#4)', () => {

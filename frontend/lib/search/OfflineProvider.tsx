@@ -10,7 +10,7 @@
  *      every query through the local DB.
  *   3. If no → state is `needs-download`. The user installs the corpus
  *      via `installFromFile()` — a corpus file they already have on
- *      disk (downloaded from the /downloadapp link, shared over
+ *      disk (bundled with the desktop app, shared over
  *      WhatsApp, a USB stick…). There is deliberately NO network
  *      download path; until the corpus is loaded the UI works against
  *      the API.
@@ -147,8 +147,8 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       } else if (result.kind === 'needs-download') {
         // In the desktop app the corpus is bundled in the installer and
         // served by the local server — install it automatically. On the
-        // web there's no bundled corpus, so wait for the user (the
-        // /downloadapp page drives the file import).
+        // web there's no bundled corpus, so wait for the user to supply
+        // one via installFromFile().
         const corpusUrl = (window as DesktopWindow).oshoDesktop?.corpusUrl;
         if (corpusUrl) {
           void installFromUrl(corpusUrl);
