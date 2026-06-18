@@ -438,7 +438,6 @@ const META_EXCLUDE_SQL =
 
 interface RecordMatchedPara {
   pid: number;
-  content: string;
   role: string | null;
 }
 
@@ -516,7 +515,7 @@ function recordLevelSearch(
     event_id: string;
     sequence_number: number;
     paragraph_id: number;
-    content: string;
+    cprefix: string;
     role: string | null;
   }>;
   try {
@@ -525,7 +524,7 @@ function recordLevelSearch(
          f.event_id,
          f.sequence_number,
          f.paragraph_id,
-         f.content,
+         substr(f.content, 1, 200) AS cprefix,
          p.role AS role
        FROM ${ftsTable} f
        LEFT JOIN events e ON e.id = f.event_id
@@ -545,17 +544,18 @@ function recordLevelSearch(
   // (the 2026-05-31 record-level bug counted them in the totals while
   // hiding them from the snippets).
   //
-  // highlight() is NOT computed in this gather (it's ~10× the bare MATCH
-  // and is needed only for the ≤3 hits we actually display); it is filled
-  // in by a post-pass after the per-event loop. Mirrors cloud_api.py.
+  // Full content is NOT fetched in this gather: the meta check inspects
+  // only the START of the text (a 200-char prefix suffices) and the full
+  // content is needed only for the ≤3 displayed hits, filled in by the
+  // post-pass below alongside highlight() (~10× the bare MATCH). Mirrors
+  // cloud_api.py.
   const matched = new Map<string, Map<number, RecordMatchedPara>>();
   for (const r of prows) {
-    if (isMetaParagraph(r.sequence_number, r.content)) continue;
+    if (isMetaParagraph(r.sequence_number, r.cprefix)) continue;
     let m = matched.get(r.event_id);
     if (!m) { m = new Map(); matched.set(r.event_id, m); }
     m.set(r.sequence_number, {
       pid: r.paragraph_id,
-      content: r.content,
       role: r.role,
     });
   }
@@ -619,6 +619,37 @@ function recordLevelSearch(
     }
   }
 
+  // Batch the per-event metadata lookup (was one db.get per qualifying
+  // event inside the loop below — thousands of round-trips on broad
+  // results). One IN-query per 5000 ids → Map keyed by id, same columns,
+  // so each loop iteration just does a Map lookup. Mirror of cloud_api.py.
+  const evRows = new Map<string, {
+    title: string | null;
+    date: string | null;
+    location: string | null;
+    language: string | null;
+    translated_from: string | null;
+    source_short: string | null;
+  }>();
+  for (let i = 0; i < commonList.length; i += 5000) {
+    const chunk = commonList.slice(i, i + 5000);
+    const ph = chunk.map(() => '?').join(',');
+    const rows = db.all<{
+      id: string;
+      title: string | null;
+      date: string | null;
+      location: string | null;
+      language: string | null;
+      translated_from: string | null;
+      source_short: string | null;
+    }>(
+      'SELECT id, title, date, location, language, translated_from, source_short'
+      + ` FROM events WHERE id IN (${ph})`,
+      chunk,
+    );
+    for (const r of rows) evRows.set(r.id, r);
+  }
+
   const events = new Map<string, MutableEvent>();
   let totalHits = 0;
   for (const evId of common) {
@@ -659,18 +690,7 @@ function recordLevelSearch(
       displaySeqs = inMap;
     }
 
-    const evRow = db.get<{
-      title: string | null;
-      date: string | null;
-      location: string | null;
-      language: string | null;
-      translated_from: string | null;
-      source_short: string | null;
-    }>(
-      'SELECT title, date, location, language, translated_from, source_short'
-      + ' FROM events WHERE id = ?',
-      [evId],
-    );
+    const evRow = evRows.get(evId);
     if (!evRow) continue;
 
     // All-words → per-paragraph hit count; Within-N → 1 passage per
@@ -678,11 +698,12 @@ function recordLevelSearch(
     const hitCount = nearDist !== null ? 1 : paraMap.size;
     totalHits += hitCount;
 
-    // hl is filled in by the post-pass below — only for the paragraphs
-    // that survive this ≤3 cap — so we don't pay highlight() for paragraphs
-    // we never show. paraMap is already meta-filtered at gather time. The
-    // `hl: ''` placeholder is inserted here (before role) so the post-pass
-    // overwrites its value without changing key order, preserving the
+    // Both content and hl are filled in by the post-pass below — only for
+    // the paragraphs that survive this ≤3 cap — so we pay neither the
+    // content fetch nor highlight() for paragraphs we never show. paraMap is
+    // already meta-filtered at gather time. The `content: ''` / `hl: ''`
+    // placeholders are inserted here (before role) so the post-pass
+    // overwrites their values without changing key order, preserving the
     // historical hit shape { paragraph_id, sequence_number, content, hl, role }.
     const hits: SearchHit[] = [];
     for (const seq of displaySeqs) {
@@ -692,7 +713,7 @@ function recordLevelSearch(
       const hit: SearchHit = {
         paragraph_id: info.pid,
         sequence_number: seq,
-        content: stripShailendra(info.content || ''),
+        content: '',
         hl: '',
       };
       if (info.role) hit.role = info.role;
@@ -714,35 +735,41 @@ function recordLevelSearch(
   }
 
   // ── Post-pass: compute highlight() for ONLY the paragraphs we display.
-  // The gather above skips highlight() (~10× the bare MATCH); here we run
-  // it for just the ≤3 hits per event that survived the cap. Same MATCH
-  // (`gatherFts`) the gather used, restricted to the displayed paragraph
-  // ids, so the markers are identical to the old per-row highlight().
-  // Mirrors the post-pass in cloud_api.py.
+  // The gather above skips both full content and highlight() (~10× the bare
+  // MATCH); here we fetch them for just the ≤3 hits per event that survived
+  // the cap. Same MATCH (`gatherFts`) the gather used, restricted to the
+  // displayed paragraph ids, so the markers are identical to the old per-row
+  // highlight() and the content is the same paragraph text. Mirrors the
+  // post-pass in cloud_api.py.
   const displayPids: number[] = [];
   for (const ev of events.values()) for (const h of ev.hits) displayPids.push(h.paragraph_id);
+  const contentMap = new Map<number, string>();
   const hlMap = new Map<number, string>();
   for (let i = 0; i < displayPids.length; i += 5000) {
     const chunk = displayPids.slice(i, i + 5000);
     const ph = chunk.map(() => '?').join(',');
     try {
-      const hrows = db.all<{ paragraph_id: number; hl: string }>(
-        `SELECT f.paragraph_id, highlight(${ftsTable}, 0, ?, ?) AS hl
+      const hrows = db.all<{ paragraph_id: number; content: string; hl: string }>(
+        `SELECT f.paragraph_id, f.content, highlight(${ftsTable}, 0, ?, ?) AS hl
          FROM ${ftsTable} f
          WHERE ${ftsTable} MATCH ?
          AND f.paragraph_id IN (${ph})`,
         [HL_OPEN, HL_CLOSE, gatherFts, ...chunk],
       );
-      for (const r of hrows) hlMap.set(r.paragraph_id, markersToGuillemets(stripShailendra(r.hl || '')));
+      for (const r of hrows) {
+        contentMap.set(r.paragraph_id, stripShailendra(r.content || ''));
+        hlMap.set(r.paragraph_id, markersToGuillemets(stripShailendra(r.hl || '')));
+      }
     } catch {
-      // Defensive: mirror the gather's catch. On failure leave hlMap as-is
-      // so these hits fall back to their plain content.
+      // Defensive: mirror the gather's catch. On failure leave the maps
+      // as-is so these hits fall back to empty content.
     }
   }
   for (const ev of events.values()) {
     for (const h of ev.hits) {
       const hl = hlMap.get(h.paragraph_id) ?? '';
       h.hl = hl;
+      h.content = contentMap.get(h.paragraph_id) ?? '';
       // hl with «» markers duplicates content; the frontend renders the
       // preview from hl, so drop content to avoid shipping the same text
       // twice. Keep content as the rare no-marker fallback.
