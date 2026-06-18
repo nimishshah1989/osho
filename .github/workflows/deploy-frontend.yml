@@ -8,10 +8,15 @@ on:
       - 'scripts/deploy-frontend.sh'
       - '.github/workflows/deploy-frontend.yml'
 
-# Serialise frontend deploys so two pushes can't build + restart PM2 at
-# the same time.
+# Serialise ALL VPS deploys (frontend AND backend) under one shared group.
+# Both workflows SSH into the same box and `git pull` the same checkout, so
+# when a merge touched both halves they ran at once and raced on the pull —
+# silently failing the frontend deploy (it died at `git pull` with "no
+# candidates for merging" on PRs #111 and #112, each needing a manual re-run).
+# A shared group makes them queue and run one-at-a-time instead. Must match
+# the `group:` in deploy-backend.yml.
 concurrency:
-  group: deploy-frontend
+  group: deploy-vps
   cancel-in-progress: false
 
 jobs:
