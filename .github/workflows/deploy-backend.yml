@@ -12,6 +12,16 @@ on:
       - 'data/**'
       - '.github/workflows/deploy-backend.yml'
 
+# Serialise ALL VPS deploys (backend AND frontend) under one shared group.
+# Both workflows SSH into the same box and `git pull` the same checkout; run
+# concurrently (a merge touching both halves) they raced on the pull and
+# silently failed the frontend deploy (#111, #112). A shared group queues
+# them instead of running git operations side-by-side. Must match the
+# `group:` in deploy-frontend.yml.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest

@@ -330,6 +330,15 @@ Both halves deploy on push to `main`:
   FTS rebuild (conditional) → `systemctl restart osho-backend.service` →
   healthcheck `/health`.
 
+> **Both deploys share one concurrency group (`deploy-vps`).** They SSH into the
+> same box and `git pull` the same checkout, so a merge touching *both* halves
+> used to run them at once and race on the pull — the frontend deploy died at
+> `git pull` ("no candidates for merging") and silently shipped nothing, needing
+> a manual re-run (happened on PRs #111 and #112). The shared `concurrency.group`
+> (with `cancel-in-progress: false`) makes them queue and run one-at-a-time. If
+> you ever see one deploy fail at `git pull` while the other is mid-deploy, that
+> guard has regressed — check both workflows still share the group.
+
 > **Never commit on the VPS.** Both deploy scripts `git pull --ff-only`, which
 > aborts if the box's `main` has diverged. That's exactly what wedged the #102
 > deploy: someone had committed UI fixes directly on the box (`78ff821` "UI
