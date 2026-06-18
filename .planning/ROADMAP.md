@@ -40,6 +40,14 @@
 - NEAR proximity border box no longer shows context-only paragraphs — only actual hit paragraphs shown
 - Hindi NEAR=100 cross-paragraph queries now work (@13: `Agyat Ki Or अंधकारपूर्ण` → 1, OCTP: 1 ✓)
 
+### UI Batch + Speed + Incidents (PRs #101–#109 + ops, 2026-06-13 to 2026-06-18)
+- **Sugit UI batch @18–@36 (PR #101):** filters rebuilt as compact dropdowns (`FilterSelect`); Spelling (Stemmed/Exact) control hidden in exact-phrase mode; new **Time** (chronological) sort across backend + offline engine + proxy; record typography (event-info block, sannyas.wiki title link, indents, italics, soft line breaks); "discourses"→"records". *(This is the "missing tabs" some users reported — tab-buttons became dropdowns + Spelling hides in phrase mode, both by request.)*
+- **Layout (PRs #103/#104):** 1600px shell, trimmed left/right/bottom margins, compact search box, RANK header kept on one line, taller result panes — for more reading space.
+- **`/downloadapp` removed (@29):** in-browser corpus-download UI + `OfflineSetup.tsx` deleted; desktop Electron app is the going-forward offline path. The TS search engine (`frontend/lib/search/`) is retained — the desktop build depends on it.
+- **Deploy hardening (PR #102):** `scripts/deploy-frontend.sh` now builds from a clean `.next` and verifies every homepage `/_next/static` asset resolves — root-cause fix for the 2026-06-16 blank-page incident (incomplete build served HTML referencing chunks that 400'd; blank for fresh visitors, invisible to the old `'/'`-only healthcheck).
+- **Search latency (PRs #105–#109, no result changes):** stopped shipping duplicate hit text, deferred FTS5 `highlight()` to displayed hits only, batched per-event lookups, and pushed all-words counting/selection into SQL window functions. Worst case `मन की शांति` 8.4 s → 3.0 s; `प्रेम ध्यान शांति` 4.0 s → 2.3 s. Every `total`/`hit-count` verified byte-identical to OCTP across 17 EN+HI parity cases (`scripts/tests/test_search.py`, `engine.test.ts`).
+- **HTTP/3 disabled at Cloudflare (ops):** QUIC was causing blank screens for an O2/Telefónica Germany user; disabled via Speed → Optimization so all clients stay on TCP. Not a repo change.
+
 ---
 
 ## Active — Open Issues
@@ -58,4 +66,5 @@ These are ideas that have come up but have no committed timeline:
 4. **Date range auto-refresh** — currently requires explicit submit after typing.
 5. **HindiInput stale closure** — Enter without space submits Roman text.
 6. **Provisioning scripts in repo** — `02-setup-single-vps.sh` and `refresh-cloudflare-ips.sh` exist only on the VPS.
-7. ~~**FTS exact table highlight()**~~ — completed 2026-06-12: FTS rebuilt on VPS, `paragraphs_fts_exact` now content-bearing.
+7. **Search latency below the parity floor** — broad cross-paragraph NEAR (3.6–10.8 s) and `मन की शांति` (~3 s) survive the #105–#109 optimizations. Going lower means either result-paginating the record-level scan (a UX change) or maintaining our own FTS5-position index instead of calling `highlight()`. Deferred because every option risks diverging from OCTP, and parity is the contract.
+8. ~~**FTS exact table highlight()**~~ — completed 2026-06-12: FTS rebuilt on VPS, `paragraphs_fts_exact` now content-bearing.

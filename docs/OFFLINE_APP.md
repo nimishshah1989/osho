@@ -1,9 +1,18 @@
 # Osho Archives — Offline app
 
-A single URL — `https://oshoarchives.com` — installs as a PWA on every
-modern device, downloads the corpus once over Wi-Fi, and then works
-fully offline. No app stores. No signing certificates. Updates ride
-on top of the existing Vercel deploys.
+> **⚠️ Status (2026-06-17): the in-browser corpus-download flow was removed.**
+> The `/downloadapp` page and the `OfflineSetup` component that drove the
+> "download ~400 MB corpus into the browser" experience are gone (Sugit @29).
+> **The desktop Electron app is the going-forward offline path** — it ships the
+> corpus bundled, offline from first launch (see **Operators → Desktop** and
+> `docs/DESKTOP_INSTALL.md`). The **Operators / corpus-publishing** half of this
+> runbook is still current: the nightly `publish-corpus.yml` workflow still
+> rebuilds the `.zst` corpus and replaces the `corpus-latest` release asset,
+> which the desktop build consumes. The PWA **shell** (manifest + service worker)
+> still installs the *online* site to a home screen, but it no longer
+> auto-downloads the corpus, so the per-platform "Install" instructions below
+> describe the **historical** in-browser offline flow and are kept for reference
+> only. (Hosting also moved off Vercel to an E2E VPS long ago — see `CLAUDE.md`.)
 
 This document is the operator's runbook + the end-user install guide
 in one place. If you're shipping a corpus update, read **Operators**.

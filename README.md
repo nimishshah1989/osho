@@ -1,7 +1,7 @@
 # Osho Archive
 
 A full-text search engine and browsable library over the complete discourses of
-Osho (~10,000 talks, ~75,000 paragraphs, English and Hindi). Every word on
+Osho (~10,000 talks, ~1.3 million paragraphs, English and Hindi). Every word on
 screen is Osho's own — no AI paraphrasing or generated summaries.
 
 **Live:** <https://oshoarchives.com>
@@ -13,9 +13,12 @@ recurring bugs, deployment runbook — read [`CLAUDE.md`](./CLAUDE.md).
 
 ## What's here
 
-- **Search** (`/`) — three modes: exact phrase, all words, within N words; with
-  Hindi transliteration input (type Roman, get Devanagari suggestions); language
-  + date-range filters; BM25 ranking with a per-discourse hit-count boost.
+- **Search** (`/`) — three modes: exact phrase, all words, within N words; a
+  Stemmed/Exact spelling toggle (hidden in exact-phrase mode, where it has no
+  effect); with Hindi transliteration input (type Roman, get Devanagari
+  suggestions); language + date-range filters as compact dropdowns; sort by
+  **Rank**, **Time** (chronological), or **Title**; BM25 ranking with a
+  per-discourse hit-count boost.
 - **Archive** (`/archive`) — drill down by theme, year, or place.
 - **Constellation** (`/constellation`) — clustered visualization of the library.
 - **Reader** (`/read`) — full discourse, paragraph-numbered.
@@ -93,7 +96,7 @@ substring vs. matching it as a whole word. See `CLAUDE.md` for full history.
 | Variable | Where | Required | Description |
 |---|---|---|---|
 | `API_URL` | frontend | optional | Backend base for the `/api/*` proxy. Defaults to `http://127.0.0.1:8000` (FastAPI on the same VPS). |
-| `NEXT_PUBLIC_CORPUS_URL` | frontend | optional | GitHub Release asset the offline PWA downloads. Unset → online-only. |
+| `NEXT_PUBLIC_CORPUS_DOWNLOAD_URL` | frontend | optional | `corpus-latest` GitHub Release asset (the compressed `.zst` corpus). Consumed by the corpus-publish tooling and the desktop bundle. **No longer read by the live site** — the in-browser `/downloadapp` corpus-download flow was removed 2026-06-17; the desktop app is the offline path now. |
 | `ADMIN_KEY` | backend | yes in prod | Password for `/admin/*` endpoints. Backend hard-fails on startup if `OSHO_ENV=production` and this is unset or equals the default `osho-admin`. |
 | `OSHO_ENV` | backend | yes in prod | Set to `production` to enable the ADMIN_KEY hard-fail. |
 | `ALLOWED_ORIGINS` | backend | optional | Comma-separated CORS origins (default `https://oshoarchives.com`). |
@@ -175,11 +178,16 @@ Both halves deploy automatically via GitHub Actions on push to `main`.
 Any push to `main` touching `frontend/**` runs the `Deploy Frontend`
 workflow, which SSHes into the VPS and runs `scripts/deploy-frontend.sh`:
 
-1. `git pull` (fast-forward only)
+1. `git pull --ff-only` (never commit on the box — a local commit makes this abort)
 2. `npm ci` if `frontend/package*.json` changed
-3. `npm run build`
+3. `rm -rf .next`, then `npm run build` (clean build — an in-place rebuild can
+   leave orphaned chunks; see below)
 4. Restarts the `osho-frontend` PM2 app
-5. Curls `:3000` and exits non-zero if it doesn't answer
+5. Curls `:3000`, **then verifies every `/_next/static` asset the homepage
+   references resolves 200** and fails the deploy otherwise — a guard added in
+   PR #102 after the 2026-06-16 blank-page incident (an incomplete build served
+   HTML referencing chunks that 400'd, blank for fresh visitors, invisible to the
+   old `'/' returns 200` check)
 
 ### Backend (GitHub Actions — fully automated)
 
@@ -221,8 +229,8 @@ All endpoints return JSON. Auth endpoints require `X-Admin-Key`.
 | `GET` | `/api/date-range` | Min/max date in archive |
 | `GET` | `/api/clusters?lens=timeline|geography|themes` | Cluster groups |
 
-`/api/search` params: `q` (required), `sort` (`rank`/`title`), `limit`,
-`language`, `date_from`, `date_to`.
+`/api/search` params: `q` (required), `sort` (`rank`/`time`/`title`), `limit`,
+`language`, `date_from`, `date_to`, `exact` (1 = no stemming).
 
 `/api/discourse` params: `event_id` **or** `title`, plus optional `q` —
 when present the backend returns `hl` markers (FTS5 highlight `«…»`) on
