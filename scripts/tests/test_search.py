@@ -98,6 +98,27 @@ def test_near_hindi_content_only_unchanged():
     )
 
 
+def test_near_rowid_fastpath_is_byte_identical_to_fullscan(app_client, monkeypatch):
+    """The rowid position-gather fast path must return EXACTLY what the original
+    full-scan path returns. Force each path via _NEAR_ROWID_FASTPATH_MAX and
+    compare the full JSON for several cross-paragraph NEAR cases."""
+    from scripts import cloud_api
+
+    cases = [
+        "/api/search?q=NEAR(politicians mafia, 30)",
+        "/api/search?q=NEAR(love intelligence awareness, 100)",
+        "/api/search?q=NEAR(enlightenment trust love, 20)&exact=true",
+        "/api/search?q=NEAR(अनंत मौन, 50)",
+        "/api/search?q=NEAR(politicians mafia, 30)&language=English",  # where_extra
+    ]
+    for url in cases:
+        monkeypatch.setattr(cloud_api, "_NEAR_ROWID_FASTPATH_MAX", 0)      # full scan
+        slow = app_client.get(url).json()
+        monkeypatch.setattr(cloud_api, "_NEAR_ROWID_FASTPATH_MAX", 100000)  # rowid seek
+        fast = app_client.get(url).json()
+        assert slow == fast, f"fast path diverged from full scan for {url}"
+
+
 def test_or_operator(app_client):
     r = app_client.get("/api/search?q=zen OR tantra")
     assert r.status_code == 200
