@@ -91,33 +91,45 @@ export interface NearQuery {
  * Tolerates the column-filter wrap `rewriteQuery` may have applied.
  * Returns null when the query isn't a NEAR.
  */
-// English function words dropped from "Within N words" (NEAR) proximity
-// matching — see the long rationale on `_NEAR_STOPWORDS` in
-// scripts/cloud_api.py. OCTP ignores articles/prepositions/pronouns in
-// proximity; keeping them as units both timed the request out (giant posting
-// lists) and truncated the real discourse out of the gather. Pruned of
-// spiritually-loaded words common in the discourses (be/being/now/here/no/
-// not/one/self/will/…) so "be here now" keeps literal proximity. Hindi NEAR
-// is unaffected. MUST stay byte-identical to `_NEAR_STOPWORDS` in cloud_api.py.
+// Function words dropped from "Within N words" (NEAR) proximity matching —
+// see the long rationale on `_NEAR_STOPWORDS` in scripts/cloud_api.py. OCTP
+// ignores articles/prepositions/pronouns in proximity; keeping them as units
+// both timed the request out (giant posting lists) and truncated the real
+// discourse out of the gather. English is pruned of spiritually-loaded words
+// common in the discourses (be/being/now/here/no/not/one/self/will/…) so
+// "be here now" keeps literal proximity. Hindi covers the postpositions
+// (का/की/के/को/में/से/पर/ने), conjunctions, copulas and common pronouns —
+// the Devanagari equivalents of a/the/of/in — pruned of content words.
+// Compared after NFC normalisation (Devanagari can arrive in >1 normal form).
+// MUST stay byte-identical to `_NEAR_STOPWORDS` in scripts/cloud_api.py.
 const NEAR_STOPWORDS = new Set(
   (
-    'a an the ' +
-    'and or but nor ' +
+    // ── English ──
+    'a an the and or but nor ' +
     'i you he she it we they me him her us them ' +
     'my your his its our their mine yours hers ours theirs ' +
     'this that these those which who whom whose ' +
-    'am is are was were ' +
-    'do does did ' +
-    'have has had ' +
-    'of in on at to for with by from into onto about as'
-  ).split(/\s+/),
+    'am is are was were do does did have has had ' +
+    'of in on at to for with by from into onto about as ' +
+    // ── Hindi: postpositions / conjunctions / copulas / pronouns / particles ──
+    'का की के को में से पर ने तक ' +
+    'और या कि एवं तथा ' +
+    'है हैं हूँ हो था थे थी ' +
+    'मैं मुझे मेरा तू तुम तुम्हें आप यह ये वह वो वे हम इस उस जो ' +
+    'भी ही'
+  )
+    .split(/\s+/)
+    .map((w) => w.normalize('NFC')),
 );
 
 /** Drop function-word units from a NEAR query so proximity is measured on
- *  content words (OCTP semantics). Falls back to the original list when fewer
- *  than two content words remain. Mirrors `_strip_near_stopwords`. */
+ *  content words (OCTP semantics) — English articles/prepositions/pronouns and
+ *  Hindi postpositions/conjunctions/copulas. Falls back to the original list
+ *  when fewer than two content words remain. Mirrors `_strip_near_stopwords`. */
 function stripNearStopwords(words: string[]): string[] {
-  const content = words.filter((w) => !NEAR_STOPWORDS.has(w.trim().toLowerCase()));
+  const content = words.filter(
+    (w) => !NEAR_STOPWORDS.has(w.trim().toLowerCase().normalize('NFC')),
+  );
   return content.length >= 2 ? content : words;
 }
 

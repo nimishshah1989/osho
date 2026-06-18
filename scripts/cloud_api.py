@@ -320,41 +320,61 @@ _COLUMN_FILTER_WRAP_RE = re.compile(
     re.DOTALL,
 )
 
-# English function words dropped from "Within N words" (NEAR) proximity
-# matching. OCTP (Folio Views) ignores articles / prepositions / pronouns
-# when matching within N words, so a sentence pasted into Within-N mode —
-# e.g. "falling in love you remain a child" — matches on its content words
-# ("falling love remain child"). Keeping the function words as proximity
-# units was actively harmful: each one matches nearly every paragraph in the
-# 1.3M-row corpus, so the record-level gather (a) scanned their giant FTS
-# posting lists — pushing a query like the above to ~25s, past the client's
-# fetch timeout, surfacing as "NetworkError" — and (b) flooded the
-# `LIMIT 100000` gather with function-word rows, truncating the genuine
-# discourse out before it was ever scored (the query then returned 0 even
-# though the exact phrase existed). Pruned of spiritually-loaded words that
-# are common in the discourses (be/being/now/here/no/not/one/self/will/…) —
-# those are NEVER stripped, so "be here now" et al. keep their literal
-# proximity. Hindi NEAR is unaffected: no Devanagari token matches this set.
-# MUST stay in sync with NEAR_STOPWORDS in frontend/lib/search/queryRewrite.ts.
-_NEAR_STOPWORDS = frozenset("""
-    a an the
-    and or but nor
-    i you he she it we they me him her us them
-    my your his its our their mine yours hers ours theirs
-    this that these those which who whom whose
-    am is are was were
-    do does did
-    have has had
-    of in on at to for with by from into onto about as
-""".split())
+# Function words dropped from "Within N words" (NEAR) proximity matching.
+# OCTP (Folio Views) ignores articles / prepositions / pronouns when matching
+# within N words, so a sentence pasted into Within-N mode — e.g.
+# "falling in love you remain a child", or Hindi "मन की शांति" — matches on its
+# content words ("falling love remain child" / "मन शांति"). Keeping the function
+# words as proximity units was actively harmful: each matches nearly every
+# paragraph in the 1.3M-row corpus, so the record-level gather (a) scanned their
+# giant FTS posting lists — pushing such a query to ~25s, past the client's
+# fetch timeout, surfacing as "NetworkError" / "Failed to fetch" — and (b)
+# flooded the `LIMIT 100000` gather with function-word rows, truncating the
+# genuine discourse out before it was ever scored (the query then returned 0
+# even though the exact phrase existed).
+#
+#   English — pruned of spiritually-loaded words common in the discourses
+#     (be/being/now/here/no/not/one/self/will/…); those are NEVER stripped, so
+#     "be here now" keeps literal proximity.
+#   Hindi — the postpositions (का/की/के/को/में/से/पर/ने/तक), conjunctions
+#     (और/या/कि), copulas (है/हैं/था/थे/थी/हूँ/हो) and common pronouns: the
+#     Devanagari equivalents of a/the/of/in. Pruned of content words
+#     (मन/ध्यान/प्रेम/सत्य/मौन/…); negation (नहीं/न) is NOT stripped.
+#
+# Compared after NFC-normalising both sides (Devanagari can arrive in more than
+# one normal form). MUST stay in sync with NEAR_STOPWORDS in
+# frontend/lib/search/queryRewrite.ts.
+_NEAR_STOPWORD_SOURCE = (
+    # ── English ──
+    "a an the and or but nor "
+    "i you he she it we they me him her us them "
+    "my your his its our their mine yours hers ours theirs "
+    "this that these those which who whom whose "
+    "am is are was were do does did have has had "
+    "of in on at to for with by from into onto about as "
+    # ── Hindi (Devanagari) ──
+    "का की के को में से पर ने तक "          # postpositions
+    "और या कि एवं तथा "                      # conjunctions
+    "है हैं हूँ हो था थे थी "                  # copulas (होना)
+    "मैं मुझे मेरा तू तुम तुम्हें आप "        # 1st/2nd-person pronouns
+    "यह ये वह वो वे हम इस उस जो "             # demonstrative/relative pronouns
+    "भी ही"                                  # emphasis particles
+)
+_NEAR_STOPWORDS = frozenset(
+    unicodedata.normalize("NFC", w) for w in _NEAR_STOPWORD_SOURCE.split()
+)
 
 
 def _strip_near_stopwords(words: list[str]) -> list[str]:
     """Drop function-word units from a NEAR query so proximity is measured on
-    content words (OCTP semantics). Falls back to the original list if fewer
-    than two content words remain, so a deliberately function-word query
-    ("to be or not to be") still searches something rather than nothing."""
-    content = [w for w in words if w.strip().lower() not in _NEAR_STOPWORDS]
+    content words (OCTP semantics) — English articles/prepositions/pronouns and
+    Hindi postpositions/conjunctions/copulas. Falls back to the original list if
+    fewer than two content words remain, so a deliberately function-word query
+    ("to be or not to be", "की में से") still searches something."""
+    content = [
+        w for w in words
+        if unicodedata.normalize("NFC", w.strip().lower()) not in _NEAR_STOPWORDS
+    ]
     return content if len(content) >= 2 else words
 
 

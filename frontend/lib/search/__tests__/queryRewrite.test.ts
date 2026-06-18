@@ -106,6 +106,24 @@ describe('parseNear', () => {
       distance: 30,
     });
   });
+
+  it('strips Hindi function words (postpositions/conjunctions)', () => {
+    expect(parseNear('NEAR(मन की शांति, 30)')).toEqual({
+      words: ['मन', 'शांति'],
+      distance: 30,
+    });
+    expect(parseNear('NEAR(प्रेम और ध्यान की शांति, 30)')).toEqual({
+      words: ['प्रेम', 'ध्यान', 'शांति'],
+      distance: 30,
+    });
+  });
+
+  it('leaves Hindi content-only NEAR unchanged (parity)', () => {
+    expect(parseNear('NEAR(धन धर्म विश्वास, 30)')).toEqual({
+      words: ['धन', 'धर्म', 'विश्वास'],
+      distance: 30,
+    });
+  });
 });
 
 
