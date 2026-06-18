@@ -511,53 +511,64 @@ function recordLevelSearch(
   // ── Step B: gather matched paragraphs for the common events only.
   const unionQuery = units.map((u) => `(${unitNorm(u)})`).join(' OR ');
   const gatherFts = `{content} : (${unionQuery})`;
-  let prows: Array<{
-    event_id: string;
-    sequence_number: number;
-    paragraph_id: number;
-    cprefix: string;
-    role: string | null;
-  }>;
-  try {
-    prows = db.all(
-      `SELECT
-         f.event_id,
-         f.sequence_number,
-         f.paragraph_id,
-         substr(f.content, 1, 200) AS cprefix,
-         p.role AS role
-       FROM ${ftsTable} f
-       LEFT JOIN events e ON e.id = f.event_id
-       LEFT JOIN paragraphs p ON p.id = f.paragraph_id
-       WHERE ${ftsTable} MATCH ?
-       AND f.event_id IN (${placeholders})
-       ${whereExtra}`,
-      [gatherFts, ...commonList, ...filterParams],
-    );
-  } catch {
-    return empty;
-  }
 
-  // event_id -> seq -> matched paragraph info. Meta paragraphs (title row
-  // / sannyas-wiki marker) are dropped here so they count toward neither
-  // hit_count nor total_hits nor the NEAR window — mirrors cloud_api.py
-  // (the 2026-05-31 record-level bug counted them in the totals while
-  // hiding them from the snippets).
-  //
-  // Full content is NOT fetched in this gather: the meta check inspects
-  // only the START of the text (a 200-char prefix suffices) and the full
-  // content is needed only for the ≤3 displayed hits, filled in by the
-  // post-pass below alongside highlight() (~10× the bare MATCH). Mirrors
-  // cloud_api.py.
+  // The NEAR (Within-N) path needs the raw matched-paragraph map per event
+  // to feed the proximity-window logic below, so it keeps the original
+  // gather + JS meta-filter. The All-words path (nearDist === null) never
+  // needs that intermediate map: its only outputs are, per event, the
+  // matched-paragraph COUNT (= hit_count) and the ≤3 lowest-sequence
+  // paragraphs to display. Both are computed server-side in one window-
+  // function query (built afterwards), avoiding pulling up to 100k matched
+  // rows into JS only to count and sort them. Mirror of cloud_api.py.
   const matched = new Map<string, Map<number, RecordMatchedPara>>();
-  for (const r of prows) {
-    if (isMetaParagraph(r.sequence_number, r.cprefix)) continue;
-    let m = matched.get(r.event_id);
-    if (!m) { m = new Map(); matched.set(r.event_id, m); }
-    m.set(r.sequence_number, {
-      pid: r.paragraph_id,
-      role: r.role,
-    });
+  if (nearDist !== null) {
+    let prows: Array<{
+      event_id: string;
+      sequence_number: number;
+      paragraph_id: number;
+      cprefix: string;
+      role: string | null;
+    }>;
+    try {
+      prows = db.all(
+        `SELECT
+           f.event_id,
+           f.sequence_number,
+           f.paragraph_id,
+           substr(f.content, 1, 200) AS cprefix,
+           p.role AS role
+         FROM ${ftsTable} f
+         LEFT JOIN events e ON e.id = f.event_id
+         LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+         WHERE ${ftsTable} MATCH ?
+         AND f.event_id IN (${placeholders})
+         ${whereExtra}`,
+        [gatherFts, ...commonList, ...filterParams],
+      );
+    } catch {
+      return empty;
+    }
+
+    // event_id -> seq -> matched paragraph info. Meta paragraphs (title row
+    // / sannyas-wiki marker) are dropped here so they count toward neither
+    // hit_count nor total_hits nor the NEAR window — mirrors cloud_api.py
+    // (the 2026-05-31 record-level bug counted them in the totals while
+    // hiding them from the snippets).
+    //
+    // Full content is NOT fetched in this gather: the meta check inspects
+    // only the START of the text (a 200-char prefix suffices) and the full
+    // content is needed only for the ≤3 displayed hits, filled in by the
+    // post-pass below alongside highlight() (~10× the bare MATCH). Mirrors
+    // cloud_api.py.
+    for (const r of prows) {
+      if (isMetaParagraph(r.sequence_number, r.cprefix)) continue;
+      let m = matched.get(r.event_id);
+      if (!m) { m = new Map(); matched.set(r.event_id, m); }
+      m.set(r.sequence_number, {
+        pid: r.paragraph_id,
+        role: r.role,
+      });
+    }
   }
 
   // For NEAR: per-unit in-paragraph positions, restricted to common events.
@@ -652,16 +663,106 @@ function recordLevelSearch(
 
   const events = new Map<string, MutableEvent>();
   let totalHits = 0;
-  for (const evId of common) {
+
+  if (nearDist === null) {
+    // ── All-words: do the per-event hit_count + ≤3 display-row selection
+    // entirely in SQL. The innermost subquery is exactly the Step-B gather
+    // (same MATCH / IN / whereExtra → identical rows, FTS5 deterministic);
+    // the `NOT (sq = 0 OR ct LIKE 'event page in sannyas%')` filter then
+    // drops the same meta rows isMetaParagraph did (byte-for-byte identical
+    // on the prod corpus). `cnt` per event = surviving rows = old
+    // paraMap.size = hit_count; `rn <= 3` picks the lowest-`sq` rows = old
+    // [...paraMap.keys()].sort().slice(0, 3). No full paragraph text leaves
+    // SQLite here — only a 200-char prefix for the meta check (the marker is
+    // far shorter than 200 chars). Mirror of cloud_api.py.
+    let awRows: Array<{
+      event_id: string;
+      sq: number;
+      pid: number;
+      role: string | null;
+      cnt: number;
+    }>;
+    try {
+      awRows = db.all(
+        `SELECT event_id, sq, pid, role, cnt FROM (
+           SELECT event_id, sq, pid, role,
+                  ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY sq) AS rn,
+                  COUNT(*)     OVER (PARTITION BY event_id)            AS cnt
+           FROM (
+             SELECT f.event_id AS event_id, f.sequence_number AS sq,
+                    f.paragraph_id AS pid, p.role AS role,
+                    substr(f.content, 1, 200) AS ct
+             FROM ${ftsTable} f
+             LEFT JOIN events e ON e.id = f.event_id
+             LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+             WHERE ${ftsTable} MATCH ?
+             AND f.event_id IN (${placeholders})
+             ${whereExtra}
+             LIMIT 100000
+           ) WHERE NOT (sq = 0 OR ct LIKE 'event page in sannyas%')
+         ) WHERE rn <= ?`,
+        [gatherFts, ...commonList, ...filterParams, 3],
+      );
+    } catch {
+      return empty;
+    }
+
+    // Group the (≤3) display rows per event, in `sq` order. `cnt` (constant
+    // per event) is the hit_count and is added to totalHits exactly once per
+    // event — the same accounting as the old loop. Events with no surviving
+    // (non-meta) row simply don't appear here, mirroring the old
+    // `paraMap.size === 0 → continue`.
+    const awByEv = new Map<string, { cnt: number; rows: typeof awRows }>();
+    for (const r of awRows) {
+      let bucket = awByEv.get(r.event_id);
+      if (!bucket) { bucket = { cnt: r.cnt, rows: [] }; awByEv.set(r.event_id, bucket); }
+      bucket.rows.push(r);
+    }
+
+    for (const [evId, bucket] of awByEv) {
+      const evRow = evRows.get(evId);
+      if (!evRow) continue;
+      const hitCount = bucket.cnt;
+      totalHits += hitCount;
+      // The `content: ''` / `hl: ''` placeholders are inserted here (before
+      // role) so the post-pass overwrites their values without changing key
+      // order, preserving the historical hit shape
+      // { paragraph_id, sequence_number, content, hl, role }.
+      const hits: SearchHit[] = [];
+      for (const r of [...bucket.rows].sort((a, b) => a.sq - b.sq)) {
+        const hit: SearchHit = {
+          paragraph_id: r.pid,
+          sequence_number: r.sq,
+          content: '',
+          hl: '',
+        };
+        if (r.role) hit.role = r.role;
+        hits.push(hit);
+      }
+      events.set(evId, {
+        event_id: evId,
+        title: evRow.title,
+        date: evRow.date,
+        location: evRow.location,
+        language: evRow.language,
+        translated_from: evRow.translated_from,
+        source_short: evRow.source_short,
+        best_rank: 0.0,
+        hit_count: hitCount,
+        hits,
+      });
+    }
+  }
+
+  if (nearDist !== null) for (const evId of common) {
     const paraMap = matched.get(evId);
     if (!paraMap || paraMap.size === 0) continue;
 
-    // display_seqs: which paragraphs to show + count. All-words → every
-    // matched paragraph; Within-N → narrowed to the proximity-window
-    // paragraphs below. Mirror of cloud_api.py.
+    // display_seqs: which paragraphs to show + count. Within-N → narrowed to
+    // the proximity-window paragraphs below. Mirror of cloud_api.py.
     let displaySeqs = [...paraMap.keys()].sort((a, b) => a - b);
 
-    if (nearDist !== null) {
+    {
       const unitPos = perUnitPos.get(evId);
       const seqOff = offsets.get(evId) ?? new Map<number, number>();
       const positionsPerUnit: number[][] = [];
@@ -693,9 +794,9 @@ function recordLevelSearch(
     const evRow = evRows.get(evId);
     if (!evRow) continue;
 
-    // All-words → per-paragraph hit count; Within-N → 1 passage per
-    // discourse (matches OCTP's within-N counts). Mirror of cloud_api.py.
-    const hitCount = nearDist !== null ? 1 : paraMap.size;
+    // Within-N → 1 passage per discourse (matches OCTP's within-N counts).
+    // Mirror of cloud_api.py.
+    const hitCount = 1;
     totalHits += hitCount;
 
     // Both content and hl are filled in by the post-pass below — only for
