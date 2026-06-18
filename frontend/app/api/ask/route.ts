@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { streamingJsonProxy } from '../../../lib/streamProxy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,21 +35,7 @@ export async function GET(req: Request) {
   const dateTo = searchParams.get('date_to');
   if (dateTo) params.set('date_to', dateTo);
 
-  try {
-    const upstream = await fetch(
-      `${API_BASE}/api/search?${params.toString()}`,
-      { cache: 'no-store' },
-    );
-    const body = await upstream.json().catch(() => null);
-    if (!upstream.ok) {
-      return NextResponse.json(
-        { error: (body && body.detail) || 'Archive unreachable.' },
-        { status: upstream.status || 502 },
-      );
-    }
-    return NextResponse.json(body);
-  } catch (error) {
-    console.error('Ask proxy failed:', error);
-    return NextResponse.json({ error: 'Archive unreachable.' }, { status: 502 });
-  }
+  // Stream a heartbeat while the (sometimes multi-second) search runs so a
+  // VPN/mobile link can't drop the idle connection. See lib/streamProxy.
+  return streamingJsonProxy(`${API_BASE}/api/search?${params.toString()}`);
 }

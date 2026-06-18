@@ -93,6 +93,15 @@ describe('searchApi (online fallback)', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('throws when a 200 body carries an error (keepalive proxy upstream failure)', async () => {
+    // The streaming keepalive proxy returns HTTP 200 with {error} when the
+    // backend failed; searchApi must still treat that as a failure.
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ error: 'Empty query.' }));
+    vi.stubGlobal('fetch', fetchMock);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(searchApi({ q: 'x' } as any, null)).rejects.toThrow('Empty query.');
+  });
+
   it('uses the offline engine when present (no network at all)', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

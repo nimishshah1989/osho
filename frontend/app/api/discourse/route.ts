@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { streamingJsonProxy } from '../../../lib/streamProxy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,21 +27,8 @@ export async function GET(req: Request) {
   if (q) upstream.searchParams.set('q', q);
   if (exact === 'true') upstream.searchParams.set('exact', 'true');
 
-  try {
-    const response = await fetch(upstream.toString(), { cache: 'no-store' });
-    const body = await response.json().catch(() => null);
-    if (!response.ok) {
-      return NextResponse.json(
-        body ?? { error: 'Discourse fetch failed' },
-        { status: response.status },
-      );
-    }
-    return NextResponse.json(body);
-  } catch (error) {
-    console.error('Discourse proxy failed:', error);
-    return NextResponse.json(
-      { error: 'The archive is unreachable. Please retry shortly.' },
-      { status: 500 },
-    );
-  }
+  // Discourse fetch with `?q=NEAR(...)` runs the same record-level highlight
+  // pass as search and can be slow; stream a heartbeat so VPN links don't drop
+  // the idle connection. See lib/streamProxy.
+  return streamingJsonProxy(upstream.toString());
 }

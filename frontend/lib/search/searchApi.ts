@@ -105,6 +105,12 @@ export async function searchApi(
   if (!body) {
     throw new Error('Archive returned an empty response.');
   }
+  // The keepalive proxy streams HTTP 200 even for upstream failures (the
+  // status line is sent before the upstream result is known), surfacing the
+  // failure as a body-level `error`. Treat it the same as an HTTP error.
+  if (body.error) {
+    throw new Error(body.error);
+  }
   return body as SearchResponse;
 }
 
@@ -127,6 +133,13 @@ export async function discourseApi(
   const body = await r.json().catch(() => null);
   if (!r.ok) {
     throw new Error((body && body.error) || `Discourse unavailable (HTTP ${r.status})`);
+  }
+  if (!body) {
+    throw new Error('Discourse returned an empty response.');
+  }
+  // Keepalive proxy returns 200 + body-level `error` on upstream failure.
+  if (body.error) {
+    throw new Error(body.error);
   }
   return body as DiscourseResponse;
 }
