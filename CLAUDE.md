@@ -7,9 +7,15 @@ codebase. Read top to bottom before suggesting changes.
 
 ## Product
 
-Search engine + archive for Osho's complete discourses (~75K paragraphs, ~10K events).
+Search engine + archive for Osho's complete discourses (~1.3M paragraphs, ~10K events).
 Production: **oshoarchives.com** — a single sponsor-owned E2E Networks VPS
 (`164.52.223.241`) running Next.js + FastAPI + SQLite/FTS5, behind Cloudflare.
+
+> **Corpus size:** the `paragraphs` table holds **1,327,403** rows (measured on
+> the production DB, 2026-06-18). Earlier versions of this doc said "~75K" — that
+> was a stale early-load estimate, not the live corpus. ~1.3M paragraphs across
+> ~10K events (≈130 paragraphs/discourse) is the real scale, and it's why broad
+> Hindi all-words queries are the latency-sensitive case (see **Search performance**).
 
 Two user audiences:
 - **Sannyasins worldwide** — search/read Osho's words verbatim, English + Hindi
@@ -40,8 +46,9 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
         ├── /constellation — clustered visualization (components/Constellation/Constellation.tsx)
         ├── /read        — full discourse reader     (app/read/page.tsx)
         ├── /help        — search guide + corpus version badge  (app/help/page.tsx)
-        ├── /downloadapp — offline / desktop setup    (app/downloadapp/page.tsx)
         └── /admin       — ADMIN_KEY-protected ops   (app/admin/page.tsx)
+        (/downloadapp was removed 2026-06-17 — Sugit @29; desktop app is the
+         going-forward offline path. See Offline section below.)
 
         API proxies → upstream backend:
         ├── /api/ask       — keyword search
@@ -75,7 +82,7 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
 ## FTS5 tokenizer — CRITICAL CONFIG
 
 `scripts/build_fts.py:103-113` is the single source of truth. Any change here requires a
-**full index rebuild** on the VPS (~5-10 min for 75K paragraphs).
+**full index rebuild** on the VPS (~10-15 min for the full ~1.3M-paragraph corpus).
 
 ```sql
 tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
@@ -132,8 +139,12 @@ ev["rank"] = best_bm25 * max(log1p(hit_count), 1.0)
 ```
 Lower = better. Discourses with more matching paragraphs rank higher even at the same BM25.
 
-**Cross-paragraph NEAR** (`_augment_near_cross_paragraph`): only for `N >= 100`. For
-narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
+**Cross-paragraph NEAR**: now **always used**, for every N (record-level
+token-window in `_record_level_search` / TS `recordLevelSearch`). The earlier
+`dist_p > 100` gate (PRs #94/#95) was an overcorrection — Sugit confirmed OCTP
+matches across paragraph boundaries, so PR #99 removed it. A NEAR hit counts when
+the units fall within N tokens of each other across the discourse, not just
+within one FTS5 row (= one paragraph).
 
 **Highlights** flow:
 - Backend wraps FTS5-matched tokens in `«…»` (search hits + discourse paragraphs when
@@ -145,32 +156,84 @@ narrower N, FTS5's in-row NEAR is used directly (FTS5 row = 1 paragraph).
 
 ---
 
+## Search performance (latency)
+
+The OCTP-parity record-level search (per-unit event-set intersection + token
+windows) is correct but expensive on the broadest queries, because the corpus is
+~1.3M paragraphs, not the ~75K this doc once claimed. PRs #105–#109 (2026-06-13
+to 2026-06-18) cut the worst cases roughly in half **without changing a single
+result**. The optimizations, in order, in `scripts/cloud_api.py`
+`_record_level_search` (mirrored in TS `frontend/lib/search/engine.ts`
+`recordLevelSearch`):
+
+- **#105/#106 — stop shipping duplicate hit text.** When a hit's `hl` already
+  carries the `«…»` markers the frontend renders, the response no longer also
+  ships the raw `content` (set `content=''` when `'«' in hl`). Applied to the
+  record-level path **and** the single-word/phrase MATCH path (the single-word
+  path is separate legacy code — #105 missed it, #106 caught it). ~40% smaller
+  payloads on broad queries (e.g. नक्षत्र 143 KB → 83 KB).
+- **#107 — defer `highlight()` to displayed hits only.** FTS5 `highlight()` costs
+  ~10× a plain column read. It used to run for every matched paragraph; now it
+  runs only for the ≤N paragraphs actually returned. A post-pass re-fetches
+  `content` + `hl` for just the displayed `pid`s.
+- **#108 — batch the per-event lookup.** Event rows are fetched in chunked
+  `IN (…)` queries (5000 per chunk) instead of one query per event, and the bulk
+  content fetch is skipped (the post-pass covers displayed hits).
+- **#109 — compute the all-words count + display set in SQL.** The window-function
+  query (`ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY sq)`,
+  `COUNT(*) OVER (PARTITION BY event_id)`) does the per-event counting and
+  top-N selection in SQLite instead of materializing every matching row in Python.
+
+`_RECORD_LEVEL_EVENT_CAP = 2000`; the inner FTS scan keeps `LIMIT 100000`.
+
+**Measured (production, old → new), parity verified across 17 EN+HI cases:**
+- `मन की शांति` (Hindi all-words, the worst case): **8.4 s → 3.0 s**
+- `प्रेम ध्यान शांति` all-words: 4.0 s → 2.3 s
+- `love intelligence awareness` all-words exact: 3.6 s → 3.3 s
+- single-word `meditation`: 2.2 s → 1.0 s
+- Every `total` and `hit-count` is **identical** old-vs-new (this was the
+  hard constraint — "optimize latency without changing results/logic").
+
+**Still at the parity floor** (not yet improved without a behaviour change):
+cross-paragraph NEAR (3.6–10.8 s on broad terms) and `मन की शांति` (~3 s). Going
+lower needs either pagination (a UX change) or a different FTS5-positions
+mechanism — both deliberately deferred so results stay byte-identical to OCTP.
+The parity harness lives in `scripts/tests/test_search.py` +
+`frontend/lib/search/__tests__/engine.test.ts`; re-run it before touching this path.
+
+---
+
 ## Offline PWA & desktop app
 
-Beyond the hosted site, the corpus ships in two offline forms:
+The **desktop Electron app is the going-forward offline path.** The in-browser
+"download the corpus" flow was removed 2026-06-17 (Sugit @29): `/downloadapp` and
+`components/OfflineSetup.tsx` (the only frontend code that read
+`NEXT_PUBLIC_CORPUS_DOWNLOAD_URL`) are gone, and the Help page's "Offline Use"
+section with them. **What's removed vs. what's retained:**
 
-- **PWA** — `frontend/lib/search/` is a full TypeScript port of the FastAPI
-  search engine running on sqlite-wasm + OPFS in a web worker. The user
-  downloads a compressed corpus from `/downloadapp` (a click-to-download link
-  to `NEXT_PUBLIC_CORPUS_DOWNLOAD_URL`, set in `frontend/.env.production` → the
-  stable `corpus-latest` GitHub Release asset) and picks the file; the worker
-  decompresses it into OPFS and search runs entirely client-side. Manifest,
-  icons, and service worker live in `frontend/public/`. **Note:** the env var
-  is baked in at `next build` time on the VPS, so a fresh build is required
-  after changing it; the only frontend code that reads it is
-  `components/OfflineSetup.tsx`.
+- **Removed** — `app/downloadapp/page.tsx`, `components/OfflineSetup.tsx`, the
+  Help "Offline Use" section. The live site therefore no longer auto-downloads a
+  ~400 MB corpus into the browser. `NEXT_PUBLIC_CORPUS_DOWNLOAD_URL`
+  (`frontend/.env.production` → stable `corpus-latest` GitHub Release asset) is
+  still set, but **no live frontend component reads it anymore** — it now feeds
+  only the corpus-publish tooling and the desktop bundle.
+- **Retained** — the PWA shell still installs (`public/manifest.webmanifest`,
+  `public/sw.js`, `components/PwaRegistrar.tsx`, `components/DesktopGate.tsx`),
+  and the full TypeScript search engine (`frontend/lib/search/`: sqlite-wasm +
+  OPFS web worker, `OfflineProvider`, `engine.ts`, …) stays because **the desktop
+  build depends on it.** Do not delete `lib/search/` thinking it's dead PWA code.
 - **Desktop app** — `desktop/` is an Electron shell that bundles the built
   frontend and the corpus, offline from first launch. Installers are built in CI
   by `.github/workflows/build-desktop.yml`.
 - **Corpus publishing** — `.github/workflows/publish-corpus.yml` (nightly +
   manual) rebuilds the compressed `.zst` corpus on the VPS and replaces the
-  `corpus-latest` release asset, keeping the offline copy in sync with the live
-  DB. See `docs/OFFLINE_APP.md` for the full runbook.
+  `corpus-latest` release asset, keeping the desktop/offline copy in sync with the
+  live DB. See `docs/OFFLINE_APP.md` for the full runbook.
 
 The TS engine in `frontend/lib/search/` must stay behaviour-compatible with
-`scripts/cloud_api.py` — tokenizer, Devanagari normalisation, BM25 ranking, and
-NEAR semantics are all duplicated and covered by tests in
-`frontend/lib/search/__tests__/`.
+`scripts/cloud_api.py` — tokenizer, Devanagari normalisation, BM25 ranking, NEAR
+semantics, **and the #105–#109 perf shape** are all duplicated and covered by
+tests in `frontend/lib/search/__tests__/`.
 
 ---
 
@@ -194,6 +257,18 @@ change:
 echo 'deny all;' >> /etc/nginx/snippets/cloudflare-allow.conf
 nginx -t && systemctl reload nginx
 ```
+
+> **HTTP/3 (QUIC) is disabled at Cloudflare** (dashboard → **Speed →
+> Optimization → HTTP/3 (with QUIC)**, toggle OFF — Cloudflare moved this
+> control out of the old Network tab). Reason: a user in Germany on **O2 /
+> Telefónica** got a persistent blank screen; a VPN fixed it. Root cause was
+> O2's network mishandling QUIC (UDP/443) — Cloudflare was advertising
+> `alt-svc: h3=":443"`, browsers upgraded to HTTP/3, and that path silently
+> failed on O2 while HTTP/1.1/2 over TCP worked. Disabling HTTP/3 drops the
+> `alt-svc` advertisement so every client stays on TCP. Verify with
+> `curl -sI https://oshoarchives.com | grep -i alt-svc` — it should return
+> nothing. This is a Cloudflare-dashboard setting, **not in the repo**; re-check
+> it if blank-screen-on-one-ISP reports recur.
 
 > **SSH access**: key-based auth for the `osho` user. The private key
 > is `~/.ssh/osho_e2e` (ed25519, `osho-e2e`); its public half is in
@@ -240,13 +315,31 @@ curl -s http://127.0.0.1:8000/health
 
 Both halves deploy on push to `main`:
 - **`deploy-frontend.yml`** → `scripts/deploy-frontend.sh` — fires on
-  `frontend/**` changes; runs `git pull` → `npm ci` (if package files
-  changed) → `npm run build` → `pm2 restart osho-frontend` → healthcheck
-  `:3000`.
+  `frontend/**` changes; runs `git pull --ff-only` → `npm ci` (if package files
+  changed) → **`rm -rf .next`** → `npm run build` → `pm2 restart osho-frontend` →
+  **two-stage healthcheck**. The script was hardened in PR #102 after the
+  **2026-06-16 blank-page incident** (see Recurring bugs #6): an in-place rebuild
+  had left `.next` referencing chunk hashes that were never written to disk, so
+  fresh visitors got 400s on those chunks and a blank page while cached visitors
+  saw nothing wrong, and the old `'/' returns 200` healthcheck passed anyway. Now
+  it (a) always builds from a clean `.next`, and (b) after restart curls **every**
+  `/_next/static` asset the homepage HTML references and fails the deploy loudly
+  if any returns non-200.
 - **`deploy-backend.yml`** → `scripts/deploy.sh` — fires on backend
   script / `requirements.txt` / `data/**` changes; pull → pip install →
   FTS rebuild (conditional) → `systemctl restart osho-backend.service` →
   healthcheck `/health`.
+
+> **Never commit on the VPS.** Both deploy scripts `git pull --ff-only`, which
+> aborts if the box's `main` has diverged. That's exactly what wedged the #102
+> deploy: someone had committed UI fixes directly on the box (`78ff821` "UI
+> feedback follow-up @32") that were never pushed, so `--ff-only` refused to move.
+> Recovery without losing the work: `git fetch origin && git rebase origin/main &&
+> git push origin main` (which re-landed that commit as `24eeb65`). The box's repo
+> must only ever fast-forward from `origin/main` — all edits flow through git →
+> PR → `main` → auto-deploy. `deploy-frontend.sh` also has a lookahead that
+> handles untracked working-tree files (the 2026-05-30 `.env.production`
+> incident), but it cannot rescue a local *commit* — only the rebase above can.
 
 `scripts/deploy.sh`, `scripts/deploy-frontend.sh` and the
 `deploy-backend.yml` / `deploy-frontend.yml` / `publish-corpus.yml`
@@ -345,6 +438,28 @@ gitignored — moved between machines by rsync, never committed.
    `/api/discourse` so the backend can return FTS5 `hl` markers. Fixed in PR #29.
 4. **Anusvara vs. nasal-consonant** — both must be normalised at both index AND query
    time. Mismatch = silent zero matches.
+5. **HTTP/3 / QUIC blank screen on one ISP** — if the site is blank for a user on
+   one network but fine over a VPN or another ISP, suspect QUIC, not your build.
+   Some carriers (confirmed: O2/Telefónica Germany) mishandle UDP/443. HTTP/3 is
+   now disabled at Cloudflare to avoid it (see Deployment). `curl -sI` the site and
+   check `alt-svc` is absent before chasing app-level causes.
+6. **Broken build → blank page for *fresh* visitors only** — if the site works for
+   you (cached assets) but is blank for others, the served HTML is likely
+   referencing `/_next/static` chunks that 400. An in-place `next build` can leave
+   `.next` inconsistent (esp. if OOM-killed). The deploy script now `rm -rf .next`
+   and verifies every homepage asset resolves; a `'/' returns 200` check alone does
+   **not** catch this. (2026-06-16 incident; PR #102.)
+7. **Never commit on the VPS** — local commits on the box make `git pull --ff-only`
+   (used by both deploy scripts) abort. Recover with
+   `git fetch origin && git rebase origin/main && git push origin main`; never force
+   a divergent state. See Deployment for the full note.
+8. **Record-level search latency on broad queries** — the OCTP-parity record-level
+   path is expensive at ~1.3M paragraphs, and the slow cases are broad Hindi
+   all-words / NEAR. The fix is always *mechanical* (defer `highlight()`, push
+   counting into SQL window functions, batch lookups, slim the payload — PRs
+   #105–#109), **never** loosening the matching logic. Every change to this path
+   must keep `total` and `hit-count` byte-identical to OCTP — re-run the parity
+   harness (`scripts/tests/test_search.py`, `engine.test.ts`) before shipping.
 
 ---
 
@@ -361,7 +476,7 @@ gitignored — moved between machines by rsync, never committed.
 
 ---
 
-## Open known-issues backlog (audited 2026-06-06)
+## Open known-issues backlog (audited 2026-06-18)
 
 ### Resolved — PRs #85–87 (2026-05-22 audit, Sugit's first feedback batch)
 - `searchApi` null crash ("can't access property 'total'") — null guard
@@ -421,19 +536,45 @@ gitignored — moved between machines by rsync, never committed.
 - @2 `enlightenment trust love` NEAR=20 exact: 13 → 8 (OCTP: 5; delta = known stop-word gap)
 - @11 `enlightenment trust love awareness` NEAR=100 exact: 2 → 0 (both were false positives; genuine OCTP match needs FTS rebuild on VPS — see item 9 below)
 
-### Still open (as of 2026-06-12)
+### Resolved — PRs #101–#109 + ops (2026-06-13 to 2026-06-18, Sugit's UI batch + speed + incidents)
+
+**PR #101 — Sugit UI/layout batch @18–@36**
+- @18 hide the Spelling (Stemmed/Exact) control in Exact-phrase mode (phrase is always exact). This is the "missing tabs" some users reported — the control is *intentionally hidden in phrase mode*, by Sugit's own request, not removed.
+- @22/@23 filters rebuilt as compact labeled **dropdowns** (new `FilterSelect`); "Lang"→"Language". Again — the old inline tab-buttons becoming dropdowns is the other half of the "missing tabs" reports.
+- @24 Sort moved to last; @25a new **Time** (chronological) sort — backend + offline engine + types + proxy + tests; @25b "discourses"→"records"; @26 count folded into list header.
+- @19 scroll active record into view on keyboard nav; @20 dropped "OSHO · Discourse Search" title, bold active nav tab; @21 bordered rounded search input with inline magnifier.
+- @31–@36 record typography: tighter event-info block, sannyas.wiki title linkified (@32), `osho_talking` first-line indent, italics for other-talking & poem, soft line breaks via `whitespace-pre-wrap`.
+
+**PRs #103/#104 — layout/margins (follow-up to the same feedback)**
+- Widened the layout shell to `max-w-[1600px]`, trimmed left/right/bottom margins for more reading space; compacted the search box; kept the RANK header on one line (`whitespace-nowrap flex-shrink-0`); taller result panes.
+
+**Commit `24eeb65` — `/downloadapp` removed (@29) + Help accuracy**
+- Removed `app/downloadapp/page.tsx` and `components/OfflineSetup.tsx`; desktop app is the going-forward offline path (see Offline section). Help page audited against the live UI (Match filter, Spelling section, Sort Order incl. Time, "records").
+
+**PR #102 — deploy hardening (2026-06-16 blank-page incident)**
+- `scripts/deploy-frontend.sh` now `rm -rf .next` before build + verifies every homepage `/_next/static` asset resolves post-restart. See Recurring bugs #6 and Deployment.
+
+**PRs #105–#109 — search latency (no result changes)**
+- See **Search performance** above. Worst case `मन की शांति` 8.4 s → 3.0 s; all `total`/`hit-count` byte-identical to OCTP across 17 EN+HI parity cases.
+
+**Ops — HTTP/3 disabled at Cloudflare**
+- Disabled QUIC (Speed → Optimization) to fix blank screens for an O2/Germany user. See Recurring bugs #5 and Deployment. Not a repo change.
+
+**FTS rebuild on VPS (2026-06-12)** — `paragraphs_fts_exact` is now content-bearing and all then-stale FTS entries were cleared (closes the prior @11 "exact-mode NEAR finds 0" item).
+
+### Still open (as of 2026-06-18)
 
 **High priority (archivist-visible):**
 1. **@3** — Intermittent: title match occasionally lands arrow-key nav on seq=0. Believed fixed in PR #91; needs Sugit confirmation.
-2. **@11 / FTS rebuild on VPS** — `paragraphs_fts_exact` is contentless on production: `highlight()` returns no markers, so per-unit token positions come back empty for genuine (non-stale) rows, and exact-mode NEAR finds 0 instead of OCTP's 1. Fix: SSH to VPS and run `python3 scripts/build_fts.py` (~5-10 min). Also clears all remaining stale FTS entries permanently.
 
 **Moderate priority (UX):**
-3. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
-4. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
-5. Date range inputs don't auto-refresh after typing (requires explicit submit)
+2. Hindi `Enter`-without-space submits Roman text (HindiInput stale closure)
+3. Archive / Constellation / Help pages skip `t(...)` — English-only in Hindi locale
+4. Date range inputs don't auto-refresh after typing (requires explicit submit)
 
 **Minor / ops:**
-6. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
-7. `total_hits` over-reports for narrow NEAR (N < 20)
-8. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
-9. Stale FTS entries accumulate on each ingest without a full rebuild. Long-term fix: also `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when paragraphs are removed during batch-update / re-ingest. Short-term: run `build_fts.py` on VPS after each Antar batch.
+5. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
+6. `total_hits` over-reports for narrow NEAR (N < 20)
+7. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
+8. Stale FTS entries accumulate on each ingest without a full rebuild. Long-term fix: also `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when paragraphs are removed during batch-update / re-ingest. Short-term: run `build_fts.py` on VPS after each Antar batch (last full rebuild 2026-06-12).
+9. **Search latency floor** — broad cross-paragraph NEAR (3.6–10.8 s) and `मन की शांति` (~3 s) remain after PRs #105–#109. Further speedups need pagination (UX change) or a different FTS5-positions mechanism; deferred to keep results identical to OCTP.

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A production search engine and archive for Osho's complete discourses — ~75,000 paragraphs across ~10,000 events in English and Hindi. Live at **oshoarchives.com**.
+A production search engine and archive for Osho's complete discourses — **~1.3 million paragraphs** (1,327,403, measured 2026-06-18) across ~10,000 events in English and Hindi. Live at **oshoarchives.com**.
 
 ## Two User Audiences
 
@@ -33,8 +33,9 @@ Faithful, fast, bilingual full-text search of the complete Osho corpus. The refe
 | `/constellation` | Clustered visual by city × year × theme |
 | `/read` | Full discourse reader |
 | `/help` | Search guide + corpus version badge |
-| `/downloadapp` | Offline / desktop setup |
 | `/admin` | ADMIN_KEY-protected: ingest, edit, tag, batch update |
+
+(`/downloadapp` was removed 2026-06-17; the desktop Electron app is the offline path now.)
 
 ## Constraints
 
