@@ -79,6 +79,25 @@ def test_near_keeps_loaded_words_and_falls_back():
     assert _parse_near("NEAR(of the, 30)") == (["of", "the"], 30)
 
 
+def test_near_strips_hindi_function_words():
+    """Hindi postpositions/conjunctions are dropped from Within-N too, so
+    'मन की शांति' matches on its content words (मन, शांति) — the same OCTP
+    treatment as English, and it relieves the documented Hindi latency."""
+    from scripts.cloud_api import _parse_near
+    assert _parse_near("NEAR(मन की शांति, 30)") == (["मन", "शांति"], 30)
+    assert _parse_near("NEAR(प्रेम और ध्यान की शांति, 30)") == (
+        ["प्रेम", "ध्यान", "शांति"], 30,
+    )
+
+
+def test_near_hindi_content_only_unchanged():
+    """Content-word Hindi NEAR queries are untouched (parity)."""
+    from scripts.cloud_api import _parse_near
+    assert _parse_near("NEAR(धन धर्म विश्वास, 30)") == (
+        ["धन", "धर्म", "विश्वास"], 30,
+    )
+
+
 def test_or_operator(app_client):
     r = app_client.get("/api/search?q=zen OR tantra")
     assert r.status_code == 200
