@@ -634,7 +634,7 @@ def _record_level_search(
                 f.event_id,
                 f.sequence_number,
                 f.paragraph_id,
-                f.content,
+                substr(f.content, 1, 200) AS cprefix,
                 p.role AS role
             FROM {fts_table} f
             LEFT JOIN events e ON e.id = f.event_id
@@ -649,25 +649,30 @@ def _record_level_search(
     except Exception:
         return {}, 0, 0
 
-    # event_id -> { seq: {pid, content, role} }
+    # event_id -> { seq: {pid, role} }
     # Meta paragraphs (title row / sannyas-wiki marker) are dropped here so
     # they count toward neither hit_count nor total_hits nor the NEAR
     # window — an event matched ONLY via a meta paragraph correctly falls
     # out (its para_map becomes empty → skipped below).
     #
-    # `highlight()` is NOT computed in this gather: it is ~10× the cost of
-    # the bare MATCH and is needed only for the ≤_max_hits paragraphs we
-    # actually display. We fill those in via a small post-pass after the
-    # per-event loop. (positions/token_count were also dropped — they were
-    # never read downstream; NEAR uses per_unit_pos/offsets, all-words
-    # uses neither.)
+    # Full `f.content` is NOT fetched in this gather: it is needed only by
+    # the meta check (which inspects only the START of the text, so a 200-
+    # char prefix suffices) and by the ≤_max_hits paragraphs we actually
+    # display (filled in by the post-pass below, alongside highlight()).
+    # Fetching it for every gathered row was the dominant cost on broad
+    # multi-word queries (LIMIT 100000 rows × full paragraph text).
+    #
+    # `highlight()` is likewise NOT computed here: it is ~10× the cost of
+    # the bare MATCH and is needed only for the displayed paragraphs. We
+    # fill both content and hl in via a small post-pass after the per-event
+    # loop. (positions/token_count were also dropped — they were never read
+    # downstream; NEAR uses per_unit_pos/offsets, all-words uses neither.)
     matched: dict[str, dict[int, dict]] = {}
     for r in prows:
-        if _is_meta_paragraph(r['sequence_number'], r['content']):
+        if _is_meta_paragraph(r['sequence_number'], r['cprefix']):
             continue
         matched.setdefault(r['event_id'], {})[r['sequence_number']] = {
             'pid': r['paragraph_id'],
-            'content': r['content'],
             'role': r['role'],
         }
 
@@ -732,6 +737,21 @@ def _record_level_search(
                 running += _count_tokens(content)
             offsets[ev_id] = seq_off
 
+    # Batch the per-event metadata lookup (was one SELECT per qualifying
+    # event inside the loop below — thousands of round-trips on broad
+    # results). One IN-query per 5000 ids → dict keyed by id, same columns
+    # in the same order, so each loop iteration just does a dict lookup.
+    ev_rows: dict = {}
+    for i in range(0, len(common_list), 5000):
+        chunk = common_list[i:i + 5000]
+        ph = ",".join("?" * len(chunk))
+        for row in conn.execute(
+            "SELECT id, title, date, location, language, "
+            f"translated_from, source_short FROM events WHERE id IN ({ph})",
+            chunk,
+        ).fetchall():
+            ev_rows[row['id']] = row
+
     events: dict = {}
     total_hits = 0
     for ev_id in common:
@@ -792,11 +812,7 @@ def _record_level_search(
             # (e.g. seq N+1 between two matched paragraphs) with no real hit.
             display_seqs = [s for s in window_seqs if s in para_map] or []
 
-        ev_row = conn.execute(
-            "SELECT title, date, location, language, "
-            "translated_from, source_short FROM events WHERE id = ?",
-            (ev_id,),
-        ).fetchone()
+        ev_row = ev_rows.get(ev_id)
         if not ev_row:
             continue
 
@@ -816,9 +832,10 @@ def _record_level_search(
         # Display hits: up to _max_hits paragraphs from display_seqs, ordered
         # by sequence_number. (para_map is already meta-filtered at gather
         # time.) _max_hits=None means no cap (used by _near_hl_for_discourse
-        # to illuminate the full window). `hl` is filled in by the post-pass
-        # below — only for the paragraphs that survive this cap — so we don't
-        # pay highlight() for paragraphs we never show.
+        # to illuminate the full window). Both `content` and `hl` are filled
+        # in by the post-pass below — only for the paragraphs that survive
+        # this cap — so we pay neither the content fetch nor highlight() for
+        # paragraphs we never show.
         hits = []
         for seq in display_seqs:
             if _max_hits is not None and len(hits) >= _max_hits:
@@ -829,7 +846,6 @@ def _record_level_search(
             hit: dict = {
                 'paragraph_id': info['pid'],
                 'sequence_number': seq,
-                'content': _strip_shailendra(info['content'] or ''),
             }
             if info.get('role'):
                 hit['role'] = info['role']
@@ -837,25 +853,27 @@ def _record_level_search(
 
         events[ev_id] = {
             'event_id': ev_id,
-            'title': ev_row[0],
-            'date': ev_row[1],
-            'location': ev_row[2],
-            'language': ev_row[3],
-            'translated_from': ev_row[4],
-            'source_short': ev_row[5],
+            'title': ev_row['title'],
+            'date': ev_row['date'],
+            'location': ev_row['location'],
+            'language': ev_row['language'],
+            'translated_from': ev_row['translated_from'],
+            'source_short': ev_row['source_short'],
             'best_rank': 0.0,
             'hit_count': hit_count,
             'hits': hits,
             '_record_level': True,
         }
 
-    # ── Post-pass: compute highlight() for ONLY the paragraphs we display.
-    # The gather above deliberately skips highlight() (~10× the bare MATCH);
-    # here we run it for just the ≤_max_hits hits per event that survived the
-    # cap. Same MATCH (`gather_fts`) the gather used, restricted to the
+    # ── Post-pass: fetch full content + highlight() for ONLY the paragraphs
+    # we display. The gather above deliberately skips both (full content is
+    # only needed for the ≤_max_hits displayed hits; highlight() is ~10× the
+    # bare MATCH); here we run them for just the hits per event that survived
+    # the cap. Same MATCH (`gather_fts`) the gather used, restricted to the
     # displayed paragraph ids, so the markers are identical to what the old
-    # per-row highlight() produced.
+    # per-row highlight() produced and the content is the same paragraph text.
     display_pids = [h['paragraph_id'] for ev in events.values() for h in ev['hits']]
+    content_map: dict[int, str] = {}
     hl_map: dict[int, str] = {}
     for i in range(0, len(display_pids), 5000):
         chunk = display_pids[i:i + 5000]
@@ -865,6 +883,7 @@ def _record_level_search(
                 f"""
                 SELECT
                     f.paragraph_id,
+                    f.content,
                     highlight({fts_table}, 0, '\x02', '\x03') AS hl
                 FROM {fts_table} f
                 WHERE {fts_table} MATCH ?
@@ -874,9 +893,10 @@ def _record_level_search(
             ).fetchall()
         except Exception:
             # Defensive: mirror the gather's broad except. On failure leave
-            # hl_map as-is so these hits fall back to their plain content.
+            # the maps as-is so these hits fall back to empty content.
             continue
         for r in hrows:
+            content_map[r['paragraph_id']] = _strip_shailendra(r['content'] or '')
             hl_map[r['paragraph_id']] = (
                 _strip_shailendra(r['hl'] or '')
                 .replace('\x02', '«')
@@ -886,8 +906,9 @@ def _record_level_search(
     for ev in events.values():
         new_hits = []
         for h in ev['hits']:
-            hl = hl_map.get(h['paragraph_id'], '')
-            content = h['content']
+            pid = h['paragraph_id']
+            hl = hl_map.get(pid, '')
+            content = content_map.get(pid, '')
             # When hl carries «» markers it is the same preview text as
             # content, just annotated; the frontend renders the preview from
             # hl in that case, so shipping content too would just double the
@@ -897,7 +918,7 @@ def _record_level_search(
             # Rebuild with the historical key order: paragraph_id,
             # sequence_number, content, hl, (role).
             nh: dict = {
-                'paragraph_id': h['paragraph_id'],
+                'paragraph_id': pid,
                 'sequence_number': h['sequence_number'],
                 'content': content,
                 'hl': hl,
