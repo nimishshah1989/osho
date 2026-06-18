@@ -627,54 +627,64 @@ def _record_level_search(
     # ── Step B: gather matched paragraphs for the common events only.
     union_query = " OR ".join(f"({unit_norm(u)})" for u in units)
     gather_fts = f'{{content}} : ({union_query})'
-    try:
-        prows = conn.execute(
-            f"""
-            SELECT
-                f.event_id,
-                f.sequence_number,
-                f.paragraph_id,
-                substr(f.content, 1, 200) AS cprefix,
-                p.role AS role
-            FROM {fts_table} f
-            LEFT JOIN events e ON e.id = f.event_id
-            LEFT JOIN paragraphs p ON p.id = f.paragraph_id
-            WHERE {fts_table} MATCH ?
-            AND f.event_id IN ({placeholders})
-            {where_extra}
-            LIMIT 100000
-            """,
-            ([gather_fts] + common_list + filter_params),
-        ).fetchall()
-    except Exception:
-        return {}, 0, 0
 
-    # event_id -> { seq: {pid, role} }
-    # Meta paragraphs (title row / sannyas-wiki marker) are dropped here so
-    # they count toward neither hit_count nor total_hits nor the NEAR
-    # window — an event matched ONLY via a meta paragraph correctly falls
-    # out (its para_map becomes empty → skipped below).
-    #
-    # Full `f.content` is NOT fetched in this gather: it is needed only by
-    # the meta check (which inspects only the START of the text, so a 200-
-    # char prefix suffices) and by the ≤_max_hits paragraphs we actually
-    # display (filled in by the post-pass below, alongside highlight()).
-    # Fetching it for every gathered row was the dominant cost on broad
-    # multi-word queries (LIMIT 100000 rows × full paragraph text).
-    #
-    # `highlight()` is likewise NOT computed here: it is ~10× the cost of
-    # the bare MATCH and is needed only for the displayed paragraphs. We
-    # fill both content and hl in via a small post-pass after the per-event
-    # loop. (positions/token_count were also dropped — they were never read
-    # downstream; NEAR uses per_unit_pos/offsets, all-words uses neither.)
+    # The NEAR (Within-N) path needs the raw matched-paragraph map per event
+    # to feed the proximity-window logic below, so it keeps the original
+    # gather + Python meta-filter. The All-words path (near_dist is None)
+    # never needs that intermediate map: its only outputs are, per event,
+    # the matched-paragraph COUNT (= hit_count) and the ≤_max_hits lowest-
+    # sequence paragraphs to display. Both are computed server-side in one
+    # window-function query (matched_aw, built afterwards), avoiding pulling
+    # up to 100k matched rows into Python only to count and sort them.
     matched: dict[str, dict[int, dict]] = {}
-    for r in prows:
-        if _is_meta_paragraph(r['sequence_number'], r['cprefix']):
-            continue
-        matched.setdefault(r['event_id'], {})[r['sequence_number']] = {
-            'pid': r['paragraph_id'],
-            'role': r['role'],
-        }
+    if near_dist is not None:
+        try:
+            prows = conn.execute(
+                f"""
+                SELECT
+                    f.event_id,
+                    f.sequence_number,
+                    f.paragraph_id,
+                    substr(f.content, 1, 200) AS cprefix,
+                    p.role AS role
+                FROM {fts_table} f
+                LEFT JOIN events e ON e.id = f.event_id
+                LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+                WHERE {fts_table} MATCH ?
+                AND f.event_id IN ({placeholders})
+                {where_extra}
+                LIMIT 100000
+                """,
+                ([gather_fts] + common_list + filter_params),
+            ).fetchall()
+        except Exception:
+            return {}, 0, 0
+
+        # event_id -> { seq: {pid, role} }
+        # Meta paragraphs (title row / sannyas-wiki marker) are dropped here
+        # so they count toward neither hit_count nor total_hits nor the NEAR
+        # window — an event matched ONLY via a meta paragraph correctly falls
+        # out (its para_map becomes empty → skipped below).
+        #
+        # Full `f.content` is NOT fetched in this gather: it is needed only by
+        # the meta check (which inspects only the START of the text, so a 200-
+        # char prefix suffices) and by the ≤_max_hits paragraphs we actually
+        # display (filled in by the post-pass below, alongside highlight()).
+        # Fetching it for every gathered row was the dominant cost on broad
+        # multi-word queries (LIMIT 100000 rows × full paragraph text).
+        #
+        # `highlight()` is likewise NOT computed here: it is ~10× the cost of
+        # the bare MATCH and is needed only for the displayed paragraphs. We
+        # fill both content and hl in via a small post-pass after the per-
+        # event loop. (positions/token_count were also dropped — they were
+        # never read downstream; NEAR uses per_unit_pos/offsets.)
+        for r in prows:
+            if _is_meta_paragraph(r['sequence_number'], r['cprefix']):
+                continue
+            matched.setdefault(r['event_id'], {})[r['sequence_number']] = {
+                'pid': r['paragraph_id'],
+                'role': r['role'],
+            }
 
     # For NEAR we need per-unit, per-paragraph position info to assign
     # record-level token offsets. Run one scoped query per unit, restricted
@@ -754,17 +764,105 @@ def _record_level_search(
 
     events: dict = {}
     total_hits = 0
-    for ev_id in common:
+
+    if near_dist is None:
+        # ── All-words: do the per-event hit_count + ≤_max_hits display-row
+        # selection entirely in SQL. The innermost subquery is exactly the
+        # Step-B gather (same MATCH / IN / where_extra / LIMIT 100000, no
+        # ORDER BY → identical first-100k rows, FTS5 deterministic); the
+        # `NOT (sq = 0 OR ct LIKE 'event page in sannyas%')` filter then
+        # drops the same meta rows _is_meta_paragraph did (verified byte-for-
+        # byte identical on the prod corpus). `cnt` per event = count of
+        # surviving rows = old len(para_map) = hit_count; `rn <= _max_hits`
+        # picks the lowest-`sq` rows = old sorted(para_map.keys())[:_max_hits].
+        # No full paragraph text leaves SQLite here — only a 200-char prefix
+        # for the meta check (the marker is far shorter than 200 chars).
+        meta_clause = "WHERE NOT (sq = 0 OR ct LIKE 'event page in sannyas%')"
+        rn_clause = "" if _max_hits is None else "WHERE rn <= ?"
+        aw_params = [gather_fts] + common_list + filter_params
+        if _max_hits is not None:
+            aw_params = aw_params + [_max_hits]
+        try:
+            aw_rows = conn.execute(
+                f"""
+                SELECT event_id, sq, pid, role, cnt FROM (
+                  SELECT event_id, sq, pid, role,
+                         ROW_NUMBER() OVER (PARTITION BY event_id ORDER BY sq) AS rn,
+                         COUNT(*)     OVER (PARTITION BY event_id)            AS cnt
+                  FROM (
+                    SELECT f.event_id AS event_id, f.sequence_number AS sq,
+                           f.paragraph_id AS pid, p.role AS role,
+                           substr(f.content, 1, 200) AS ct
+                    FROM {fts_table} f
+                    LEFT JOIN events e ON e.id = f.event_id
+                    LEFT JOIN paragraphs p ON p.id = f.paragraph_id
+                    WHERE {fts_table} MATCH ?
+                    AND f.event_id IN ({placeholders})
+                    {where_extra}
+                    LIMIT 100000
+                  ) {meta_clause}
+                ) {rn_clause}
+                """,
+                aw_params,
+            ).fetchall()
+        except Exception:
+            return {}, 0, 0
+
+        # Group the (≤_max_hits) display rows per event, in `sq` order. The
+        # window-function output is already deterministic, but we sort by
+        # `sq` when emitting hits so the display order is identical to the
+        # old sorted(display_seqs) regardless of row arrival order. `cnt`
+        # (constant per event) is the hit_count and is added to total_hits
+        # exactly once per event — the same accounting as the old loop.
+        aw_by_ev: dict[str, dict] = {}
+        for r in aw_rows:
+            ev_id = r['event_id']
+            bucket = aw_by_ev.get(ev_id)
+            if bucket is None:
+                bucket = {'cnt': r['cnt'], 'rows': []}
+                aw_by_ev[ev_id] = bucket
+            bucket['rows'].append(r)
+
+        for ev_id, bucket in aw_by_ev.items():
+            ev_row = ev_rows.get(ev_id)
+            if not ev_row:
+                continue
+            hit_count = bucket['cnt']
+            total_hits += hit_count
+            hits = []
+            for r in sorted(bucket['rows'], key=lambda r: r['sq']):
+                hit: dict = {
+                    'paragraph_id': r['pid'],
+                    'sequence_number': r['sq'],
+                }
+                if r['role']:
+                    hit['role'] = r['role']
+                hits.append(hit)
+            events[ev_id] = {
+                'event_id': ev_id,
+                'title': ev_row['title'],
+                'date': ev_row['date'],
+                'location': ev_row['location'],
+                'language': ev_row['language'],
+                'translated_from': ev_row['translated_from'],
+                'source_short': ev_row['source_short'],
+                'best_rank': 0.0,
+                'hit_count': hit_count,
+                'hits': hits,
+                '_record_level': True,
+            }
+
+    for ev_id in (common if near_dist is not None else ()):
         para_map = matched.get(ev_id)
         if not para_map:
             continue
 
         # `display_seqs` selects which paragraphs to show + count as the
-        # hit. For All-words it's every matched paragraph. For Within-N it
-        # is narrowed below to just the paragraphs forming the proximity
-        # window, so a NEAR hit shows the actual close-together passage —
-        # not every paragraph that happens to contain one of the words
-        # (the 2026-05-31 bug where Within-N reported All-words counts).
+        # hit. For Within-N it is narrowed below to just the paragraphs
+        # forming the proximity window, so a NEAR hit shows the actual
+        # close-together passage — not every paragraph that happens to
+        # contain one of the words (the 2026-05-31 bug where Within-N
+        # reported All-words counts).
         display_seqs = sorted(para_map.keys())
 
         if near_dist is not None:
@@ -816,17 +914,11 @@ def _record_level_search(
         if not ev_row:
             continue
 
-        # Hit count:
-        #   All-words → number of matched paragraphs (the agreed
-        #     per-paragraph rule; ranks discourses with more hits higher).
-        #   Within-N → 1 — the discourse has one proximity passage. This is
-        #     what makes the within-N total match OCTP (2 for politicians/
-        #     mafia, 5 for enlightenment/trust/love) instead of the
-        #     all-words paragraph count.
-        if near_dist is not None:
-            hit_count = 1
-        else:
-            hit_count = len(para_map)
+        # Hit count for Within-N is 1 — the discourse has one proximity
+        # passage. This is what makes the within-N total match OCTP (2 for
+        # politicians/mafia, 5 for enlightenment/trust/love) instead of the
+        # all-words paragraph count.
+        hit_count = 1
         total_hits += hit_count
 
         # Display hits: up to _max_hits paragraphs from display_seqs, ordered
