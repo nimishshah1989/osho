@@ -320,6 +320,43 @@ _COLUMN_FILTER_WRAP_RE = re.compile(
     re.DOTALL,
 )
 
+# English function words dropped from "Within N words" (NEAR) proximity
+# matching. OCTP (Folio Views) ignores articles / prepositions / pronouns
+# when matching within N words, so a sentence pasted into Within-N mode —
+# e.g. "falling in love you remain a child" — matches on its content words
+# ("falling love remain child"). Keeping the function words as proximity
+# units was actively harmful: each one matches nearly every paragraph in the
+# 1.3M-row corpus, so the record-level gather (a) scanned their giant FTS
+# posting lists — pushing a query like the above to ~25s, past the client's
+# fetch timeout, surfacing as "NetworkError" — and (b) flooded the
+# `LIMIT 100000` gather with function-word rows, truncating the genuine
+# discourse out before it was ever scored (the query then returned 0 even
+# though the exact phrase existed). Pruned of spiritually-loaded words that
+# are common in the discourses (be/being/now/here/no/not/one/self/will/…) —
+# those are NEVER stripped, so "be here now" et al. keep their literal
+# proximity. Hindi NEAR is unaffected: no Devanagari token matches this set.
+# MUST stay in sync with NEAR_STOPWORDS in frontend/lib/search/queryRewrite.ts.
+_NEAR_STOPWORDS = frozenset("""
+    a an the
+    and or but nor
+    i you he she it we they me him her us them
+    my your his its our their mine yours hers ours theirs
+    this that these those which who whom whose
+    am is are was were
+    do does did
+    have has had
+    of in on at to for with by from into onto about as
+""".split())
+
+
+def _strip_near_stopwords(words: list[str]) -> list[str]:
+    """Drop function-word units from a NEAR query so proximity is measured on
+    content words (OCTP semantics). Falls back to the original list if fewer
+    than two content words remain, so a deliberately function-word query
+    ("to be or not to be") still searches something rather than nothing."""
+    content = [w for w in words if w.strip().lower() not in _NEAR_STOPWORDS]
+    return content if len(content) >= 2 else words
+
 
 def _parse_near(fts_query: str):
     q = fts_query.strip()
@@ -333,6 +370,7 @@ def _parse_near(fts_query: str):
     words = [w.strip().strip('"') for w in words_raw.split() if w.strip().strip('"')]
     if len(words) < 2:
         return None
+    words = _strip_near_stopwords(words)
     return words, int(dist_str)
 
 

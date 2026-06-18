@@ -48,6 +48,37 @@ def test_near_operator(app_client):
     assert r.json()["total"] >= 1
 
 
+# ── Within-N (NEAR) stop-word handling ────────────────────
+# Regression for the "falling in love you remain a child" report: a sentence
+# pasted into Within-N mode timed out (NetworkError) and returned 0 because the
+# function words (in/you/a) each match ~every paragraph — their giant FTS
+# posting lists made the gather slow AND flooded the LIMIT 100000, truncating
+# the real discourse out before it was scored. NEAR now matches on content
+# words only (OCTP ignores articles/prepositions/pronouns in proximity).
+
+def test_near_strips_function_words():
+    from scripts.cloud_api import _parse_near
+    words, dist = _parse_near("NEAR(falling in love you remain a child, 30)")
+    assert dist == 30
+    assert words == ["falling", "love", "remain", "child"]
+
+
+def test_near_content_only_query_unchanged():
+    """Stripping must not touch content-word NEAR queries (OCTP parity)."""
+    from scripts.cloud_api import _parse_near
+    assert _parse_near("NEAR(enlightenment trust love, 20)") == (
+        ["enlightenment", "trust", "love"], 20,
+    )
+
+
+def test_near_keeps_loaded_words_and_falls_back():
+    from scripts.cloud_api import _parse_near
+    # be/here/now are intentionally NOT stop-words → literal proximity kept.
+    assert _parse_near("NEAR(be here now, 30)") == (["be", "here", "now"], 30)
+    # All-function-word query: nothing content remains → keep the original.
+    assert _parse_near("NEAR(of the, 30)") == (["of", "the"], 30)
+
+
 def test_or_operator(app_client):
     r = app_client.get("/api/search?q=zen OR tantra")
     assert r.status_code == 200

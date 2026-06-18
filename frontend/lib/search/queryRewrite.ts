@@ -91,6 +91,36 @@ export interface NearQuery {
  * Tolerates the column-filter wrap `rewriteQuery` may have applied.
  * Returns null when the query isn't a NEAR.
  */
+// English function words dropped from "Within N words" (NEAR) proximity
+// matching — see the long rationale on `_NEAR_STOPWORDS` in
+// scripts/cloud_api.py. OCTP ignores articles/prepositions/pronouns in
+// proximity; keeping them as units both timed the request out (giant posting
+// lists) and truncated the real discourse out of the gather. Pruned of
+// spiritually-loaded words common in the discourses (be/being/now/here/no/
+// not/one/self/will/…) so "be here now" keeps literal proximity. Hindi NEAR
+// is unaffected. MUST stay byte-identical to `_NEAR_STOPWORDS` in cloud_api.py.
+const NEAR_STOPWORDS = new Set(
+  (
+    'a an the ' +
+    'and or but nor ' +
+    'i you he she it we they me him her us them ' +
+    'my your his its our their mine yours hers ours theirs ' +
+    'this that these those which who whom whose ' +
+    'am is are was were ' +
+    'do does did ' +
+    'have has had ' +
+    'of in on at to for with by from into onto about as'
+  ).split(/\s+/),
+);
+
+/** Drop function-word units from a NEAR query so proximity is measured on
+ *  content words (OCTP semantics). Falls back to the original list when fewer
+ *  than two content words remain. Mirrors `_strip_near_stopwords`. */
+function stripNearStopwords(words: string[]): string[] {
+  const content = words.filter((w) => !NEAR_STOPWORDS.has(w.trim().toLowerCase()));
+  return content.length >= 2 ? content : words;
+}
+
 export function parseNear(ftsQuery: string): NearQuery | null {
   let q = ftsQuery.trim();
   const wrap = q.match(COLUMN_FILTER_WRAP_RE);
@@ -99,11 +129,12 @@ export function parseNear(ftsQuery: string): NearQuery | null {
   if (!m) return null;
   const wordsRaw = m[1];
   const distance = parseInt(m[2], 10);
-  const words = wordsRaw
+  let words = wordsRaw
     .split(/\s+/)
     .map((w) => w.trim().replace(/^"|"$/g, ''))
     .filter(Boolean);
   if (words.length < 2) return null;
+  words = stripNearStopwords(words);
   return { words, distance };
 }
 

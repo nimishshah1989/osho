@@ -77,6 +77,35 @@ describe('parseNear', () => {
   it('returns null when fewer than 2 words', () => {
     expect(parseNear('NEAR(politicians, 30)')).toBeNull();
   });
+
+  it('strips function words (articles/prepositions/pronouns) — OCTP semantics', () => {
+    // Regression: "falling in love you remain a child" Within-30 used to time
+    // out (NetworkError) and return 0; now it matches on its content words.
+    expect(parseNear('NEAR(falling in love you remain a child, 30)')).toEqual({
+      words: ['falling', 'love', 'remain', 'child'],
+      distance: 30,
+    });
+  });
+
+  it('leaves a content-only NEAR query unchanged (parity)', () => {
+    expect(parseNear('NEAR(enlightenment trust love, 20)')).toEqual({
+      words: ['enlightenment', 'trust', 'love'],
+      distance: 20,
+    });
+  });
+
+  it('does not strip spiritually-loaded words; falls back when <2 remain', () => {
+    // be/here/now are deliberately NOT stop-words → "be here now" is literal.
+    expect(parseNear('NEAR(be here now, 30)')).toEqual({
+      words: ['be', 'here', 'now'],
+      distance: 30,
+    });
+    // all-function-word query: nothing content remains → keep the original.
+    expect(parseNear('NEAR(of the, 30)')).toEqual({
+      words: ['of', 'the'],
+      distance: 30,
+    });
+  });
 });
 
 
