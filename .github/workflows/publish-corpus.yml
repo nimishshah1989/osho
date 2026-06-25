@@ -25,6 +25,13 @@ on:
 permissions:
   contents: write
 
+# Share the VPS deploy concurrency group: this job does `git reset --hard
+# origin/main` on the same /home/osho/osho checkout the deploy workflows pull,
+# so running it alongside a deploy would race on git. Queue them instead.
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -43,6 +50,13 @@ jobs:
           username: osho
           key: ${{ secrets.BACKEND_SSH_KEY }}
           envs: GH_TOKEN_FOR_RELEASE
+          # The build (online backup + VACUUM + zstd -19 of a ~2.7 GB DB) takes
+          # ~9-10 min, then the ~560 MB upload. The action's 10-minute DEFAULT
+          # command_timeout killed the upload mid-flight for 5+ nights running,
+          # leaving the release with only the tiny .sha256 and a 404 on
+          # osho.db.zst (the offline corpus AND the only off-box backup silently
+          # vanished). Give the whole build+upload generous headroom.
+          command_timeout: 30m
           script: |
             set -euo pipefail
             # Non-interactive SSH shells don't source ~/.bashrc, so

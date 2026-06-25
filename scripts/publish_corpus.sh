@@ -48,6 +48,22 @@ fi
 echo "==> Uploading osho.db.zst + sha256"
 gh release upload "$TAG" "$ART" "$SHA" --repo "$GH_REPO" --clobber
 
+# 4. Verify the DATA asset actually landed. `--clobber` deletes the old asset
+#    before uploading the new one, so a failed/timed-out upload leaves the
+#    release with only the tiny .sha256 and a 404 on osho.db.zst — i.e. the
+#    offline corpus and the only off-box backup silently disappear. `set -e`
+#    already catches a non-zero `gh upload`, but verify the result too so a
+#    "succeeded but empty" edge can't pass unnoticed. (`osho\.db\.zst"` matches
+#    the data asset's name but not osho.db.zst.sha256.)
+echo "==> Verifying osho.db.zst is attached to the release"
+if ! gh release view "$TAG" --repo "$GH_REPO" --json assets 2>/dev/null \
+     | grep -q 'osho\.db\.zst"'; then
+  echo "ERROR: osho.db.zst is NOT attached to release $TAG after upload —" >&2
+  echo "       the corpus/backup did not publish. Investigate before relying on it." >&2
+  exit 3
+fi
+echo "==> Verified: osho.db.zst is attached"
+
 # Print the public URL the PWA fetches from. This is wired into the
 # frontend via frontend/.env.production (NEXT_PUBLIC_CORPUS_DOWNLOAD_URL),
 # baked in at `next build` time on the VPS — the tag is stable so the
