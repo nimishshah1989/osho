@@ -374,7 +374,9 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
   const [mode, setMode] = useState<CorpusMode>('bulk');
   const [file, setFile] = useState<File | null>(null);
   const [corpusVersion, setCorpusVersion] = useState('');
-  const [dryRun, setDryRun] = useState(false);
+  // Default to a dry run for safety (Sugit's Idea 4) — the operator must
+  // consciously untick it to apply changes to the live archive.
+  const [dryRun, setDryRun] = useState(true);
   const [loading, setLoading] = useState(false);
   const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
@@ -562,7 +564,7 @@ function LoginScreen({ onLogin }: { onLogin: (k: string) => void }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-stone-50">
+    <div className="min-h-screen flex items-center justify-center bg-stone-50 text-stone-800 [color-scheme:light]">
       <form onSubmit={attempt} className="bg-white shadow rounded-lg p-8 space-y-5 w-80">
         <div>
           <h1 className="text-xl font-semibold text-stone-800">Osho Admin</h1>
@@ -603,7 +605,7 @@ export default function AdminPage() {
   if (!adminKey) return <LoginScreen onLogin={setAdminKey} />;
 
   return (
-    <div className="min-h-screen bg-stone-50">
+    <div className="min-h-screen bg-stone-50 text-stone-800 [color-scheme:light]">
       <header className="bg-white border-b border-stone-200 px-6 py-3 flex items-center justify-between">
         <h1 className="text-base font-semibold text-stone-800">Osho Admin</h1>
         <button
