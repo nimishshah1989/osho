@@ -330,14 +330,27 @@ Both halves deploy on push to `main`:
   FTS rebuild (conditional) → `systemctl restart osho-backend.service` →
   healthcheck `/health`.
 
-> **Both deploys share one concurrency group (`deploy-vps`).** They SSH into the
-> same box and `git pull` the same checkout, so a merge touching *both* halves
-> used to run them at once and race on the pull — the frontend deploy died at
-> `git pull` ("no candidates for merging") and silently shipped nothing, needing
-> a manual re-run (happened on PRs #111 and #112). The shared `concurrency.group`
-> (with `cancel-in-progress: false`) makes them queue and run one-at-a-time. If
-> you ever see one deploy fail at `git pull` while the other is mid-deploy, that
-> guard has regressed — check both workflows still share the group.
+> **All three VPS workflows share one concurrency group (`deploy-vps`).**
+> `deploy-frontend`, `deploy-backend`, and `publish-corpus` all SSH into the same
+> box and touch the same `/home/osho/osho` checkout (`git pull --ff-only` for the
+> deploys, `git reset --hard origin/main` for the corpus publish), so running two
+> at once races on git — the frontend deploy died at `git pull` ("no candidates
+> for merging") and silently shipped nothing, needing a manual re-run (PRs #111,
+> #112). The shared `concurrency.group` (with `cancel-in-progress: false`) makes
+> them queue and run one-at-a-time. If you ever see one fail at `git pull`/`git
+> reset` while another is mid-run, that guard has regressed — check all three
+> still share the group.
+
+> **`publish-corpus` upload timeout (2026-06-25).** The nightly corpus build runs
+> on the VPS via `appleboy/ssh-action`, whose **default `command_timeout` is 10
+> min**. As the DB grew (~2.7 GB), `zstd -19` compression alone took ~9.5 min, so
+> the ~560 MB `gh release upload` got killed mid-flight — for 5+ nights. Because
+> `--clobber` deletes the old asset before uploading, this left `corpus-latest`
+> with only the 65-byte `.sha256` and a **404 on `osho.db.zst`** — silently
+> killing both the offline/desktop corpus *and* the only off-box backup. Fixed by
+> setting `command_timeout: 30m` and adding a post-upload check that fails loudly
+> if `osho.db.zst` isn't attached. If builds ever approach 30 min again (corpus
+> growth), drop the zstd level rather than just bumping the timeout.
 
 > **Never commit on the VPS.** Both deploy scripts `git pull --ff-only`, which
 > aborts if the box's `main` has diverged. That's exactly what wedged the #102
