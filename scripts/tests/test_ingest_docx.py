@@ -17,6 +17,9 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from scripts.ingest_docx import (  # noqa: E402
+    Paragraph,
+    TalkRecord,
+    _canonical_title,
     _normalise_role,
     parse_docx,
     upsert,
@@ -283,3 +286,133 @@ def test_source_short_absent_header_yields_none(tmp_path):
     )
     talk = parse_docx(docx_path)
     assert talk.source_short is None
+
+
+# ── Duplicate prevention — Sugit's Issue 8 (2026-06-27) ───────────────────
+#
+# Two records that look identical on screen ("Sarvasar Upanishad ~ 07",
+# English) appeared twice in the archive. Root cause: the upsert matched the
+# existing record by a BYTE-EXACT title, so a title differing only by an
+# invisible character (Unicode form, whitespace, or which dash/tilde glyph
+# was typed) missed and created a second event. `_canonical_title` +
+# `_find_existing_event_id`'s fallback fix it; these tests pin the contract.
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        # Same talk, different separator glyph.
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad ～ 07"),  # fullwidth tilde
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad – 07"),  # en-dash
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad — 07"),  # em-dash
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad - 07"),       # ASCII hyphen
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad − 07"),  # minus sign
+        # Whitespace noise.
+        ("Sarvasar Upanishad ~ 07", "Sarvasar  Upanishad ~ 07"),       # double space
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad ~ 07"),   # non-breaking space
+        ("Sarvasar Upanishad ~ 07", "  Sarvasar Upanishad ~ 07  "),    # surrounding ws
+        # Unicode normal form (NFC vs NFD) and case.
+        ("Café Talk ~ 01", "Café Talk ~ 01"),              # composed vs decomposed
+        ("The Book Of Secrets ~ 01", "the book of secrets ~ 01"),     # case
+    ],
+)
+def test_canonical_title_collapses_cosmetic_differences(a, b):
+    assert _canonical_title(a) == _canonical_title(b)
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        # Different part number is a different talk — must NOT collapse.
+        ("Sarvasar Upanishad ~ 07", "Sarvasar Upanishad ~ 08"),
+        ("The Mustard Seed ~ 04", "The Mustard Seed ~ 14"),
+        ("Dhammapada ~ 03", "Dhammapada ~ 30"),
+        # Genuinely different titles.
+        ("A Rose Is a Rose ~ 01", "A Lotus Is a Lotus ~ 01"),
+    ],
+)
+def test_canonical_title_keeps_distinct_talks_distinct(a, b):
+    assert _canonical_title(a) != _canonical_title(b)
+
+
+def test_upsert_is_idempotent_no_duplicate(tmp_path):
+    """Re-ingesting the exact same talk updates in place — one event, not two."""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    talk = TalkRecord(
+        title="Idempotent Talk ~ 01",
+        language="English",
+        paragraphs=[Paragraph("Body.")],
+    )
+    with sqlite3.connect(str(db)) as conn:
+        _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
+        _ensure_role_column(conn)
+        _, new1 = upsert(conn, talk)
+        _, new2 = upsert(conn, talk)
+        n = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    assert new1 is True and new2 is False
+    assert n == 1
+
+
+def test_upsert_matches_despite_invisible_title_difference(tmp_path):
+    """Issue 8: a second ingest whose title differs only invisibly from an
+    existing record updates that record in place instead of duplicating it."""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    with sqlite3.connect(str(db)) as conn:
+        _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
+        _ensure_role_column(conn)
+        # As it sits in the legacy corpus.
+        _, new1 = upsert(conn, TalkRecord(
+            title="Sarvasar Upanishad ~ 07",
+            language="English",
+            paragraphs=[Paragraph("Original body.")],
+        ))
+        # Same talk re-ingested: fullwidth tilde + non-breaking space +
+        # trailing whitespace — identical to a human, different bytes.
+        _, new2 = upsert(conn, TalkRecord(
+            title="Sarvasar Upanishad ～ 07 ",
+            language="English",
+            paragraphs=[Paragraph("Updated body.")],
+        ))
+        n_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        bodies = [
+            r[0] for r in conn.execute(
+                "SELECT content FROM paragraphs ORDER BY id"
+            ).fetchall()
+        ]
+    assert new1 is True
+    assert new2 is False, "invisible title difference was treated as a new record"
+    assert n_events == 1, "a duplicate event was created (Issue 8 regression)"
+    assert bodies == ["Updated body."], "existing record was not updated in place"
+
+
+def test_misnamed_file_upserts_by_internal_title_not_filename(tmp_path):
+    """Remark 10 (Sugit): a .docx whose FILENAME disagrees with its internal
+    @title= is ingested under the @title — the filename is cosmetic. A file
+    named "… ~ 33_LEN.docx" carrying @title=… ~ 01 updates the ~ 01 record and
+    creates no ~ 33 record. (This is intended behaviour, documented as a test
+    so it isn't mistaken for a bug later.)"""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    seed_path = tmp_path / "rose01.docx"
+    make_docx(str(seed_path), title="A Rose Is a Rose ~ 01", language="EN",
+              body=["First version."])
+    # Filename says ~ 33, but @title inside says ~ 01.
+    misnamed = tmp_path / "A Rose Is a Rose ~ 33_LEN.docx"
+    make_docx(str(misnamed), title="A Rose Is a Rose ~ 01", language="EN",
+              body=["Second version."])
+    with sqlite3.connect(str(db)) as conn:
+        _ensure_translated_from_column(conn)
+        _ensure_source_short_column(conn)
+        _ensure_role_column(conn)
+        upsert(conn, parse_docx(seed_path))
+        upsert(conn, parse_docx(misnamed))
+        titles = [
+            r[0] for r in conn.execute(
+                "SELECT title FROM events ORDER BY title"
+            ).fetchall()
+        ]
+    assert titles == ["A Rose Is a Rose ~ 01"], "filename leaked into record identity"

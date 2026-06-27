@@ -308,12 +308,62 @@ def _ensure_role_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE paragraphs ADD COLUMN role TEXT")
 
 
+# Characters that all stand in for the " ~ NN " series-part separator in
+# titles. Antar's Word files, Sugit's batches and the legacy corpus type this
+# inconsistently — plain ASCII tilde, the swung dash, the fullwidth tilde, the
+# whole hyphen/dash family and the minus sign all show up. They are collapsed
+# to a single character for *matching only* so two otherwise-identical titles
+# that differ solely in which glyph was typed resolve to the same record.
+_TITLE_SEPARATORS = "~∼～⁓‐‑‒–—―−-"
+_TITLE_SEP_RE = re.compile(f"[{re.escape(_TITLE_SEPARATORS)}]")
+_TITLE_WS_RE = re.compile(r"\s+")
+
+
+def _canonical_title(title: str) -> str:
+    """Normalisation-tolerant key for matching a title to an existing record.
+
+    Two titles that look identical but differ in an *invisible* way must map
+    to the same key, or an upsert/Modify silently creates a DUPLICATE event
+    instead of updating the one already there. That is exactly the bug Sugit
+    hit: two "Sarvasar Upanishad ~ 07" English records, identical on screen
+    but differing by some mix of Unicode form, whitespace and which
+    dash/tilde glyph was typed.
+
+    The collapses applied — NFC, whitespace, dash/tilde family, case — never
+    merge genuinely distinct talks: the series number (`~ 01` vs `~ 02`) is
+    preserved, only the cosmetic surroundings are flattened. This key is used
+    for comparison only; `events.title` still stores the title verbatim for
+    display.
+    """
+    s = unicodedata.normalize("NFC", title or "")
+    s = _TITLE_SEP_RE.sub("~", s)
+    s = _TITLE_WS_RE.sub(" ", s).strip()
+    return s.casefold()
+
+
 def _find_existing_event_id(conn: sqlite3.Connection, title: str, language: str) -> str | None:
+    # Fast path: a byte-exact match hits the events(title) lookup and covers
+    # the overwhelmingly common case (re-ingesting the same files unchanged).
     row = conn.execute(
         "SELECT id FROM events WHERE title = ? AND COALESCE(language, '') = ?",
         (title, language),
     ).fetchone()
-    return row[0] if row else None
+    if row:
+        return row[0]
+    # Slow path, only when the exact match misses: tolerate invisible title
+    # differences (Unicode form, whitespace, dash/tilde glyph) that would
+    # otherwise make the upsert create a duplicate event. Scoped to the same
+    # language and compared on the canonical key. This is an admin-only path
+    # (ingest / batch-update), so the per-call candidate scan is acceptable;
+    # the fast path keeps a clean bulk re-ingest off it entirely.
+    want = _canonical_title(title)
+    for rid, cand in conn.execute(
+        "SELECT id, title FROM events WHERE COALESCE(language, '') = ?",
+        (language,),
+    ):
+        if _canonical_title(cand or "") == want:
+            return rid
+    return None
 
 
 def _delete_event_rows(conn: sqlite3.Connection, event_id: str) -> None:
