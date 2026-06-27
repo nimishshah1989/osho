@@ -513,11 +513,26 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
               Dry run — no changes were written to the database.
             </div>
           )}
-          <p className={`text-sm font-medium ${updateResult.failed > 0 ? 'text-red-700' : 'text-green-700'}`}>
-            {updateResult.failed === 0 ? '✓' : '✗'}{' '}
-            Added: {updateResult.added} · Modified: {updateResult.modified} · Deleted: {updateResult.deleted} · Failed: {updateResult.failed}
-            {updateResult.corpus_version ? ` · corpus version set to ${updateResult.corpus_version}` : ''}
-          </p>
+          {/* Issue 6 (Sugit): a structured update is all-or-nothing, so when
+              anything fails NOTHING is applied. The old line showed
+              "Modified: 10 · Deleted: 9" even on a failed run, reading as if
+              those changes had landed. Spell out the abort, and label the
+              counts as *attempted* so they're not mistaken for what happened. */}
+          {updateResult.failed === 0 ? (
+            <p className="text-sm font-medium text-green-700">
+              ✓ Added: {updateResult.added} · Modified: {updateResult.modified} · Deleted: {updateResult.deleted} · Failed: 0
+              {updateResult.corpus_version ? ` · corpus version set to ${updateResult.corpus_version}` : ''}
+            </p>
+          ) : updateResult.dry_run ? (
+            <p className="text-sm font-medium text-red-700">
+              ✗ {updateResult.failed} failed — a real run would abort and change nothing.
+              {' '}Would attempt: Added {updateResult.added} · Modified {updateResult.modified} · Deleted {updateResult.deleted}.
+            </p>
+          ) : (
+            <p className="text-sm font-medium text-red-700">
+              ✗ Aborted — no records were changed. Attempted: Added {updateResult.added} · Modified {updateResult.modified} · Deleted {updateResult.deleted} · Failed {updateResult.failed}.
+            </p>
+          )}
           <pre className="bg-stone-50 border border-stone-200 rounded px-3 py-2 text-xs font-mono overflow-y-auto max-h-72 whitespace-pre-wrap">
             {updateResult.report}
           </pre>

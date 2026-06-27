@@ -130,17 +130,16 @@ function ReaderInner() {
             </h1>
             {data?.event && (
               <div className="flex flex-wrap gap-x-6 gap-y-2 text-[11px] tracking-[0.25em] uppercase text-stone-500 dark:text-ivory/75">
-                {/* Sugit/Anuragi 2026-05-21 layout: show the readable date and,
-                    for translations, the source book title where the location
-                    used to sit. The body header inside the discourse continues
-                    to carry the full date-and-place line verbatim. */}
+                {/* Sugit/Anuragi 2026-05-21 layout: show the readable date and
+                    language. The body header inside the discourse continues to
+                    carry the full date-and-place line verbatim. The source book
+                    title for translations is rendered once by translationLine
+                    below — Issue 9 (Sugit 2026-06-27): it used to also sit here,
+                    doubling the book name. */}
                 {data.event.date && (
                   <span className="text-gold font-medium">
                     {formatReadableDate(data.event.date, locale)}
                   </span>
-                )}
-                {(data.event.source_short ?? '').trim() && (
-                  <span>{(data.event.source_short ?? '').trim()}</span>
                 )}
                 {data.event.language && <span>{data.event.language}</span>}
                 {data.paragraphs.length > 0 && (

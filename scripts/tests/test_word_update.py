@@ -213,19 +213,97 @@ def test_modify_missing_record_fails(tmp_path):
     assert not _record_exists(str(db), "Does Not Exist", "English")
 
 
-def test_delete_missing_record_is_warning_not_failure(tmp_path):
-    """Deleting an already-absent record is non-fatal — lets you re-run a
-    Delete batch idempotently."""
+def test_delete_missing_record_aborts_batch(tmp_path):
+    """Issue 7 (Sugit 2026-06-27): deleting an already-absent record is a
+    FAILURE, so the all-or-nothing batch aborts. In a curated archive a no-op
+    delete almost always means a misfiled document (a file in Delete/ that
+    belonged in Add/, or a stale batch), and silently passing it would ship a
+    batch that didn't do what its folder layout implied. A valid sibling
+    change in the same batch must roll back too."""
     db = tmp_path / "test.db"
     _seed_minimal_db(str(db))
+    # Prime a record we will try to Modify alongside the bad Delete.
+    pre = _build_root(
+        tmp_path / "pre",
+        adds=[{"title": "Keep Me", "language": "EN", "body_paragraphs": ["Original"]}],
+    )
+    run_update(pre, db)
+
     root = _build_root(
-        tmp_path,
+        tmp_path / "batch",
+        modifies=[{"title": "Keep Me", "language": "EN", "body_paragraphs": ["Changed"]}],
         deletes=[{"title": "Nothing To Delete", "language": "EN"}],
     )
     report = run_update(root, db)
-    assert not report.failed
-    # Report should still mention the file with an "already absent" note.
-    assert any("already absent" in r.summary for r in report.results)
+    assert report.failed, "delete of an absent record should fail the batch"
+    assert any(
+        r.action is Action.DELETE and not r.ok and "no such record" in (r.error or "")
+        for r in report.results
+    )
+    # All-or-nothing: the valid Modify in the same batch must NOT have landed.
+    with sqlite3.connect(str(db)) as conn:
+        contents = [
+            r[0]
+            for r in conn.execute(
+                "SELECT content FROM paragraphs"
+                " JOIN events ON events.id = paragraphs.event_id"
+                " WHERE events.title = ? ORDER BY paragraphs.sequence_number",
+                ("Keep Me",),
+            ).fetchall()
+        ]
+    assert contents == ["Original"], "sibling Modify persisted despite the abort"
+
+
+def test_failed_batch_report_says_nothing_applied(tmp_path):
+    """Issue 6 (Sugit): when a batch fails, the report must spell out that
+    NOTHING was applied — the per-action counts are 'would-have' numbers, not
+    landed changes. Pins the render() Summary wording the admin UI relies on."""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    # A valid Add + a failing Modify (no such record) → whole batch rolls back.
+    root = _build_root(
+        tmp_path,
+        adds=[{"title": "Brand New", "language": "EN", "body_paragraphs": ["X"]}],
+        modifies=[{"title": "Missing Record", "language": "EN", "body_paragraphs": ["Y"]}],
+    )
+    report = run_update(root, db)
+    assert report.failed
+    assert not _record_exists(str(db), "Brand New", "English")
+    text = report.render()
+    assert "NOTHING was applied" in text
+    assert "rolled back" in text.lower()
+
+
+def test_modify_matches_title_despite_separator_difference(tmp_path):
+    """Issue 8 in the structured-update path: a Modify whose @title uses a
+    different dash/tilde glyph than the stored record still updates it in
+    place — it neither fails as 'no such record' nor duplicates the event."""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    pre = _build_root(
+        tmp_path / "pre",
+        adds=[{"title": "Sarvasar Upanishad ~ 07", "language": "EN",
+               "body_paragraphs": ["Original"]}],
+    )
+    run_update(pre, db)
+
+    # Same talk, but typed with an en-dash instead of the tilde.
+    mod = _build_root(
+        tmp_path / "mod",
+        modifies=[{"title": "Sarvasar Upanishad – 07", "language": "EN",
+                   "body_paragraphs": ["Updated"]}],
+    )
+    report = run_update(mod, db)
+    assert not report.failed, "Modify failed to match a title differing only by separator"
+    with sqlite3.connect(str(db)) as conn:
+        n = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        bodies = [
+            r[0] for r in conn.execute(
+                "SELECT content FROM paragraphs ORDER BY id"
+            ).fetchall()
+        ]
+    assert n == 1, "separator difference created a duplicate event (Issue 8)"
+    assert bodies == ["Updated"]
 
 
 # ─── Dry-run ─────────────────────────────────────────────────────────────

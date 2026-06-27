@@ -101,7 +101,18 @@ class RunReport:
             out.append("")
         ok = sum(1 for r in self.results if r.ok)
         fail = len(self.results) - ok
-        out.append(f"Summary: {ok} ok, {fail} failed across {len(self.results)} files.")
+        if fail:
+            # Be unambiguous: a single failure rolls the whole batch back, so
+            # the per-action "(N ok)" counts above are what *would* have
+            # happened, not what landed. Sugit's Issue 6 — the bare
+            # "X ok, Y failed" line read as if the X had been applied.
+            out.append(
+                f"Summary: {fail} failed across {len(self.results)} files — "
+                f"NOTHING was applied. This batch is all-or-nothing, so the "
+                f"whole thing was rolled back. Fix the failing file(s) and re-run."
+            )
+        else:
+            out.append(f"Summary: {ok} ok across {len(self.results)} files.")
         return "\n".join(out)
 
 
@@ -163,14 +174,21 @@ def _process_delete(conn: sqlite3.Connection, path: Path) -> FileResult:
     title = header["title"].strip()
     event_id, para_count = delete_record(conn, title, language)
     if event_id is None:
-        # Treat missing-record-on-delete as a non-fatal warning so a
-        # re-run of the same batch doesn't keep failing on already-gone
-        # files; report it so it's visible but don't flip ok=False.
+        # A Delete that matches no record is a FAILURE, so the all-or-nothing
+        # batch aborts (Sugit's Issue 7, 2026-06-27). In a curated archive a
+        # no-op delete almost always means the operator made a mistake — a
+        # file dropped in Delete/ that belonged in Add/, a typo'd @title=, or
+        # a stale batch whose target was already removed — and silently
+        # waving it through hides that. The earlier "idempotent re-run"
+        # rationale doesn't hold under all-or-nothing: a failed batch rolls
+        # back entirely, so the records are still present on a re-run.
         return FileResult(
             Action.DELETE,
             path,
-            True,
-            f"{title}  [{language}]  (already absent — nothing to do)",
+            False,
+            f"{title}  [{language}]",
+            "no such record to delete — check the file is in the right folder "
+            "(a Delete/ file that should be in Add/Modify) or was already removed",
         )
     return FileResult(
         Action.DELETE,

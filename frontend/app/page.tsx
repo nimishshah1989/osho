@@ -1001,12 +1001,14 @@ function SearchPageInner() {
                             </span>
                             <span className="block text-[12px] tracking-[0.1em] text-stone-500 dark:text-ivory/55 mt-1">
                               {/* Sugit/Anuragi 2026-05-21 layout: readable date,
-                                  optional book title for translations (replaces
-                                  the location slot), language. The technical
-                                  `@time` string is no longer surfaced here. */}
+                                  language. The technical `@time` string is no
+                                  longer surfaced here. The book title for
+                                  translations lives in translationLine below —
+                                  Issue 9 (Sugit 2026-06-27): it used to also sit
+                                  here, so a translated record showed the book
+                                  name twice. */}
                               {[
                                 formatReadableDate(ev.date, locale),
-                                (ev.source_short ?? '').trim() || null,
                               ].filter(Boolean).join(' · ')}
                               {ev.language && (
                                 <span className="ml-1 text-[10px] tracking-[0.15em] uppercase text-gold/50">[{ev.language}]</span>
@@ -1057,9 +1059,11 @@ function SearchPageInner() {
                         {selectedEvent.title ?? 'Untitled'}
                       </h2>
                       <div className="text-[13px] tracking-[0.15em] uppercase text-stone-500 dark:text-ivory/55 mt-1.5">
+                        {/* Issue 9 (Sugit): book title (source_short) intentionally
+                            omitted here — translationLine below carries it, and
+                            showing it in both places duplicated it. */}
                         {[
                           formatReadableDate(selectedEvent.date, locale),
-                          (selectedEvent.source_short ?? '').trim() || null,
                           selectedEvent.language,
                         ]
                           .filter(Boolean)
