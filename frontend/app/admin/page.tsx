@@ -553,6 +553,110 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
           )}
         </div>
       )}
+
+      <ReindexPanel adminKey={adminKey} />
+    </div>
+  );
+}
+
+
+// ─── Rebuild search index (no-downtime) ───────────────────────────────────────
+
+interface ReindexStatus {
+  state: 'idle' | 'running' | 'done' | 'error';
+  done: number; total: number;
+  started_at: string | null; finished_at: string | null;
+  message: string;
+}
+
+function ReindexPanel({ adminKey }: { adminKey: string }) {
+  const [status, setStatus] = useState<ReindexStatus | null>(null);
+  const [polling, setPolling] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // On mount, read current status — a rebuild may already be running (e.g.
+  // kicked off from another tab or session).
+  useEffect(() => {
+    let cancelled = false;
+    api('reindex-status', adminKey)
+      .then((r) => r.json())
+      .then((data: ReindexStatus) => {
+        if (cancelled) return;
+        setStatus(data);
+        if (data.state === 'running') setPolling(true);
+      })
+      .catch(() => { /* ignore — the panel just shows nothing */ });
+    return () => { cancelled = true; };
+  }, [adminKey]);
+
+  // While a rebuild runs, poll for progress every 2s.
+  useEffect(() => {
+    if (!polling) return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      api('reindex-status', adminKey)
+        .then((r) => r.json())
+        .then((data: ReindexStatus) => {
+          if (cancelled) return;
+          setStatus(data);
+          if (data.state === 'done' || data.state === 'error') setPolling(false);
+        })
+        .catch(() => { /* transient network blip — keep polling */ });
+    }, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [polling, adminKey]);
+
+  const start = async () => {
+    setError(null);
+    try {
+      const res = await api('reindex', adminKey, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail ?? 'Could not start the rebuild.'); return; }
+      setStatus({ state: 'running', done: 0, total: 0, started_at: null, finished_at: null, message: 'Starting…' });
+      setPolling(true);
+    } catch {
+      setError('Network error — could not reach the server.');
+    }
+  };
+
+  const running = polling || status?.state === 'running';
+  const pct = status && status.total > 0 ? Math.round((status.done / status.total) * 100) : 0;
+
+  return (
+    <div className="border border-stone-200 rounded-lg p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-stone-700">Rebuild search index</h3>
+        <p className="text-[13px] text-stone-500 mt-1">
+          Re-syncs search with the current archive. Run it after a batch of deletes or ingests, so removed
+          records drop out of search and freshly-added ones show up in Exact-phrase mode. No downtime — search
+          keeps working while it rebuilds (~10–15&nbsp;min on the full corpus).
+        </p>
+      </div>
+
+      <button type="button" onClick={start} disabled={running}
+        className="px-5 py-2 bg-stone-700 text-white text-sm rounded hover:bg-stone-800 disabled:opacity-50 transition-colors">
+        {running ? 'Rebuilding…' : 'Rebuild search index'}
+      </button>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+
+      {status && status.state !== 'idle' && (
+        <div className="space-y-2">
+          {running && (
+            <div className="w-full bg-stone-100 rounded-full h-2 overflow-hidden">
+              <div className="bg-amber-500 h-2 transition-all" style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <p className={`text-sm font-medium ${
+            status.state === 'error' ? 'text-red-700'
+              : status.state === 'done' ? 'text-green-700' : 'text-stone-600'
+          }`}>
+            {status.state === 'done' ? '✓ ' : status.state === 'error' ? '✗ ' : ''}
+            {status.message || (running ? 'Rebuilding…' : '')}
+            {running && status.total > 0 ? ` · ${pct}%` : ''}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
 import heapq
@@ -10,6 +10,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import threading
 import unicodedata
 import uuid
 import zipfile
@@ -2093,6 +2094,110 @@ def _find_update_root(tmpdir: str) -> Optional[str]:
     return None
 
 
+# ─── Search-index rebuild (admin) ─────────────────────────────────────────────
+#
+# The FTS index is NOT fully maintained incrementally — ingest updates the
+# stemmed table but not the exact one, and deletes leave stale rows — so after a
+# batch of archival edits the index must be rebuilt to match the tables. This
+# exposes that rebuild as a one-click admin action so an archivist never needs
+# SSH. build_fts.rebuild_no_downtime() builds fresh tables alongside the live
+# ones and swaps them in atomically, so search keeps serving throughout.
+
+# One lock serialises every admin *write* — bulk ingest, batch-update, and the
+# reindex. A rebuild reads all of `paragraphs`; an ingest mutating it mid-build
+# would yield an inconsistent index, and two rebuilds must not overlap.
+# Non-reentrant: the reindex acquires it in the request and hands the release
+# to its background thread.
+_ADMIN_WRITE_LOCK = threading.Lock()
+
+# Progress/state for the background reindex, polled by GET /admin/reindex-status.
+_reindex_status_lock = threading.Lock()
+_reindex_status: dict = {
+    "state": "idle",       # idle | running | done | error
+    "done": 0,
+    "total": 0,
+    "started_at": None,
+    "finished_at": None,
+    "message": "",
+}
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _require_admin_write_slot(request: Request):
+    """FastAPI dependency for the ingest / batch-update endpoints: check admin
+    auth, then refuse (409) if a reindex or another write holds the lock, and
+    release it after the request. Stops a rebuild's atomic table-swap from
+    racing a write to the same FTS tables."""
+    _check_admin(request)
+    if not _ADMIN_WRITE_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="A search-index rebuild (or another update) is in progress. "
+                   "Please retry once it finishes.",
+        )
+    try:
+        yield
+    finally:
+        _ADMIN_WRITE_LOCK.release()
+
+
+def _run_reindex_bg():
+    """Background worker: rebuild the FTS index with no downtime, updating
+    `_reindex_status` as it goes, and release the admin-write lock when done."""
+    try:
+        import build_fts
+
+        def _progress(done: int, total: int) -> None:
+            with _reindex_status_lock:
+                _reindex_status.update(done=done, total=total,
+                                       message=f"Indexing {done:,}/{total:,}…")
+
+        total = build_fts.rebuild_no_downtime(DB_PATH, progress=_progress)
+        with _reindex_status_lock:
+            _reindex_status.update(
+                state="done", done=total, total=total, finished_at=_now_iso(),
+                message=f"Rebuilt the search index — {total:,} paragraphs.")
+    except Exception as ex:  # noqa: BLE001 — surface any failure to the UI
+        with _reindex_status_lock:
+            _reindex_status.update(state="error", finished_at=_now_iso(),
+                                   message=f"Reindex failed: {ex}")
+    finally:
+        _ADMIN_WRITE_LOCK.release()
+
+
+@app.post("/admin/reindex")
+def admin_reindex(request: Request):
+    """Kick off a no-downtime search-index rebuild in the background. Returns
+    immediately; poll GET /admin/reindex-status for progress."""
+    _check_admin(request)
+    if not _ADMIN_WRITE_LOCK.acquire(blocking=False):
+        raise HTTPException(status_code=409,
+                            detail="A rebuild or update is already in progress.")
+    try:
+        with _reindex_status_lock:
+            _reindex_status.update(state="running", done=0, total=0,
+                                   started_at=_now_iso(), finished_at=None,
+                                   message="Starting…")
+        threading.Thread(target=_run_reindex_bg, name="fts-reindex", daemon=True).start()
+    except BaseException:
+        # Never leak the lock if we failed to hand it to the worker thread.
+        _ADMIN_WRITE_LOCK.release()
+        raise
+    return {"ok": True, "state": "running"}
+
+
+@app.get("/admin/reindex-status")
+def admin_reindex_status(request: Request):
+    """Current state of the background reindex (admin-gated, safe to poll)."""
+    _check_admin(request)
+    with _reindex_status_lock:
+        return dict(_reindex_status)
+
+
 @app.post("/admin/upload-docx")
 async def admin_upload_docx(
     request: Request,
@@ -2100,6 +2205,7 @@ async def admin_upload_docx(
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
     skip_dirs: str = Form("Texts by Others"),
+    _slot: None = Depends(_require_admin_write_slot),
 ):
     """Bulk-ingest a zip of .docx files (best-effort: failed files are skipped
     and reported; successful ones are committed unless dry_run=true).
@@ -2198,6 +2304,7 @@ async def admin_batch_update(
     file: UploadFile = File(...),
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
+    _slot: None = Depends(_require_admin_write_slot),
 ):
     """Apply a structured Add/Modify/Delete update batch (all-or-nothing).
 
