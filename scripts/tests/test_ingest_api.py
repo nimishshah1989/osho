@@ -4,6 +4,7 @@
     POST /admin/batch-update
 """
 import io
+import time
 import zipfile
 
 import pytest
@@ -325,3 +326,70 @@ def test_batch_update_no_subdirs_returns_400(app_client, tmp_path):
         data={"dry_run": "false"},
     )
     assert r.status_code == 400
+
+
+# ── /admin/reindex (no-downtime search-index rebuild) ─────────────────────────
+
+
+def _wait_reindex(app_client, timeout=15.0):
+    """Poll the status endpoint until the background rebuild finishes."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = app_client.get("/admin/reindex-status", headers=ADMIN_HEADERS)
+        assert r.status_code == 200
+        st = r.json()
+        if st["state"] in ("done", "error"):
+            return st
+        time.sleep(0.05)
+    raise AssertionError("reindex did not finish within the timeout")
+
+
+def test_reindex_rejects_wrong_admin_key(app_client):
+    assert app_client.post("/admin/reindex", headers=BAD_ADMIN_HEADERS).status_code == 401
+    assert app_client.get("/admin/reindex-status", headers=BAD_ADMIN_HEADERS).status_code == 401
+
+
+def test_reindex_runs_and_search_still_works(app_client):
+    # Search works before the rebuild.
+    assert app_client.get("/api/search?q=meditation").status_code == 200
+
+    r = app_client.post("/admin/reindex", headers=ADMIN_HEADERS)
+    assert r.status_code == 200
+    assert r.json()["state"] == "running"
+
+    st = _wait_reindex(app_client)
+    assert st["state"] == "done", st
+    assert st["total"] > 0
+    assert st["done"] == st["total"]
+
+    # Search still works after the atomic table swap.
+    after = app_client.get("/api/search?q=meditation")
+    assert after.status_code == 200
+    assert after.json()["total"] >= 1
+
+
+def test_reindex_syncs_the_exact_index_that_ingest_leaves_stale(app_client, tmp_path):
+    """The point of the button: bulk ingest populates the stemmed index but
+    NOT the exact one, so a freshly-ingested record is invisible to Exact
+    search until a rebuild. The reindex is what closes that gap."""
+    docx = tmp_path / "Reindex Proof ~ 01_LEN.docx"
+    make_docx(docx, title="Reindex Proof ~ 01",
+              body=["A uniquewordxyz marker paragraph."])
+    z = _make_zip({"Reindex Proof ~ 01_LEN.docx": docx})
+    r = app_client.post("/admin/upload-docx", headers=ADMIN_HEADERS,
+                        files={"file": ("c.zip", z, "application/zip")},
+                        data={"dry_run": "false"})
+    assert r.json()["processed"] == 1
+
+    # Exact search MISSES before a reindex (ingest never touched the exact table).
+    miss = app_client.get("/api/search?q=uniquewordxyz&exact=true")
+    assert miss.status_code == 200
+    assert miss.json()["total"] == 0
+
+    app_client.post("/admin/reindex", headers=ADMIN_HEADERS)
+    assert _wait_reindex(app_client)["state"] == "done"
+
+    # After the rebuild the exact index carries it.
+    hit = app_client.get("/api/search?q=uniquewordxyz&exact=true")
+    assert hit.status_code == 200
+    assert hit.json()["total"] == 1

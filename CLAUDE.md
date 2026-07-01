@@ -81,8 +81,17 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
 
 ## FTS5 tokenizer — CRITICAL CONFIG
 
-`scripts/build_fts.py:103-113` is the single source of truth. Any change here requires a
+`scripts/build_fts.py` `_TOKENIZER_STEMMED` / `_TOKENIZER_EXACT` (fed through
+`_create_fts_sql`) are the single source of truth. Any change here requires a
 **full index rebuild** on the VPS (~10-15 min for the full ~1.3M-paragraph corpus).
+
+> Two rebuild paths, both reusing that one DDL: `build()` (in-place, drops the
+> live tables — search is down while it runs; used by the CLI / deploy) and
+> `rebuild_no_downtime()` (builds `*_new` tables alongside the live ones, then
+> swaps them in via one atomic `ALTER TABLE … RENAME` transaction — search stays
+> up). The admin **"Rebuild search index"** button (`POST /admin/reindex`, polled
+> via `GET /admin/reindex-status`) runs the no-downtime path in a background
+> thread so an archivist can reindex without SSH. See Data freshness below.
 
 ```sql
 tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
@@ -421,9 +430,37 @@ dry-run.
 All-or-nothing transaction: any failure rolls back the whole batch. Supports
 dry-run.
 
+> **Record identity is `(title, language)`, matched normalisation-tolerantly.**
+> `_find_existing_event_id` (ingest_docx) tries a byte-exact title match first,
+> then falls back to a canonical compare (`_canonical_title`: NFC + whitespace
+> collapse + dash/tilde-family unification + casefold, same language). This
+> stops two visually-identical titles that differ only by an invisible character
+> from creating a **duplicate** event (Sugit's Issue 8, 2026-06-27 — two
+> "Sarvasar Upanishad ~ 07" English records). Consequence: two records that
+> must coexist under one event name (bilingual Hindi+English talks — Adhyatma /
+> Kaivalya / Sarvasar Upanishad, Samadhi Ke Sapt Dwar, Sadhana-Sutra) **cannot**
+> share a `(title, language)`; disambiguate the titles (e.g. "… (English parts)"
+> vs "… (Hindi parts)").
+>
+> **A `Delete/` of a record that doesn't exist now FAILS** (→ aborts the batch),
+> instead of the old "already absent — nothing to do" pass (Issue 7). Under
+> all-or-nothing a no-op delete almost always means a misfiled document. On any
+> failure the report + admin UI say **"Aborted — no records were changed"** and
+> the counts are labelled *attempted* (Issue 6).
+
 Both modes accept an optional **corpus version date** (e.g. `"2026-05-24"`)
 that is saved to `corpus_meta` on a successful non-dry-run and shown on the
 Help page as "Data version YYYY-MM-DD" via `CorpusVersionBadge`.
+
+**Rebuild search index** (`POST /admin/reindex`) — the FTS index is not fully
+maintained incrementally (ingest updates the stemmed table but not the exact
+one; deletes leave stale rows), so after a batch of edits the index must be
+rebuilt to match the tables. The admin UI's **"Rebuild search index"** button
+runs `build_fts.rebuild_no_downtime()` in a background thread (no search
+downtime) and reports progress via `GET /admin/reindex-status`. A single
+`_ADMIN_WRITE_LOCK` serialises reindex vs. ingest/batch-update so a rebuild's
+atomic table-swap never races a write (both ingest endpoints 409 while a
+reindex runs, and vice-versa).
 
 ### CLI (SSH required, for large corpus or scripting)
 
@@ -598,5 +635,5 @@ gitignored — moved between machines by rsync, never committed.
 5. Dead routes: `/ask`, `/nebula`, `/zen-tree` — return 404, should redirect to `/`
 6. `total_hits` over-reports for narrow NEAR (N < 20)
 7. Provisioning scripts (`02-setup-single-vps.sh`, `refresh-cloudflare-ips.sh`) live only on the box, not in the repo
-8. Stale FTS entries accumulate on each ingest without a full rebuild. Long-term fix: also `DELETE FROM paragraphs_fts WHERE paragraph_id = ?` when paragraphs are removed during batch-update / re-ingest. Short-term: run `build_fts.py` on VPS after each Antar batch (last full rebuild 2026-06-12).
+8. Stale FTS entries accumulate on each ingest without a full rebuild (ingest updates the stemmed table but not `paragraphs_fts_exact`; deletes leave stale rows). **Now self-serviceable:** the admin UI's **"Rebuild search index"** button (`POST /admin/reindex` → `build_fts.rebuild_no_downtime()`) rebuilds both tables with no search downtime, so no SSH is needed after a batch. Long-term nicety (not yet done): also maintain both FTS tables incrementally on each edit so the rebuild becomes optional rather than required.
 9. **Search latency floor** — broad cross-paragraph NEAR (3.6–10.8 s) and `मन की शांति` (~3 s) remain after PRs #105–#109. Further speedups need pagination (UX change) or a different FTS5-positions mechanism; deferred to keep results identical to OCTP.

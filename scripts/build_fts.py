@@ -96,65 +96,61 @@ def normalize_devanagari(text: str) -> str:
     return text
 
 
-# ─── Index builder ────────────────────────────────────────────────────────────
+# ─── FTS5 table definitions — SINGLE SOURCE OF TRUTH ──────────────────────────
+#
+# The two tokenizers below are THE authoritative tokenizer config for the whole
+# project (CLAUDE.md points here). Any change requires a full index rebuild on
+# the VPS. Both the in-place `build()` (CLI) and the no-downtime
+# `rebuild_no_downtime()` (admin button) construct their tables through
+# `_create_fts_sql` so the config is never duplicated / never drifts.
+#
+#   paragraphs_fts        — porter stemming (English) + Devanagari normalisation
+#                           at index time. Default search. "teach" matches
+#                           teacher / teaching / teaches; अनन्त matches अनंत.
+#   paragraphs_fts_exact  — no porter, no normalisation. Used when the UI sends
+#                           `exact=true` so reviewers can find a specific
+#                           spelling literally, the way OCTP and the CD-ROM do.
+_TOKENIZER_STEMMED = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
+_TOKENIZER_EXACT = "unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
 
-def build():
-    t0 = time.perf_counter()
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
 
-    print("Dropping existing FTS tables (if any)…", flush=True)
-    cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
-    cur.execute("DROP TABLE IF EXISTS paragraphs_fts_exact")
-    conn.commit()
-
-    # Two parallel FTS5 tables side by side:
-    #
-    #   paragraphs_fts        — porter stemming (English) + Devanagari
-    #                           normalisation at index time. Default search.
-    #                           "teach" matches teacher / teaching / teaches;
-    #                           अनन्त matches अनंत.
-    #   paragraphs_fts_exact  — no porter, no normalisation. Used when the
-    #                           UI sends `exact=true` so reviewers can find
-    #                           a specific spelling literally, the way OCTP
-    #                           and the CD-ROM do.
-    #
-    # Doubles disk usage but the row data is shared and FTS5's term index
-    # is compact, so the increase is modest (~30%) and the alternative —
-    # querying-time post-filtering — would be much slower and uglier.
-    print("Creating paragraphs_fts (porter + unicode61, Mn+Mc)…", flush=True)
-    cur.execute(
-        """
-        CREATE VIRTUAL TABLE paragraphs_fts USING fts5(
+def _create_fts_sql(table: str, tokenizer: str) -> str:
+    """DDL for one FTS5 table. `table`/`tokenizer` are trusted internal
+    constants (never user input) — f-string interpolation is safe here."""
+    return f"""
+        CREATE VIRTUAL TABLE {table} USING fts5(
             content,
             title       UNINDEXED,
             event_id    UNINDEXED,
             paragraph_id UNINDEXED,
             sequence_number UNINDEXED,
             title_search,
-            tokenize = "porter unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
+            tokenize = "{tokenizer}"
         )
-        """
-    )
-    print("Creating paragraphs_fts_exact (no porter, no normalisation)…", flush=True)
-    cur.execute(
-        """
-        CREATE VIRTUAL TABLE paragraphs_fts_exact USING fts5(
-            content,
-            title       UNINDEXED,
-            event_id    UNINDEXED,
-            paragraph_id UNINDEXED,
-            sequence_number UNINDEXED,
-            title_search,
-            tokenize = "unicode61 remove_diacritics 1 categories 'L* N* Co Mn Mc'"
-        )
-        """
-    )
-    conn.commit()
+    """
 
+
+def _populate_fts(conn, cur, fts_table: str, exact_table: str, progress=None) -> int:
+    """Fill the (already-created) stemmed + exact FTS tables from `paragraphs`.
+
+    Streams in batches so memory stays flat on the full ~1.3M-row corpus.
+    `progress(done, total)` is called after each committed batch. Returns the
+    total number of paragraphs indexed. The connection must be in autocommit
+    mode (isolation_level=None) — we manage each batch's transaction with an
+    explicit BEGIN/COMMIT so the writes are durable and the swap that may
+    follow is clean.
+    """
     (total,) = cur.execute("SELECT COUNT(*) FROM paragraphs").fetchone()
-    print(f"Indexing {total:,} paragraphs into both tables…", flush=True)
-
+    ins_stemmed = (
+        f"INSERT INTO {fts_table} "
+        "(content, title, event_id, paragraph_id, sequence_number, title_search) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    ins_exact = (
+        f"INSERT INTO {exact_table} "
+        "(content, title, event_id, paragraph_id, sequence_number, title_search) "
+        "VALUES (?, ?, ?, ?, ?, ?)"
+    )
     batch_size = 10_000
     inserted = 0
     offset = 0
@@ -183,42 +179,96 @@ def build():
             title_raw = r[4] or ''
             content_norm = normalize_devanagari(content_raw)
             title_norm = normalize_devanagari(title_raw)
-            normalised.append(
-                (content_norm, title_norm, r[1], r[0], r[2], title_norm)
-            )
-            exact.append(
-                (content_raw, title_raw, r[1], r[0], r[2], title_raw)
-            )
+            normalised.append((content_norm, title_norm, r[1], r[0], r[2], title_norm))
+            exact.append((content_raw, title_raw, r[1], r[0], r[2], title_raw))
 
-        cur.executemany(
-            """
-            INSERT INTO paragraphs_fts
-                (content, title, event_id, paragraph_id, sequence_number, title_search)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            normalised,
-        )
-        cur.executemany(
-            """
-            INSERT INTO paragraphs_fts_exact
-                (content, title, event_id, paragraph_id, sequence_number, title_search)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            exact,
-        )
-        conn.commit()
+        cur.execute("BEGIN")
+        cur.executemany(ins_stemmed, normalised)
+        cur.executemany(ins_exact, exact)
+        cur.execute("COMMIT")
 
         inserted += len(rows)
         offset += batch_size
-        pct = (inserted / total) * 100 if total else 100
-        print(f"  {inserted:,}/{total:,} ({pct:.1f}%)", flush=True)
+        if progress:
+            progress(inserted, total)
 
-    print("Optimising FTS indices…", flush=True)
-    cur.execute("INSERT INTO paragraphs_fts(paragraphs_fts) VALUES('optimize')")
-    cur.execute("INSERT INTO paragraphs_fts_exact(paragraphs_fts_exact) VALUES('optimize')")
-    conn.commit()
+    cur.execute("BEGIN")
+    cur.execute(f"INSERT INTO {fts_table}({fts_table}) VALUES('optimize')")
+    cur.execute(f"INSERT INTO {exact_table}({exact_table}) VALUES('optimize')")
+    cur.execute("COMMIT")
+    return total
+
+
+# ─── Index builders ───────────────────────────────────────────────────────────
+
+def build():
+    """In-place rebuild (CLI). Drops the live FTS tables and recreates them —
+    search is unavailable while it runs. Fine for the deploy/SSH path; the
+    admin button uses `rebuild_no_downtime()` instead."""
+    t0 = time.perf_counter()
+    conn = sqlite3.connect(DB_PATH, isolation_level=None)
+    cur = conn.cursor()
+
+    print("Dropping existing FTS tables (if any)…", flush=True)
+    cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
+    cur.execute("DROP TABLE IF EXISTS paragraphs_fts_exact")
+
+    print("Creating paragraphs_fts (porter + unicode61, Mn+Mc)…", flush=True)
+    cur.execute(_create_fts_sql("paragraphs_fts", _TOKENIZER_STEMMED))
+    print("Creating paragraphs_fts_exact (no porter, no normalisation)…", flush=True)
+    cur.execute(_create_fts_sql("paragraphs_fts_exact", _TOKENIZER_EXACT))
+
+    (total,) = cur.execute("SELECT COUNT(*) FROM paragraphs").fetchone()
+    print(f"Indexing {total:,} paragraphs into both tables…", flush=True)
+
+    def _p(done, tot):
+        pct = (done / tot) * 100 if tot else 100
+        print(f"  {done:,}/{tot:,} ({pct:.1f}%)", flush=True)
+
+    _populate_fts(conn, cur, "paragraphs_fts", "paragraphs_fts_exact", progress=_p)
     conn.close()
     print(f"Done in {time.perf_counter() - t0:.1f}s", flush=True)
+
+
+def rebuild_no_downtime(db_path: str = DB_PATH, progress=None) -> int:
+    """Rebuild both FTS tables with ZERO search downtime.
+
+    Builds fresh `*_new` tables alongside the live ones — search keeps serving
+    from the current index the entire time — then swaps them in atomically in a
+    single transaction. A reader on another connection sees either the old or
+    the new index, never a half-built one. Returns the paragraph count indexed.
+
+    `progress(done, total)` is called after each batch so the admin endpoint
+    can report a percentage. Callers MUST serialise this against ingest /
+    batch-update writes (a concurrent change to `paragraphs` mid-build would
+    make the new index inconsistent) — cloud_api does that with a lock.
+    """
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    cur = conn.cursor()
+    try:
+        # Clear any leftovers from a previously-interrupted rebuild.
+        cur.execute("DROP TABLE IF EXISTS paragraphs_fts_new")
+        cur.execute("DROP TABLE IF EXISTS paragraphs_fts_exact_new")
+
+        cur.execute(_create_fts_sql("paragraphs_fts_new", _TOKENIZER_STEMMED))
+        cur.execute(_create_fts_sql("paragraphs_fts_exact_new", _TOKENIZER_EXACT))
+
+        total = _populate_fts(
+            conn, cur, "paragraphs_fts_new", "paragraphs_fts_exact_new", progress=progress
+        )
+
+        # Atomic swap. DROP the live tables and RENAME the freshly-built ones
+        # into their place inside one transaction. FTS5 RENAME moves the shadow
+        # tables too; the whole thing commits or not as a unit.
+        cur.execute("BEGIN IMMEDIATE")
+        cur.execute("DROP TABLE IF EXISTS paragraphs_fts")
+        cur.execute("DROP TABLE IF EXISTS paragraphs_fts_exact")
+        cur.execute("ALTER TABLE paragraphs_fts_new RENAME TO paragraphs_fts")
+        cur.execute("ALTER TABLE paragraphs_fts_exact_new RENAME TO paragraphs_fts_exact")
+        cur.execute("COMMIT")
+        return total
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':
