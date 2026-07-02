@@ -393,3 +393,52 @@ def test_reindex_syncs_the_exact_index_that_ingest_leaves_stale(app_client, tmp_
     hit = app_client.get("/api/search?q=uniquewordxyz&exact=true")
     assert hit.status_code == 200
     assert hit.json()["total"] == 1
+
+
+# ── Importer hardening — Sugit's 2026-07-02 double-zip / mislabel incident ──
+
+
+def test_upload_docx_double_zip_rejected(app_client):
+    """A zip that contains only another zip (no .docx) is rejected loudly with a
+    'double-zipped' hint — never silently accepted as a 0-file success."""
+    inner = _make_zip({"talk.docx": b"stub"})
+    outer = _make_zip({"from X to Y/OCTP.zip": inner})
+    r = app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS,
+        files={"file": ("corpus.zip", outer, "application/zip")},
+        data={"dry_run": "true"},
+    )
+    assert r.status_code == 400
+    assert "double-zip" in r.json()["detail"].lower()
+
+
+def test_upload_docx_surfaces_title_content_warning(app_client, tmp_path):
+    """A file whose @title names a different discourse than its body imports but
+    is flagged in the response `warnings` (would have caught the Zen/Birthday)."""
+    docx = tmp_path / "zen.docx"
+    make_docx(docx, title="Zen The Path of Paradox Vol 1 ~ 01",
+              body=["Birthday Celebration 1978 ~ 01", "body text"])
+    z = _make_zip({"zen.docx": docx})
+    r = app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS,
+        files={"file": ("corpus.zip", z, "application/zip")},
+        data={"dry_run": "true"},
+    )
+    assert r.status_code == 200
+    d = r.json()
+    assert d["processed"] == 1
+    assert len(d["warnings"]) == 1
+    assert "mismatch" in d["warnings"][0]["warning"].lower()
+
+
+def test_batch_update_empty_folders_rejected(app_client):
+    """Add/Modify/Delete present but no .docx inside → rejected, not a silent
+    0-change 'success'."""
+    z = _make_zip({"Add/readme.txt": b"not a docx"})
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        files={"file": ("update.zip", z, "application/zip")},
+        data={"dry_run": "true"},
+    )
+    assert r.status_code == 400
+    assert "no .docx" in r.json()["detail"].lower()

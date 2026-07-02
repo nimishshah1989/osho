@@ -363,11 +363,13 @@ type CorpusMode = 'bulk' | 'update';
 interface BulkResult {
   ok: boolean; dry_run: boolean; processed: number; failed: number;
   corpus_version: string | null; failures: { file: string; error: string }[];
+  warnings?: { file: string; warning: string }[];
 }
 interface UpdateResult {
   ok: boolean; dry_run: boolean; corpus_version: string | null; report: string;
   added: number; modified: number; deleted: number; failed: number;
   failures: { action: string; file: string; error: string }[];
+  warnings?: { action: string; file: string; warning: string }[];
 }
 
 function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
@@ -487,6 +489,16 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
             {bulkResult.processed.toLocaleString()} talks ingested · {bulkResult.failed} failed
             {bulkResult.corpus_version ? ` · corpus version set to ${bulkResult.corpus_version}` : ''}
           </p>
+          {bulkResult.warnings && bulkResult.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded px-3 py-2 text-xs text-amber-900 space-y-1">
+              <p className="font-medium">⚠ {bulkResult.warnings.length} title/content warning{bulkResult.warnings.length !== 1 ? 's' : ''} — a file&apos;s header may name the wrong discourse. Check these before relying on the import:</p>
+              <ul className="space-y-0.5 font-mono max-h-40 overflow-y-auto">
+                {bulkResult.warnings.map((w, i) => (
+                  <li key={i} className="truncate" title={w.warning}>{w.file}: {w.warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {bulkResult.failures.length > 0 && (
             <div>
               <button type="button" onClick={() => setShowFailures((v) => !v)}
@@ -536,6 +548,16 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
           <pre className="bg-stone-50 border border-stone-200 rounded px-3 py-2 text-xs font-mono overflow-y-auto max-h-72 whitespace-pre-wrap">
             {updateResult.report}
           </pre>
+          {updateResult.warnings && updateResult.warnings.length > 0 && (
+            <div className="bg-amber-50 border border-amber-300 rounded px-3 py-2 text-xs text-amber-900 space-y-1">
+              <p className="font-medium">⚠ {updateResult.warnings.length} title/content warning{updateResult.warnings.length !== 1 ? 's' : ''} — a file&apos;s header may name the wrong discourse. Check these before relying on the import:</p>
+              <ul className="space-y-0.5 font-mono max-h-40 overflow-y-auto">
+                {updateResult.warnings.map((w, i) => (
+                  <li key={i} className="truncate" title={w.warning}>[{w.action}] {w.file}: {w.warning}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {updateResult.failures.length > 0 && (
             <div>
               <button type="button" onClick={() => setShowFailures((v) => !v)}

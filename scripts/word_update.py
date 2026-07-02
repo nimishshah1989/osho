@@ -44,6 +44,7 @@ from ingest_docx import (
     _ensure_source_short_column,
     _ensure_translated_from_column,
     _find_existing_event_id,
+    _title_content_warning,
     delete_record,
     parse_docx,
     parse_docx_header,
@@ -67,6 +68,7 @@ class FileResult:
     ok: bool
     summary: str  # short human-readable line for the report
     error: str | None = None
+    warning: str | None = None  # non-fatal note, e.g. a title/content mismatch
 
 
 @dataclass
@@ -79,6 +81,10 @@ class RunReport:
     @property
     def failed(self) -> list[FileResult]:
         return [r for r in self.results if not r.ok]
+
+    @property
+    def warnings(self) -> list[FileResult]:
+        return [r for r in self.results if r.warning]
 
     def render(self) -> str:
         out: list[str] = []
@@ -98,6 +104,8 @@ class RunReport:
                 out.append(f"{prefix}{r.summary}")
                 if r.error:
                     out.append(f"         {r.error}")
+                if r.warning:
+                    out.append(f"         ⚠ {r.warning}")
             out.append("")
         ok = sum(1 for r in self.results if r.ok)
         fail = len(self.results) - ok
@@ -112,7 +120,11 @@ class RunReport:
                 f"whole thing was rolled back. Fix the failing file(s) and re-run."
             )
         else:
-            out.append(f"Summary: {ok} ok across {len(self.results)} files.")
+            line = f"Summary: {ok} ok across {len(self.results)} files."
+            if self.warnings:
+                line += (f" ⚠ {len(self.warnings)} title/content mismatch "
+                         "warning(s) — check the flagged file(s).")
+            out.append(line)
         return "\n".join(out)
 
 
@@ -139,6 +151,7 @@ def _process_add(conn: sqlite3.Connection, path: Path) -> FileResult:
         path,
         True,
         f"{talk.title}  [{talk.language}]  ({len(talk.paragraphs)} paragraphs)",
+        warning=_title_content_warning(talk),
     )
 
 
@@ -162,6 +175,7 @@ def _process_modify(conn: sqlite3.Connection, path: Path) -> FileResult:
         path,
         True,
         f"{talk.title}  [{talk.language}]  ({len(talk.paragraphs)} paragraphs)",
+        warning=_title_content_warning(talk),
     )
 
 
@@ -287,6 +301,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     report = run_update(args.root, args.db, dry_run=args.dry_run)
+    # Loudly FAIL (exit 2) if the folders exist but hold no .docx — a batch that
+    # processed nothing almost always means a bad/empty/double-zipped upload, and
+    # silently "succeeding" is what hid Sugit's 2026-07-02 incident.
+    if not report.results:
+        print(
+            f"ERROR: no .docx files found in Add/, Modify/ or Delete/ under "
+            f"{args.root} — nothing to process (is the archive empty or "
+            f"double-zipped?).",
+            file=sys.stderr,
+        )
+        return 2
     print(report.render())
     if args.dry_run:
         print("(dry-run — no changes written)")

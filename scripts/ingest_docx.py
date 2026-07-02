@@ -341,6 +341,43 @@ def _canonical_title(title: str) -> str:
     return s.casefold()
 
 
+# The "(English parts)"/"(Hindi parts)" qualifier is added to the *record title*
+# during bilingual splits, but the discourse title inside the body text keeps the
+# base name — so strip it before comparing a title to its body's first line.
+_TITLE_PARTS_RE = re.compile(r"\s*\((?:english|hindi)\s+parts\)", re.IGNORECASE)
+
+
+def _strip_parts(title: str) -> str:
+    return _TITLE_PARTS_RE.sub("", title or "")
+
+
+def _looks_like_title_line(text: str) -> bool:
+    """True if `text` reads like a discourse-title line ("… ~ NN", short, Latin
+    — the form OCTP bodies open with)."""
+    s = (text or "").strip()
+    return bool(s) and "~" in s and len(s) < 80 and sum(c.isascii() for c in s) > 0.8 * len(s)
+
+
+def _title_content_warning(talk: "TalkRecord") -> str | None:
+    """Catch a mislabeled header block — Sugit's 2026-07-02 incident, where a
+    file named `Zen … _LHI.docx` carried `@title=Birthday Celebration 1978 ~ 01`
+    on Zen content. That created a bogus record and left the real one stale.
+
+    If the first body line is a discourse-title line naming a DIFFERENT talk than
+    `@title` (ignoring the (parts) qualifier), return a warning string. Non-fatal
+    — the operator decides — but it never again passes silently. Returns None
+    when the title and body agree or the body doesn't open with a title line."""
+    if not talk.paragraphs:
+        return None
+    first = talk.paragraphs[0].text.strip()
+    if not _looks_like_title_line(first):
+        return None
+    if _canonical_title(_strip_parts(talk.title)) != _canonical_title(_strip_parts(first)):
+        return (f"title/content mismatch — @title={talk.title!r} but the text "
+                f"opens with {first!r}; this header may belong to a different discourse")
+    return None
+
+
 def _find_existing_event_id(conn: sqlite3.Connection, title: str, language: str) -> str | None:
     # Fast path: a byte-exact match hits the events(title) lookup and covers
     # the overwhelmingly common case (re-ingesting the same files unchanged).
@@ -490,6 +527,24 @@ def _walk(path: Path) -> list[Path]:
     return sorted(p for p in path.rglob("*.docx") if not p.name.startswith("~$"))
 
 
+def describe_no_docx(path: Path) -> str:
+    """A clear, actionable message for the 'nothing to ingest' case — which used
+    to pass as a silent success (Sugit's 2026-07-02 double-zip: the upload held a
+    zip *inside* a zip, so 0 .docx were found and the run reported DONE having
+    changed nothing). Flags a nested zip specifically."""
+    nested = list(path.rglob("*.zip"))[:3] if path.is_dir() else []
+    msg = f"No .docx files found under {path}."
+    if nested:
+        names = ", ".join(z.name for z in nested)
+        msg += (f" It contains a zip *inside* it ({names}) — this looks"
+                " double-zipped. Extract that inner zip (or upload a flat .zip of"
+                " .docx files) and try again.")
+    else:
+        msg += (" Expected Word .docx files — check the archive isn't empty or in"
+                " a different format.")
+    return msg
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("path", type=Path, help="A .docx file, or a directory to walk")
@@ -503,11 +558,15 @@ def main(argv: list[str] | None = None) -> int:
 
     files = _walk(args.path)
     if not files:
-        print(f"No .docx files found under {args.path}", file=sys.stderr)
-        return 0
+        # Loudly FAIL (exit 2), never silently succeed: a run that ingests
+        # nothing almost always means a bad upload (double-zip, empty, wrong
+        # format), and reporting success hid Sugit's whole 2026-07-02 incident.
+        print(f"ERROR: {describe_no_docx(args.path)}", file=sys.stderr)
+        return 2
 
     print(f"Found {len(files)} .docx file(s)")
 
+    warn_count = 0
     if args.dry_run:
         for f in files:
             try:
@@ -516,8 +575,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"  OK   {f.name}: title={talk.title!r} "
                     f"language={talk.language} paragraphs={len(talk.paragraphs)}"
                 )
+                w = _title_content_warning(talk)
+                if w:
+                    warn_count += 1
+                    print(f"  WARN {f.name}: {w}", file=sys.stderr)
             except Exception as ex:
                 print(f"  FAIL {f.name}: {ex}")
+        if warn_count:
+            print(f"\n⚠ {warn_count} file(s) have a title/content mismatch — review before a real run.", file=sys.stderr)
         return 0
 
     if not args.db.exists():
@@ -534,6 +599,10 @@ def main(argv: list[str] | None = None) -> int:
         for f in files:
             try:
                 talk = parse_docx(f)
+                w = _title_content_warning(talk)
+                if w:
+                    warn_count += 1
+                    print(f"  WARN   {f.name}: {w}", file=sys.stderr)
                 _, created_new = upsert(conn, talk)
                 if created_new:
                     new_count += 1
@@ -547,8 +616,11 @@ def main(argv: list[str] | None = None) -> int:
         conn.commit()
 
     print(
-        f"\nDone: {new_count} new, {updated_count} updated, {failed_count} failed."
+        f"\nDone: {new_count} new, {updated_count} updated, {failed_count} failed"
+        f"{f', {warn_count} warning(s)' if warn_count else ''}."
     )
+    if warn_count:
+        print(f"⚠ {warn_count} file(s) had a title/content mismatch — check them (a header may name the wrong discourse).", file=sys.stderr)
     if failed_count:
         return 1
     return 0

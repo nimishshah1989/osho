@@ -519,6 +519,23 @@ gitignored — moved between machines by rsync, never committed.
    #105–#109), **never** loosening the matching logic. Every change to this path
    must keep `total` and `hit-count` byte-identical to OCTP — re-run the parity
    harness (`scripts/tests/test_search.py`, `engine.test.ts`) before shipping.
+9. **Ingest silently no-op'd on a double-zipped upload** (Sugit, 2026-07-02). A
+   159 MB upload was a **zip inside a zip**, so the importer found 0 `.docx`,
+   changed nothing, and reported "DONE" — looking like a success. Root cause was
+   an importer that treated "0 files" as exit 0. Fixed: `ingest_docx.main()` and
+   `word_update.main()` now **exit 2** on 0 files (`describe_no_docx` flags a
+   nested zip specifically), and `/admin/upload-docx` + `/admin/batch-update`
+   **400** with a "double-zipped — upload the inner zip" hint. Separately, one
+   `.docx` had a **mismatched `@title` header** (`Zen … _LHI.docx` carried
+   `@title=Birthday Celebration 1978 ~ 01` on Zen content), which the
+   `(title, language)` upsert turned into a bogus record + a stale real one.
+   `_title_content_warning` now flags any file whose first body line names a
+   different discourse than `@title` (ignoring the `(parts)` qualifier) — a
+   **non-fatal warning** surfaced in the CLI, the report, and the admin UI's
+   `warnings` list. Lesson: an importer must fail loudly on "ingested nothing",
+   and title-vs-body divergence is the tell for a mislabeled Word file. A
+   whole-archive sweep for these is a `ROW_NUMBER() … PARTITION BY event_id`
+   query comparing `events.title` to `paragraphs` seq-0 (base titles).
 
 ---
 

@@ -2231,6 +2231,7 @@ async def admin_upload_docx(
     processed = 0
     failed = 0
     failures: list[dict] = []
+    warnings: list[dict] = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
@@ -2253,7 +2254,16 @@ async def admin_upload_docx(
                 docx_paths.append(os.path.join(dirpath, fn))
 
         if not docx_paths:
-            raise HTTPException(status_code=400, detail="No .docx files found in zip")
+            # Never accept a no-op upload silently. Flag a nested zip specifically
+            # — the classic double-zip that made tonight's import a silent no-op.
+            nested = [f for _, _, fns in os.walk(tmpdir)
+                      for f in fns if f.lower().endswith(".zip")]
+            detail = "No .docx files found in the zip."
+            if nested:
+                detail += (f" It contains {len(nested)} nested .zip file(s) "
+                           f"(e.g. '{nested[0]}') — it looks double-zipped. Upload "
+                           "the INNER zip (a flat .zip of .docx files) directly.")
+            raise HTTPException(status_code=400, detail=detail)
 
         with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
             _ingest._ensure_translated_from_column(conn)
@@ -2268,6 +2278,9 @@ async def admin_upload_docx(
                     _ingest.upsert(conn, talk)
                     conn.execute("RELEASE SAVEPOINT sp_file")
                     processed += 1
+                    w = _ingest._title_content_warning(talk)
+                    if w and len(warnings) < 50:
+                        warnings.append({"file": rel_path, "warning": w})
                 except Exception as ex:
                     conn.execute("ROLLBACK TO SAVEPOINT sp_file")
                     conn.execute("RELEASE SAVEPOINT sp_file")
@@ -2295,6 +2308,7 @@ async def admin_upload_docx(
         "failed": failed,
         "corpus_version": saved_version,
         "failures": failures,
+        "warnings": warnings,
     }
 
 
@@ -2335,16 +2349,27 @@ async def admin_batch_update(
 
         update_root = _find_update_root(tmpdir)
         if not update_root:
-            raise HTTPException(
-                status_code=400,
-                detail="Zip must contain Add/, Modify/, or Delete/ subfolders",
-            )
+            nested = [f for _, _, fns in os.walk(tmpdir)
+                      for f in fns if f.lower().endswith(".zip")]
+            detail = "Zip must contain Add/, Modify/, or Delete/ subfolders."
+            if nested:
+                detail += (f" It contains a nested .zip (e.g. '{nested[0]}') — it "
+                           "looks double-zipped; upload the INNER zip directly.")
+            raise HTTPException(status_code=400, detail=detail)
 
         import pathlib
         report = run_update(
             pathlib.Path(update_root),
             pathlib.Path(DB_PATH),
             dry_run=is_dry_run,
+        )
+
+    # Never accept a no-op batch silently: folders present but no .docx inside.
+    if not report.results:
+        raise HTTPException(
+            status_code=400,
+            detail="Found Add/Modify/Delete folders but no .docx files inside them "
+                   "— nothing to process (empty or double-zipped upload?).",
         )
 
     counts: dict[str, int] = {a.value: 0 for a in UpdateAction}
@@ -2370,6 +2395,11 @@ async def admin_batch_update(
             _set_corpus_meta(conn, "corpus_version", cv)
         saved_version = cv
 
+    warnings = [
+        {"action": r.action.value, "file": r.path.name, "warning": r.warning}
+        for r in report.warnings
+    ][:50]
+
     return {
         "ok": True,
         "dry_run": is_dry_run,
@@ -2380,6 +2410,7 @@ async def admin_batch_update(
         "deleted": counts.get("Delete", 0),
         "failed": failed,
         "failures": failures,
+        "warnings": warnings,
     }
 
 
