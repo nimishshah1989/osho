@@ -21,6 +21,9 @@ from scripts.ingest_docx import (  # noqa: E402
     TalkRecord,
     _canonical_title,
     _normalise_role,
+    _title_content_warning,
+    describe_no_docx,
+    main as ingest_main,
     parse_docx,
     upsert,
     _ensure_role_column,
@@ -416,3 +419,58 @@ def test_misnamed_file_upserts_by_internal_title_not_filename(tmp_path):
             ).fetchall()
         ]
     assert titles == ["A Rose Is a Rose ~ 01"], "filename leaked into record identity"
+
+
+# ── Importer hardening — Sugit's 2026-07-02 double-zip / mislabel incident ──
+
+
+def test_title_content_warning_flags_cross_discourse_header():
+    """A file whose @title names a different discourse than its body text gets
+    a warning (the Zen/Birthday mislabel). Matching titles, the (parts)
+    qualifier, and non-title body openings do NOT warn."""
+    mismatch = TalkRecord(
+        title="Zen The Path of Paradox Vol 1 ~ 01", language="Hindi",
+        paragraphs=[Paragraph("Birthday Celebration 1978 ~ 01"), Paragraph("body")])
+    assert _title_content_warning(mismatch) is not None
+
+    ok = TalkRecord(
+        title="Zen The Path of Paradox Vol 1 ~ 01", language="Hindi",
+        paragraphs=[Paragraph("Zen The Path of Paradox Vol 1 ~ 01")])
+    assert _title_content_warning(ok) is None
+
+    # The intended "(English parts)" rename: title has the qualifier, body has
+    # the base name — same discourse, must NOT warn.
+    parts = TalkRecord(
+        title="Adhyatma Upanishad (English parts) ~ 08", language="English",
+        paragraphs=[Paragraph("Adhyatma Upanishad ~ 08")])
+    assert _title_content_warning(parts) is None
+
+    # Body doesn't open with a title-like line → nothing to compare, no warning.
+    prose = TalkRecord(
+        title="Zen ~ 01", language="English",
+        paragraphs=[Paragraph("Once upon a time a master spoke at length of silence.")])
+    assert _title_content_warning(prose) is None
+
+
+def test_describe_no_docx_flags_nested_zip(tmp_path):
+    (tmp_path / "inner.zip").write_bytes(b"PK\x03\x04stub")
+    assert "double-zip" in describe_no_docx(tmp_path).lower()
+    empty = tmp_path / "empty"; empty.mkdir()
+    assert "double-zip" not in describe_no_docx(empty).lower()
+
+
+def test_ingest_main_fails_loudly_on_no_docx(tmp_path, capsys):
+    """The core safety net: a run that finds no .docx exits non-zero instead of
+    reporting a silent success (which hid the whole 2026-07-02 incident)."""
+    empty = tmp_path / "empty"; empty.mkdir()
+    rc = ingest_main([str(empty)])
+    assert rc == 2
+    assert "No .docx" in capsys.readouterr().err
+
+
+def test_ingest_main_double_zip_message(tmp_path, capsys):
+    d = tmp_path / "batch"; d.mkdir()
+    (d / "OCTP.zip").write_bytes(b"PK\x03\x04stub")
+    rc = ingest_main([str(d)])
+    assert rc == 2
+    assert "double-zip" in capsys.readouterr().err.lower()

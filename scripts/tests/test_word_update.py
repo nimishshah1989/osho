@@ -20,7 +20,7 @@ SCRIPTS_DIR = os.path.join(BASE_DIR, "scripts")
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
-from word_update import Action, run_update  # noqa: E402
+from word_update import Action, run_update, main as word_main  # noqa: E402
 from _helpers import make_docx  # noqa: E402  — shared `.docx` builder
 
 
@@ -320,3 +320,41 @@ def test_dry_run_writes_nothing(tmp_path):
     assert not report.failed
     # The report says ok, but the DB must be untouched.
     assert not _record_exists(str(db), "Dry Run Add", "English")
+
+
+# ─── Importer hardening (2026-07-02 incident) ────────────────────────────
+
+
+def test_add_flags_title_content_mismatch(tmp_path):
+    """A file whose @title names a different discourse than its body still
+    imports, but carries a warning that surfaces in the report (the mislabeled
+    Zen/Birthday header)."""
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    root = _build_root(
+        tmp_path,
+        adds=[{"title": "Zen The Path of Paradox Vol 1 ~ 01", "language": "EN",
+               "body_paragraphs": ["Birthday Celebration 1978 ~ 01", "content"]}],
+    )
+    report = run_update(root, db)
+    assert not report.failed
+    assert len(report.warnings) == 1
+    assert "mismatch" in (report.warnings[0].warning or "").lower()
+    assert "⚠" in report.render()
+
+
+def test_empty_batch_has_no_results(tmp_path):
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    root = _build_root(tmp_path)  # Add/Modify/Delete created but empty
+    report = run_update(root, db)
+    assert report.results == []
+
+
+def test_main_fails_loudly_on_empty_batch(tmp_path, capsys):
+    db = tmp_path / "test.db"
+    _seed_minimal_db(str(db))
+    root = _build_root(tmp_path)  # empty Add/Modify/Delete
+    rc = word_main([str(root), "--db", str(db)])
+    assert rc == 2
+    assert "no .docx" in capsys.readouterr().err.lower()
