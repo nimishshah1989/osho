@@ -253,6 +253,10 @@ function SearchPageInner() {
   // Set to true when the user navigates cross-discourse while details are open;
   // cleared after the new discourse mounts and details are programmatically opened.
   const pendingOpenDetailsRef = useRef(false);
+  // When the panel is opened programmatically as the default-open on a fresh
+  // discourse, suppress the toggle handler's scroll-to-first-match so the view
+  // stays on the title + top matches instead of jumping into the body.
+  const suppressToggleScrollRef = useRef(false);
   // Result-list <button> elements keyed by event_id, so keyboard navigation
   // can scroll the active record into view in the left list (Sugit #19).
   const resultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -317,6 +321,17 @@ function SearchPageInner() {
   const pendingJumpRef = useRef<'first' | 'last' | null>(null);
 
   useEffect(() => {
+    // Open the full-record panel by DEFAULT whenever a discourse loads, so the
+    // reader and the Prev/Next hit-nav appear without clicking "Show entire
+    // record" (Nimish 2026-07-03). A manual collapse sticks until you move to
+    // another discourse. Cross-discourse arrow-nav (pendingOpenDetailsRef) keeps
+    // its scroll-to-match; a plain selection suppresses it so the view stays on
+    // the title + top matches instead of jumping into the body.
+    if (discourseDetailsRef.current) {
+      suppressToggleScrollRef.current = !pendingOpenDetailsRef.current;
+      discourseDetailsRef.current.open = true;
+      pendingOpenDetailsRef.current = false;
+    }
     if (matchIndices.length === 0) {
       setCurrentMatchPos(0);
       pendingJumpRef.current = null;
@@ -326,12 +341,6 @@ function SearchPageInner() {
       pendingJumpRef.current === 'last' ? matchIndices.length - 1 : 0;
     setCurrentMatchPos(pos);
     pendingJumpRef.current = null;
-    // When the user arrow-navigated cross-discourse while details were open,
-    // re-open the details panel in the new discourse automatically.
-    if (pendingOpenDetailsRef.current && discourseDetailsRef.current) {
-      discourseDetailsRef.current.open = true;
-      pendingOpenDetailsRef.current = false;
-    }
   }, [matchIndices]);
 
   const jumpToMatch = useCallback(
@@ -671,6 +680,12 @@ function SearchPageInner() {
 
   const handleDetailsToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
     if (e.currentTarget.open && firstMatchRef.current) {
+      // Default-open on a fresh discourse must not yank the view into the body;
+      // only a manual open or cross-discourse nav scrolls to the first match.
+      if (suppressToggleScrollRef.current) {
+        suppressToggleScrollRef.current = false;
+        return;
+      }
       setTimeout(() => {
         firstMatchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 60);
