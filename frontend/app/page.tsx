@@ -1185,7 +1185,7 @@ function SearchPageInner() {
                           Per-paragraph gaps come from paragraphGapClass so the
                           event-info header reads as one tight block and Osho's
                           paragraphs flow book-style with no blank line (#31/#33). */}
-                      <div className="mt-4 discourse-body whitespace-pre-wrap text-stone-800 dark:text-ivory/90 leading-relaxed text-[17px]">
+                      <div className="mt-4 pb-4 discourse-body whitespace-pre-wrap text-stone-800 dark:text-ivory/90 leading-relaxed text-[17px]">
                         {(() => {
                           // First body paragraph after the leading metadata
                           // header block — gets extra space above it (#31).
@@ -1247,12 +1247,14 @@ function SearchPageInner() {
                         })()}
                       </div>
 
-                      {/* Floating hit navigation — sticks to bottom of discourse pane.
-                          Prev / Next cross into the adjacent record once the current
-                          record's matches are exhausted (Sugit 2026-05-16, matches
-                          OCTP and CD-ROM behaviour). Buttons are only disabled when
-                          we're at the very first / last match of the very first / last
-                          record in the result list. */}
+                      {/* Hit-navigation footer — a SOLID bar pinned to the bottom of the
+                          discourse pane (Nimish 2026-07-03: the old translucent floating
+                          pill let text show through and overlapped the words, and was
+                          easy to miss). Prev / Next cross into the adjacent record once
+                          the current record's matches are exhausted (Sugit 2026-05-16,
+                          matches OCTP and CD-ROM behaviour). Buttons are only disabled
+                          when we're at the very first / last match of the very first /
+                          last record in the result list. */}
                       {matchIndices.length > 0 && (() => {
                         const totalEvents = results?.events.length ?? 0;
                         const atFirstEvent = selectedIdx <= 0;
@@ -1262,13 +1264,13 @@ function SearchPageInner() {
                         const prevDisabled = atFirstMatch && atFirstEvent;
                         const nextDisabled = atLastMatch && atLastEvent;
                         return (
-                          <div className="sticky bottom-3 z-20 mt-6 flex justify-center pointer-events-none">
-                            <div className="pointer-events-auto flex items-center gap-1 text-[11px] tracking-[0.2em] uppercase backdrop-blur-md bg-[rgb(var(--bg))]/85 border border-gold/40 rounded-full px-2 py-1 shadow-lg shadow-black/20">
+                          <div className="sticky bottom-0 z-20 mt-8 flex justify-center border-t border-gold/25 bg-[rgb(var(--bg))] py-2.5">
+                            <div className="flex items-center gap-1 text-[12px] tracking-[0.15em] uppercase bg-[rgb(var(--bg))] border border-gold/40 rounded-full px-1.5 py-0.5 shadow-sm">
                               <button
                                 type="button"
                                 onClick={() => jumpToMatchAcross(-1)}
                                 disabled={prevDisabled}
-                                className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                                className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
                                 aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
                                 title={locale === 'hi' ? 'पिछला मिलान (←)' : 'Previous match (←)'}
                               >
@@ -1284,7 +1286,7 @@ function SearchPageInner() {
                                 type="button"
                                 onClick={() => jumpToMatchAcross(1)}
                                 disabled={nextDisabled}
-                                className="px-2.5 py-1 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                                className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
                                 aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
                                 title={locale === 'hi' ? 'अगला मिलान (→)' : 'Next match (→)'}
                               >
