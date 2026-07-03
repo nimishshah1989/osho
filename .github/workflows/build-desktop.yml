@@ -108,3 +108,47 @@ jobs:
             desktop/dist/*.dmg
             desktop/dist/*.exe
           if-no-files-found: error
+
+  # Publish the installers as assets on a stable GitHub Release. End users
+  # then download them over GitHub's fast release CDN (Fastly) instead of
+  # the slow, non-CDN Actions "Artifacts" blob storage — the latter can
+  # crawl for hours, especially from outside the US. The offline corpus is
+  # already distributed this way (corpus-latest); this gives the desktop
+  # installers the same fast, stable download URLs:
+  #   https://github.com/<owner>/<repo>/releases/download/desktop-latest/<file>
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download both installers built in this run
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+
+      - name: Publish installers to the desktop-latest release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          echo "Installers built in this run:"
+          find installers -type f \( -name '*.dmg' -o -name '*.exe' \) -print
+
+          # Create the rolling release once (ignore the error when it
+          # already exists), then overwrite its assets below.
+          gh release create desktop-latest \
+            --title "Osho Archives — Desktop app (latest)" \
+            --notes "Latest macOS (.dmg) and Windows (.exe) installers. Offline-first: the full discourse archive is bundled, so no internet is needed after install." \
+            || true
+
+          # -print0 / read -d '' so filenames with spaces (electron-builder
+          # names them "Osho Archives ...") upload correctly. --clobber
+          # overwrites the previous copy so the URLs stay stable.
+          find installers -type f \( -name '*.dmg' -o -name '*.exe' \) -print0 \
+            | while IFS= read -r -d '' f; do
+                echo "Uploading: $f"
+                gh release upload desktop-latest "$f" --clobber
+              done
+
+          echo "Assets: https://github.com/${GH_REPO}/releases/tag/desktop-latest"
