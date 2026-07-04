@@ -1,6 +1,7 @@
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
+import csv
 import heapq
 import io
 import math
@@ -2196,6 +2197,38 @@ def admin_reindex_status(request: Request):
     _check_admin(request)
     with _reindex_status_lock:
         return dict(_reindex_status)
+
+
+@app.get("/admin/records-csv")
+def admin_records_csv(request: Request):
+    """Dump every record as CSV (title;language) for corpus-consistency
+    checks — lets an archivist diff the live corpus against a source file
+    list. Admin-gated, read-only (no write lock needed).
+
+    The CSV is returned *inside* a JSON envelope so it rides the existing
+    /api/admin/* JSON proxy unchanged; the browser turns `csv` into a
+    download. Semicolon-delimited so Excel (esp. European locales) opens it
+    cleanly; csv.writer quotes any title that itself contains ';', '"' or a
+    newline. The frontend prepends a UTF-8 BOM so Devanagari titles render."""
+    _check_admin(request)
+    if not os.path.exists(DB_PATH):
+        return {"ok": True, "count": 0, "corpus_version": None,
+                "csv": "title;language\r\n"}
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
+        rows = conn.execute(
+            "SELECT title, COALESCE(language, '') FROM events"
+            " WHERE title IS NOT NULL AND TRIM(title) != ''"
+            " ORDER BY LOWER(COALESCE(language, '')), title"
+        ).fetchall()
+        corpus_version = (_get_corpus_meta(conn, "corpus_version")
+                          if _table_exists(conn, "corpus_meta") else None)
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";", quoting=csv.QUOTE_MINIMAL,
+                        lineterminator="\r\n")
+    writer.writerow(["title", "language"])
+    writer.writerows(rows)
+    return {"ok": True, "count": len(rows),
+            "corpus_version": corpus_version, "csv": buf.getvalue()}
 
 
 @app.post("/admin/upload-docx")
