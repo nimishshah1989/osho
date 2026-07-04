@@ -395,6 +395,69 @@ def test_reindex_syncs_the_exact_index_that_ingest_leaves_stale(app_client, tmp_
     assert hit.json()["total"] == 1
 
 
+# ── /admin/records-csv (dump title;language for corpus reconciliation) ────────
+
+
+def test_records_csv_rejects_wrong_admin_key(app_client):
+    assert (
+        app_client.get("/admin/records-csv", headers=BAD_ADMIN_HEADERS).status_code
+        == 401
+    )
+
+
+def test_records_csv_dumps_every_record(app_client):
+    r = app_client.get("/admin/records-csv", headers=ADMIN_HEADERS)
+    assert r.status_code == 200
+    d = r.json()
+
+    # The count matches the number of titled events the admin list reports,
+    # so the dump can't silently drop or duplicate records.
+    events_total = app_client.get(
+        "/admin/events?per_page=1", headers=ADMIN_HEADERS
+    ).json()["total"]
+    assert d["count"] == events_total
+    assert d["count"] >= 17  # sanity: the seed corpus
+
+    lines = d["csv"].splitlines()
+    assert lines[0] == "title;language"          # header first
+    assert len(lines) == d["count"] + 1          # then one row per record
+
+    # Known English + Hindi records are present, semicolon-delimited.
+    assert "The Book of Secrets ~ 01;English" in lines
+    assert "Dekh Kabira Roya ~ 17;Hindi" in lines
+
+    # Rows are grouped by language (ORDER BY language, title) — English before
+    # Hindi — which is what makes the file easy to diff against source folders.
+    langs = [ln.rsplit(";", 1)[1] for ln in lines[1:]]
+    first_hindi = langs.index("Hindi")
+    assert all(l == "English" for l in langs[:first_hindi])
+    assert all(l == "Hindi" for l in langs[first_hindi:])
+
+
+def test_records_csv_quotes_a_title_containing_the_delimiter(app_client, tmp_path):
+    """A title that itself contains ';' must be CSV-quoted, so a stray
+    delimiter can't split one record into a phantom extra column."""
+    docx = tmp_path / "weird.docx"
+    make_docx(docx, title="Weird; Title ~ 01")
+    z = _make_zip({"weird.docx": docx})
+    app_client.post(
+        "/admin/upload-docx",
+        headers=ADMIN_HEADERS,
+        files={"file": ("c.zip", z, "application/zip")},
+        data={"dry_run": "false"},
+    )
+
+    csv_text = app_client.get("/admin/records-csv", headers=ADMIN_HEADERS).json()["csv"]
+    assert '"Weird; Title ~ 01"' in csv_text  # the field is quoted
+
+    # And it round-trips through a real CSV parser into exactly two columns.
+    import csv as _csv
+
+    rows = list(_csv.reader(io.StringIO(csv_text), delimiter=";"))
+    weird = [row for row in rows if row and row[0] == "Weird; Title ~ 01"]
+    assert len(weird) == 1 and len(weird[0]) == 2
+
+
 # ── Importer hardening — Sugit's 2026-07-02 double-zip / mislabel incident ──
 
 

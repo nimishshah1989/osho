@@ -577,6 +577,7 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
       )}
 
       <ReindexPanel adminKey={adminKey} />
+      <RecordsCsvPanel adminKey={adminKey} />
     </div>
   );
 }
@@ -678,6 +679,78 @@ function ReindexPanel({ adminKey }: { adminKey: string }) {
             {running && status.total > 0 ? ` · ${pct}%` : ''}
           </p>
         </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── Dump records to CSV ──────────────────────────────────────────────────────
+
+function RecordsCsvPanel({ adminKey }: { adminKey: string }) {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD, local-agnostic
+  const [filename, setFilename] = useState(`osho-records-${today}.csv`);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [count, setCount] = useState<number | null>(null);
+
+  const dump = async () => {
+    setError(null); setCount(null); setBusy(true);
+    try {
+      const res = await api('records-csv', adminKey);
+      const data = await res.json();
+      if (!res.ok) { setError(data.detail ?? 'Could not generate the dump.'); return; }
+
+      // Prepend a UTF-8 BOM (U+FEFF) so Excel renders the Devanagari (Hindi)
+      // titles correctly instead of mojibake.
+      const BOM = String.fromCharCode(0xfeff);
+      const blob = new Blob([BOM + (data.csv ?? '')], { type: 'text/csv;charset=utf-8' });
+      let name = (filename || 'osho-records.csv').trim();
+      if (!name.toLowerCase().endsWith('.csv')) name += '.csv';
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      setCount(data.count ?? 0);
+    } catch {
+      setError('Network error — could not reach the server.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border border-stone-200 rounded-lg p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-stone-700">Dump records to CSV</h3>
+        <p className="text-[13px] text-stone-500 mt-1">
+          Downloads every record as a two-column CSV (<code>title;language</code>) — one row per record,
+          grouped by language. Handy for reconciling the corpus against a source file list.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={filename}
+          onChange={(e) => setFilename(e.target.value)}
+          placeholder="osho-records.csv"
+          aria-label="Name of the dump"
+          className="flex-1 min-w-[220px] px-3 py-2 border border-stone-300 rounded text-sm text-stone-800 [color-scheme:light]"
+        />
+        <button type="button" onClick={dump} disabled={busy}
+          className="px-5 py-2 bg-stone-700 text-white text-sm rounded hover:bg-stone-800 disabled:opacity-50 transition-colors">
+          {busy ? 'Preparing…' : 'Dump records to CSV'}
+        </button>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {count !== null && (
+        <p className="text-sm font-medium text-green-700">
+          ✓ Downloaded {count.toLocaleString()} records.
+        </p>
       )}
     </div>
   );

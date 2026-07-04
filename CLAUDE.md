@@ -462,6 +462,18 @@ downtime) and reports progress via `GET /admin/reindex-status`. A single
 atomic table-swap never races a write (both ingest endpoints 409 while a
 reindex runs, and vice-versa).
 
+**Dump records to CSV** (`GET /admin/records-csv`) — read-only export of every
+record as `title;language` (semicolon-delimited so Excel opens it cleanly, one
+row per record, grouped by language) for reconciling the live corpus against a
+source file list. The CSV rides back *inside a JSON envelope* (`{ok, count,
+corpus_version, csv}`) so it passes through the existing `/api/admin/*` JSON
+proxy (`frontend/app/api/admin/[...path]/route.ts`, which does `res.json()`)
+unchanged; the admin UI's **"Dump records to CSV"** button (under "Rebuild
+search index") prepends a UTF-8 BOM so Devanagari titles render in Excel and
+saves it under a user-chosen filename. `csv.writer(QUOTE_MINIMAL)` quotes any
+title containing `;`, `"` or a newline. Added 2026-07-04 for Sugit's
+corpus-count reconciliation (source files vs. live records off by a handful).
+
 ### CLI (SSH required, for large corpus or scripting)
 
 **Bulk `.docx`**: `python3 scripts/ingest_docx.py <dir>` (walks recursively;
