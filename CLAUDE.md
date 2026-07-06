@@ -163,6 +163,38 @@ within one FTS5 row (= one paragraph).
 - `hasBackendHl` flag suppresses the regex fallback in non-matching paragraphs of the
   full-discourse view — otherwise NEAR queries over-highlight standalone words.
 
+**Result navigation (Prev/Next) — the churn magnet.** The reader's match
+Prev/Next in `frontend/app/page.tsx` was rebuilt four times in three days
+(#120→#121→#124→#125) reacting to piecemeal feedback, each disturbing the last,
+until it read as "not working" (Anuragi, 2026-07-06). The **final, locked
+behaviour** and its invariants:
+
+- The full-record `<details>` panel stays **collapsed by default** — a fresh
+  selection lands on the clean compact **"Top matches"** cards, never a wall of
+  the whole discourse. The Prev/Next footer renders **outside** `<details>`, so
+  it's visible without expanding.
+- One helper, **`revealMatchAt(pos)`**, is the single source of truth for every
+  path (Prev/Next buttons, `←`/`→` keys, the cross-record landing effect):
+  - **NEAR (cross-paragraph, `hasBackendHl===false`)** matches carry **no `«»`
+    marker in the body**, so expanding the record shows unmarked text (the
+    original bug). Instead scroll the compact **card** (keyed by
+    `sequence_number` in `topMatchRefs`, `isConnected`-guarded) which *does*
+    show the highlight; the record stays collapsed.
+  - **phrase / all-words** (markers present, and matches can exceed the ≤3 cards)
+    open the record and centre the highlighted body paragraph — **double-rAF +
+    a 200 ms re-scroll** so a just-expanded long body has laid out before the
+    scroll (the "first-step lands at the top" bug).
+- **Invariant that must hold for every mode:** after each step the current match
+  is **in the viewport AND visibly highlighted** (contains a `<mark>`); the
+  landing is collapsed with Prev/Next visible; boundaries disable correctly
+  (Prev at the very first match, Next at the very last).
+- **The safety net that was missing:** `frontend/scripts/verify-nav.cjs` drives
+  the real page in headless Chromium across the whole matrix (phrase/all/NEAR ×
+  EN/HI × same-/cross-record × stemmed/exact) and asserts exactly that
+  invariant. **Run it against a dev server pointed at the prod API before
+  shipping ANY change to this navigation** — it is what turns "looks fine to me"
+  into "verified across every combination."
+
 ---
 
 ## Search performance (latency)
