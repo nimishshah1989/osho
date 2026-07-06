@@ -322,12 +322,12 @@ function SearchPageInner() {
     // record — otherwise wait, preserving the flags for the real load.
     if (!discourse || discourse.event.id !== selectedEventId) return;
 
-    // Open the full-record panel by DEFAULT whenever a discourse loads, so the
-    // reader and the Prev/Next hit-nav appear without clicking "Show entire
-    // record" (Nimish 2026-07-03). A manual collapse only sticks until the next
-    // discourse.
-    if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
-
+    // The full-record panel stays COLLAPSED by default, so a fresh selection
+    // lands on the clean "Top matches" view instead of a wall of the whole
+    // discourse (Anuragi 2026-07-05 — the open-by-default from #121 read as
+    // cluttered). The Prev/Next bar is rendered OUTSIDE the panel so it's still
+    // visible without expanding; actually stepping to a match is what reveals
+    // the body (see jumpToMatch + the isNav branch below).
     const isNav = pendingOpenDetailsRef.current;
     pendingOpenDetailsRef.current = false;
     const jump = pendingJumpRef.current;
@@ -349,6 +349,9 @@ function SearchPageInner() {
     // mounted+open across the hop, so the toggle never fires — the bug that
     // left the highlight off-screen after each Next (Sugit 2026-07-05).
     if (!isNav) return;
+    // A cross-record Prev/Next landed here — reveal the body and centre the
+    // match. (A plain list selection leaves the record collapsed + clean.)
+    if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
     const paraIdx = matchIndices[pos];
     const timer = setTimeout(() => {
       matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -362,9 +365,14 @@ function SearchPageInner() {
       if (!matchIndices.length) return;
       const clamped = Math.max(0, Math.min(pos, matchIndices.length - 1));
       setCurrentMatchPos(clamped);
+      // Stepping to a match reveals the full record (collapsed by default for a
+      // clean landing) and centres the paragraph. Defer the scroll one tick so a
+      // just-opened <details> has painted its body before we scroll to it.
+      if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
       const paraIdx = matchIndices[clamped];
-      const el = matchRefs.current.get(paraIdx);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setTimeout(() => {
+        matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 60);
     },
     [matchIndices],
   );
@@ -1254,58 +1262,59 @@ function SearchPageInner() {
                           });
                         })()}
                       </div>
-
-                      {/* Hit-navigation footer — a SOLID bar pinned to the bottom of the
-                          discourse pane (Nimish 2026-07-03: the old translucent floating
-                          pill let text show through and overlapped the words, and was
-                          easy to miss). Prev / Next cross into the adjacent record once
-                          the current record's matches are exhausted (Sugit 2026-05-16,
-                          matches OCTP and CD-ROM behaviour). Buttons are only disabled
-                          when we're at the very first / last match of the very first /
-                          last record in the result list. */}
-                      {matchIndices.length > 0 && (() => {
-                        const totalEvents = results?.events.length ?? 0;
-                        const atFirstEvent = selectedIdx <= 0;
-                        const atLastEvent = selectedIdx >= totalEvents - 1;
-                        const atFirstMatch = currentMatchPos <= 0;
-                        const atLastMatch = currentMatchPos >= matchIndices.length - 1;
-                        const prevDisabled = atFirstMatch && atFirstEvent;
-                        const nextDisabled = atLastMatch && atLastEvent;
-                        return (
-                          <div className="sticky bottom-0 z-20 mt-8 flex justify-center border-t border-gold/25 bg-[rgb(var(--bg))] py-2.5">
-                            <div className="flex items-center gap-1 text-[12px] tracking-[0.15em] uppercase bg-[rgb(var(--bg))] border border-gold/40 rounded-full px-1.5 py-0.5 shadow-sm">
-                              <button
-                                type="button"
-                                onClick={() => jumpToMatchAcross(-1)}
-                                disabled={prevDisabled}
-                                className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
-                                aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
-                                title={locale === 'hi' ? 'पिछला मिलान (←)' : 'Previous match (←)'}
-                              >
-                                ← {locale === 'hi' ? 'पिछला' : 'Prev'}
-                              </button>
-                              <span className="text-stone-500 dark:text-ivory/70 tabular-nums font-medium px-1.5">
-                                {currentMatchPos + 1} / {matchIndices.length}
-                                {totalEvents > 1 && (
-                                  <span className="opacity-50">  · {selectedIdx + 1}/{totalEvents}</span>
-                                )}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => jumpToMatchAcross(1)}
-                                disabled={nextDisabled}
-                                className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
-                                aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
-                                title={locale === 'hi' ? 'अगला मिलान (→)' : 'Next match (→)'}
-                              >
-                                {locale === 'hi' ? 'अगला' : 'Next'} →
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })()}
                     </details>
                   )}
+
+                  {/* Hit-navigation footer — a SOLID bar pinned to the bottom of the
+                      discourse pane. Rendered OUTSIDE the collapsible record panel so
+                      the Prev/Next bar shows over the clean "Top matches" view without
+                      expanding the whole discourse; stepping to a match is what reveals
+                      the body (Anuragi 2026-07-05). Prev / Next cross into the adjacent
+                      record once the current record's matches are exhausted (Sugit
+                      2026-05-16, matches OCTP and CD-ROM behaviour). Buttons are only
+                      disabled at the very first / last match of the very first / last
+                      record in the result list. */}
+                  {selectedEvent && discourse && discourse.event.id === selectedEvent.event_id && matchIndices.length > 0 && (() => {
+                    const totalEvents = results?.events.length ?? 0;
+                    const atFirstEvent = selectedIdx <= 0;
+                    const atLastEvent = selectedIdx >= totalEvents - 1;
+                    const atFirstMatch = currentMatchPos <= 0;
+                    const atLastMatch = currentMatchPos >= matchIndices.length - 1;
+                    const prevDisabled = atFirstMatch && atFirstEvent;
+                    const nextDisabled = atLastMatch && atLastEvent;
+                    return (
+                      <div className="sticky bottom-0 z-20 mt-8 flex justify-center border-t border-gold/25 bg-[rgb(var(--bg))] py-2.5">
+                        <div className="flex items-center gap-1 text-[12px] tracking-[0.15em] uppercase bg-[rgb(var(--bg))] border border-gold/40 rounded-full px-1.5 py-0.5 shadow-sm">
+                          <button
+                            type="button"
+                            onClick={() => jumpToMatchAcross(-1)}
+                            disabled={prevDisabled}
+                            className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                            aria-label={locale === 'hi' ? 'पिछला' : 'Previous match'}
+                            title={locale === 'hi' ? 'पिछला मिलान (←)' : 'Previous match (←)'}
+                          >
+                            ← {locale === 'hi' ? 'पिछला' : 'Prev'}
+                          </button>
+                          <span className="text-stone-500 dark:text-ivory/70 tabular-nums font-medium px-1.5">
+                            {currentMatchPos + 1} / {matchIndices.length}
+                            {totalEvents > 1 && (
+                              <span className="opacity-50">  · {selectedIdx + 1}/{totalEvents}</span>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => jumpToMatchAcross(1)}
+                            disabled={nextDisabled}
+                            className="px-3 py-1.5 text-gold hover:bg-gold/10 rounded-full disabled:opacity-30 transition-colors font-medium"
+                            aria-label={locale === 'hi' ? 'अगला' : 'Next match'}
+                            title={locale === 'hi' ? 'अगला मिलान (→)' : 'Next match (→)'}
+                          >
+                            {locale === 'hi' ? 'अगला' : 'Next'} →
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </article>
               )}
             </section>
