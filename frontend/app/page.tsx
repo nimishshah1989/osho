@@ -313,6 +313,17 @@ function SearchPageInner() {
   // matches span a paragraph boundary and carry NO highlight in the body, but
   // the card shows the hit highlighted (Anuragi 2026-07-06).
   const topMatchRefs = useRef<Map<number, HTMLElement>>(new Map());
+  // Bumped on every reveal so a deferred (rAF / 200ms) re-scroll from an earlier
+  // step bails instead of yanking the viewport back to a stale match when the
+  // user clicks Next fast or holds an arrow key (review 2026-07-06).
+  const scrollGenRef = useRef(0);
+  // Set true right before revealMatchAt opens <details> programmatically, so the
+  // onToggle handler doesn't ALSO scroll — it only scrolls on a USER-initiated
+  // "Show entire record" expand.
+  const suppressToggleScrollRef = useRef(false);
+  // True while a cross-record hop's discourse is loading; a second Next/arrow in
+  // that window is dropped so it can't skip the record being loaded.
+  const crossNavInFlightRef = useRef(false);
   // When the user steps off the end of one discourse, we navigate to the
   // adjacent one and need the new discourse to land focused on either its
   // first or last match. The load is async (the matchIndices effect below
@@ -336,17 +347,22 @@ function SearchPageInner() {
       const seq = discourse.paragraphs[paraIdx]?.sequence_number;
       const details = discourseDetailsRef.current;
       const card = seq !== undefined ? topMatchRefs.current.get(seq) : undefined;
+      // Supersede any deferred scroll still pending from a previous step.
+      const gen = ++scrollGenRef.current;
       if (!hasBackendHl && card?.isConnected && !details?.open) {
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
-      const scrollBody = () =>
+      const scrollBody = () => {
+        if (scrollGenRef.current !== gen) return; // a newer step took over
         matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      };
       if (details && !details.open) {
         // Opening a collapsed record un-hides a long body (often 100+
         // paragraphs). Scrolling before it lays out lands on the wrong spot
         // (the first-step bug). Wait two frames for layout, then re-centre once
         // more after the smooth scroll settles so the match reliably lands in view.
+        suppressToggleScrollRef.current = true; // this open is programmatic
         details.open = true;
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
@@ -369,6 +385,9 @@ function SearchPageInner() {
     // record. So only proceed once the LOADED discourse matches the selected
     // record — otherwise wait, preserving the flags for the real load.
     if (!discourse || discourse.event.id !== selectedEventId) return;
+    // The awaited (or freshly selected) discourse has loaded — no cross-record
+    // hop is in flight any more, so a subsequent Next/arrow may proceed.
+    crossNavInFlightRef.current = false;
 
     // The full-record panel stays COLLAPSED by default, so a fresh selection
     // lands on the clean "Top matches" view instead of a wall of the whole
@@ -675,6 +694,14 @@ function SearchPageInner() {
   }, [dateFrom, dateTo]);
 
   const selectEvent = (eventId: string) => {
+    // A plain selection is NOT a match cross-nav — drop any un-consumed cross-nav
+    // intent so an interrupted hop (target superseded by this click, or a failed
+    // load) can't auto-expand/scroll this record or land it on the wrong end
+    // (review 2026-07-06). jumpToMatchAcross re-sets these AFTER calling
+    // selectEvent, so its own cross-nav intent survives.
+    pendingOpenDetailsRef.current = false;
+    pendingJumpRef.current = null;
+    crossNavInFlightRef.current = false;
     if (results) {
       const ev = results.events.find(e => e.event_id === eventId);
       if (ev) trackResultClick({
@@ -719,26 +746,42 @@ function SearchPageInner() {
         jumpToMatch(next);
         return;
       }
+      // A cross-record hop is already loading — drop this extra press so a fast
+      // double Next/arrow can't skip the record being loaded (review 2026-07-06).
+      if (crossNavInFlightRef.current) return;
       if (!results || !results.events.length) return;
       const currentIdx = results.events.findIndex(
         (e) => e.event_id === selectedEventId,
       );
       const targetIdx = currentIdx + direction;
       if (targetIdx < 0 || targetIdx >= results.events.length) return;
-      pendingJumpRef.current = direction === -1 ? 'last' : 'first';
-      // Mark this as a cross-record navigation (NOT a plain selection) so the
-      // newly loaded discourse scrolls to the landed match — for the on-screen
-      // Prev/Next buttons just as for the arrow keys. This is the wiring the
-      // buttons were missing, which left every cross-record hop parked at the
-      // top of the record with the highlight off-screen (Sugit 2026-07-05).
-      pendingOpenDetailsRef.current = true;
       const targetId = results.events[targetIdx].event_id;
+      // selectEvent clears any stale cross-nav flags first; THEN we set this
+      // hop's intent so the newly loaded discourse scrolls to the landed match —
+      // for the buttons just as for the arrow keys (Sugit 2026-07-05).
       selectEvent(targetId);
+      pendingJumpRef.current = direction === -1 ? 'last' : 'first';
+      pendingOpenDetailsRef.current = true;
+      crossNavInFlightRef.current = true;
       scrollRecordIntoView(targetId);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [currentMatchPos, matchIndices, jumpToMatch, results, selectedEventId],
   );
+
+  // A USER-initiated "Show entire record" expand should still land on the
+  // current match instead of dumping the reader at the metadata header
+  // (regression flagged by review 2026-07-06). revealMatchAt's own programmatic
+  // opens set suppressToggleScrollRef, so they don't double-scroll here.
+  const handleDetailsToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    if (!e.currentTarget.open) return;
+    if (suppressToggleScrollRef.current) { suppressToggleScrollRef.current = false; return; }
+    if (!discourse || !matchIndices.length) return;
+    const paraIdx = matchIndices[Math.min(currentMatchPos, matchIndices.length - 1)];
+    setTimeout(() => {
+      matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+  };
 
   const clearSelection = () => {
     setSelectedEventId('');
@@ -1202,8 +1245,11 @@ function SearchPageInner() {
                         // sequence_number of the match Prev/Next is currently on,
                         // so its card is ringed + scrolled to (kept in sync with
                         // the footer position across every mode).
+                        // Guard on the LOADED discourse matching this record, so
+                        // during a cross-record load no card is falsely ringed by
+                        // a coincidental sequence_number from the outgoing record.
                         const currentSeq =
-                          discourse && matchIndices.length
+                          discourse && discourse.event.id === selectedEvent.event_id && matchIndices.length
                             ? discourse.paragraphs[matchIndices[currentMatchPos]]?.sequence_number
                             : undefined;
                         return selectedEvent.hits.map((h) => {
@@ -1213,7 +1259,10 @@ function SearchPageInner() {
                           <li
                             key={h.paragraph_id}
                             ref={(el) => {
+                              // Delete on unmount so the map stays bounded to the
+                              // current record's cards (no stale cross-record entries).
                               if (el) topMatchRefs.current.set(h.sequence_number, el);
+                              else topMatchRefs.current.delete(h.sequence_number);
                             }}
                             className={cx(
                               'border-l-[3px] pl-4 pr-3 py-3 leading-relaxed text-[16px] scroll-mt-4 transition-colors',
@@ -1247,6 +1296,7 @@ function SearchPageInner() {
                   {discourse && discourse.event.id === selectedEvent.event_id && (
                     <details
                       ref={discourseDetailsRef}
+                      onToggle={handleDetailsToggle}
                       className="mt-4 group"
                     >
                       <summary className="cursor-pointer text-[11px] tracking-[0.35em] uppercase text-gold/80 hover:text-gold select-none font-medium">
