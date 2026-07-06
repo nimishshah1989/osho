@@ -248,15 +248,10 @@ function SearchPageInner() {
   // (Hindi transliteration is now handled inline by the HindiInput component)
 
   const detailRef = useRef<HTMLDivElement | null>(null);
-  const firstMatchRef = useRef<HTMLParagraphElement | null>(null);
   const discourseDetailsRef = useRef<HTMLDetailsElement | null>(null);
   // Set to true when the user navigates cross-discourse while details are open;
   // cleared after the new discourse mounts and details are programmatically opened.
   const pendingOpenDetailsRef = useRef(false);
-  // When the panel is opened programmatically as the default-open on a fresh
-  // discourse, suppress the toggle handler's scroll-to-first-match so the view
-  // stays on the title + top matches instead of jumping into the body.
-  const suppressToggleScrollRef = useRef(false);
   // Result-list <button> elements keyed by event_id, so keyboard navigation
   // can scroll the active record into view in the left list (Sugit #19).
   const resultRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -310,8 +305,6 @@ function SearchPageInner() {
     return { matchIndices: indices, hasBackendHl: false };
   }, [discourse, highlightPattern, results, selectedEventId]);
 
-  const firstMatchIndex = useMemo(() => matchIndices.length > 0 ? matchIndices[0] : -1, [matchIndices]);
-
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
   // When the user steps off the end of one discourse, we navigate to the
@@ -321,27 +314,48 @@ function SearchPageInner() {
   const pendingJumpRef = useRef<'first' | 'last' | null>(null);
 
   useEffect(() => {
+    // This effect fires on matchIndices changes, but matchIndices briefly
+    // reflects the OLD discourse during a cross-record hop: selectedEventId has
+    // already advanced while the new discourse is still loading. Acting then
+    // would consume the nav flag and set the match position against the wrong
+    // record. So only proceed once the LOADED discourse matches the selected
+    // record — otherwise wait, preserving the flags for the real load.
+    if (!discourse || discourse.event.id !== selectedEventId) return;
+
     // Open the full-record panel by DEFAULT whenever a discourse loads, so the
     // reader and the Prev/Next hit-nav appear without clicking "Show entire
-    // record" (Nimish 2026-07-03). A manual collapse sticks until you move to
-    // another discourse. Cross-discourse arrow-nav (pendingOpenDetailsRef) keeps
-    // its scroll-to-match; a plain selection suppresses it so the view stays on
-    // the title + top matches instead of jumping into the body.
-    if (discourseDetailsRef.current) {
-      suppressToggleScrollRef.current = !pendingOpenDetailsRef.current;
-      discourseDetailsRef.current.open = true;
-      pendingOpenDetailsRef.current = false;
-    }
+    // record" (Nimish 2026-07-03). A manual collapse only sticks until the next
+    // discourse.
+    if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
+
+    const isNav = pendingOpenDetailsRef.current;
+    pendingOpenDetailsRef.current = false;
+    const jump = pendingJumpRef.current;
+    pendingJumpRef.current = null;
+
     if (matchIndices.length === 0) {
       setCurrentMatchPos(0);
-      pendingJumpRef.current = null;
       return;
     }
-    const pos =
-      pendingJumpRef.current === 'last' ? matchIndices.length - 1 : 0;
+    const pos = jump === 'last' ? matchIndices.length - 1 : 0;
     setCurrentMatchPos(pos);
-    pendingJumpRef.current = null;
-  }, [matchIndices]);
+
+    // Whether we scroll to the match depends on HOW we got here, not on the
+    // input device: jumpToMatchAcross sets `pendingOpenDetailsRef` when a
+    // cross-record Prev/Next — on-screen button OR arrow key — lands us on a
+    // new discourse. Only then do we centre the landed match; a plain list
+    // selection leaves the view on the title + Top Matches card. We scroll HERE
+    // rather than in the <details> onToggle because the panel usually stays
+    // mounted+open across the hop, so the toggle never fires — the bug that
+    // left the highlight off-screen after each Next (Sugit 2026-07-05).
+    if (!isNav) return;
+    const paraIdx = matchIndices[pos];
+    const timer = setTimeout(() => {
+      matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchIndices, discourse, selectedEventId]);
 
   const jumpToMatch = useCallback(
     (pos: number) => {
@@ -665,6 +679,12 @@ function SearchPageInner() {
       const targetIdx = currentIdx + direction;
       if (targetIdx < 0 || targetIdx >= results.events.length) return;
       pendingJumpRef.current = direction === -1 ? 'last' : 'first';
+      // Mark this as a cross-record navigation (NOT a plain selection) so the
+      // newly loaded discourse scrolls to the landed match — for the on-screen
+      // Prev/Next buttons just as for the arrow keys. This is the wiring the
+      // buttons were missing, which left every cross-record hop parked at the
+      // top of the record with the highlight off-screen (Sugit 2026-07-05).
+      pendingOpenDetailsRef.current = true;
       const targetId = results.events[targetIdx].event_id;
       selectEvent(targetId);
       scrollRecordIntoView(targetId);
@@ -676,20 +696,6 @@ function SearchPageInner() {
   const clearSelection = () => {
     setSelectedEventId('');
     syncUrl(query.trim(), sort, '', mode, proximity);
-  };
-
-  const handleDetailsToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
-    if (e.currentTarget.open && firstMatchRef.current) {
-      // Default-open on a fresh discourse must not yank the view into the body;
-      // only a manual open or cross-discourse nav scrolls to the first match.
-      if (suppressToggleScrollRef.current) {
-        suppressToggleScrollRef.current = false;
-        return;
-      }
-      setTimeout(() => {
-        firstMatchRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 60);
-    }
   };
 
   // Keyboard shortcuts:
@@ -705,24 +711,13 @@ function SearchPageInner() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'ArrowRight' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (discourseDetailsRef.current?.open) {
-          // Step through hits in current discourse; when crossing to the next
-          // discourse mark that details should auto-open there too.
-          const next = currentMatchPos + 1;
-          if (next >= matchIndices.length) pendingOpenDetailsRef.current = true;
-          jumpToMatchAcross(1);
-        } else {
-          jumpToMatchAcross(1);
-        }
+        // Keys and buttons take the SAME path now: step one match, crossing
+        // into the adjacent record at the boundary. jumpToMatchAcross flags the
+        // crossing so the next record scrolls to its match.
+        jumpToMatchAcross(1);
       } else if (e.key === 'ArrowLeft' && !e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
-        if (discourseDetailsRef.current?.open) {
-          const next = currentMatchPos - 1;
-          if (next < 0) pendingOpenDetailsRef.current = true;
-          jumpToMatchAcross(-1);
-        } else {
-          jumpToMatchAcross(-1);
-        }
+        jumpToMatchAcross(-1);
       } else if (e.key === 'n' || e.key === 'j') {
         e.preventDefault();
         jumpToMatch(currentMatchPos + 1);
@@ -1188,7 +1183,6 @@ function SearchPageInner() {
                     <details
                       ref={discourseDetailsRef}
                       className="mt-4 group"
-                      onToggle={handleDetailsToggle}
                     >
                       <summary className="cursor-pointer text-[11px] tracking-[0.35em] uppercase text-gold/80 hover:text-gold select-none font-medium">
                         {t('search.detail.showAll', { n: discourse.paragraphs.length })}
@@ -1229,7 +1223,6 @@ function SearchPageInner() {
                               <p
                                 key={p.sequence_number}
                                 ref={(el) => {
-                                  if (idx === firstMatchIndex && el) firstMatchRef.current = el;
                                   if (isMatch && el) matchRefs.current.set(idx, el);
                                 }}
                                 className={cx(gapCls, matchCls, roleCls)}
