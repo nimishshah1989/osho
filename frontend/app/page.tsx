@@ -307,11 +307,59 @@ function SearchPageInner() {
 
   const [currentMatchPos, setCurrentMatchPos] = useState(0);
   const matchRefs = useRef<Map<number, HTMLParagraphElement>>(new Map());
+  // Refs to the compact "Top matches" cards, keyed by sequence_number, so
+  // Prev/Next can highlight + scroll the current match's CARD instead of
+  // expanding the whole record. Crucial for "Within N words" (NEAR): those
+  // matches span a paragraph boundary and carry NO highlight in the body, but
+  // the card shows the hit highlighted (Anuragi 2026-07-06).
+  const topMatchRefs = useRef<Map<number, HTMLElement>>(new Map());
   // When the user steps off the end of one discourse, we navigate to the
   // adjacent one and need the new discourse to land focused on either its
   // first or last match. The load is async (the matchIndices effect below
   // runs once the new discourse arrives), so we stash the intent here.
   const pendingJumpRef = useRef<'first' | 'last' | null>(null);
+
+  // Reveal the match at position `pos` in whichever view keeps it visible AND
+  // highlighted, without churning the layout:
+  //   • NEAR (no hl markers in the body): scroll the compact "Top matches" CARD
+  //     — it carries the highlight; the record stays collapsed and clean.
+  //   • phrase / all-words (hl markers present, and matches can exceed the ≤3
+  //     top cards): open the full record and centre the highlighted paragraph.
+  //   • already reading the full record: just follow the body.
+  // This is the single source of truth for Prev/Next, arrow keys, and the
+  // cross-record landing effect, so every path behaves identically.
+  const revealMatchAt = useCallback(
+    (pos: number) => {
+      if (!discourse || !matchIndices.length) return;
+      const clamped = Math.max(0, Math.min(pos, matchIndices.length - 1));
+      const paraIdx = matchIndices[clamped];
+      const seq = discourse.paragraphs[paraIdx]?.sequence_number;
+      const details = discourseDetailsRef.current;
+      const card = seq !== undefined ? topMatchRefs.current.get(seq) : undefined;
+      if (!hasBackendHl && card?.isConnected && !details?.open) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+      }
+      const scrollBody = () =>
+        matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (details && !details.open) {
+        // Opening a collapsed record un-hides a long body (often 100+
+        // paragraphs). Scrolling before it lays out lands on the wrong spot
+        // (the first-step bug). Wait two frames for layout, then re-centre once
+        // more after the smooth scroll settles so the match reliably lands in view.
+        details.open = true;
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            scrollBody();
+            setTimeout(scrollBody, 200);
+          }),
+        );
+      } else {
+        scrollBody();
+      }
+    },
+    [discourse, matchIndices, hasBackendHl],
+  );
 
   useEffect(() => {
     // This effect fires on matchIndices changes, but matchIndices briefly
@@ -349,13 +397,11 @@ function SearchPageInner() {
     // mounted+open across the hop, so the toggle never fires — the bug that
     // left the highlight off-screen after each Next (Sugit 2026-07-05).
     if (!isNav) return;
-    // A cross-record Prev/Next landed here — reveal the body and centre the
-    // match. (A plain list selection leaves the record collapsed + clean.)
-    if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
-    const paraIdx = matchIndices[pos];
-    const timer = setTimeout(() => {
-      matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 80);
+    // A cross-record Prev/Next landed here — reveal the match the same way the
+    // buttons do (compact card for NEAR, expanded body for phrase/all). A plain
+    // list selection leaves the record collapsed + clean. Deferred a tick so the
+    // new record's cards / body have mounted before we scroll.
+    const timer = setTimeout(() => revealMatchAt(pos), 80);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [matchIndices, discourse, selectedEventId]);
@@ -365,16 +411,9 @@ function SearchPageInner() {
       if (!matchIndices.length) return;
       const clamped = Math.max(0, Math.min(pos, matchIndices.length - 1));
       setCurrentMatchPos(clamped);
-      // Stepping to a match reveals the full record (collapsed by default for a
-      // clean landing) and centres the paragraph. Defer the scroll one tick so a
-      // just-opened <details> has painted its body before we scroll to it.
-      if (discourseDetailsRef.current) discourseDetailsRef.current.open = true;
-      const paraIdx = matchIndices[clamped];
-      setTimeout(() => {
-        matchRefs.current.get(paraIdx)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 60);
+      revealMatchAt(clamped);
     },
-    [matchIndices],
+    [matchIndices, revealMatchAt],
   );
 
   const expandQuery = useCallback(
@@ -1159,12 +1198,29 @@ function SearchPageInner() {
                       {t('search.detail.topMatches')}
                     </h3>
                     <ol className="space-y-4">
-                      {selectedEvent.hits.map((h) => {
+                      {(() => {
+                        // sequence_number of the match Prev/Next is currently on,
+                        // so its card is ringed + scrolled to (kept in sync with
+                        // the footer position across every mode).
+                        const currentSeq =
+                          discourse && matchIndices.length
+                            ? discourse.paragraphs[matchIndices[currentMatchPos]]?.sequence_number
+                            : undefined;
+                        return selectedEvent.hits.map((h) => {
                         const roleCls = paragraphRoleClass(h.role);
+                        const isCurrent = h.sequence_number === currentSeq;
                         return (
                           <li
                             key={h.paragraph_id}
-                            className="bg-stone-100 dark:bg-ivory/5 border-l-[3px] border-gold/50 pl-4 pr-3 py-3 text-stone-800 dark:text-ivory/95 leading-relaxed text-[16px]"
+                            ref={(el) => {
+                              if (el) topMatchRefs.current.set(h.sequence_number, el);
+                            }}
+                            className={cx(
+                              'border-l-[3px] pl-4 pr-3 py-3 leading-relaxed text-[16px] scroll-mt-4 transition-colors',
+                              isCurrent
+                                ? 'bg-gold/10 border-gold ring-1 ring-gold/40 text-stone-900 dark:text-ivory'
+                                : 'bg-stone-100 dark:bg-ivory/5 border-gold/50 text-stone-800 dark:text-ivory/95',
+                            )}
                           >
                             <div className="text-[12px] tracking-[0.15em] uppercase text-stone-400 dark:text-ivory/40 mb-1.5 font-medium">
                               Para {h.sequence_number}
@@ -1174,7 +1230,8 @@ function SearchPageInner() {
                             </div>
                           </li>
                         );
-                      })}
+                        });
+                      })()}
                     </ol>
                   </div>
 
