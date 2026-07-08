@@ -91,7 +91,16 @@ jobs:
           curl -fL --retry 3 --retry-delay 5 \
             -o desktop/app/corpus/osho.db.zst \
             "https://github.com/nimishshah1989/osho/releases/download/corpus-latest/osho.db.zst"
-          ls -lh desktop/app/corpus/osho.db.zst
+          # Also bundle the checksum. The app serves it at
+          # /corpus/osho.db.zst.sha256 and OfflineProvider compares it to the
+          # corpus already in OPFS — when a newer app ships a different corpus
+          # the checksum changes, so the app re-installs the fresh data instead
+          # of clinging to the stale copy forever (Anuragi 2026-07-08: the
+          # offline Hindi stayed pre-Unicode because nothing refreshed it).
+          curl -fL --retry 3 --retry-delay 5 \
+            -o desktop/app/corpus/osho.db.zst.sha256 \
+            "https://github.com/nimishshah1989/osho/releases/download/corpus-latest/osho.db.zst.sha256"
+          ls -lh desktop/app/corpus/osho.db.zst desktop/app/corpus/osho.db.zst.sha256
 
       - name: Build installer
         shell: bash
