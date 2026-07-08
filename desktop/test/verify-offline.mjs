@@ -36,7 +36,7 @@
  */
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { existsSync, mkdirSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -58,6 +58,13 @@ if (!existsSync(OUT)) {
 const corpusDir = path.join(OUT, 'corpus');
 mkdirSync(corpusDir, { recursive: true });
 copyFileSync(FIXTURE, path.join(corpusDir, 'osho.db.zst'));
+// Stage the corpus checksum exactly as build-desktop.yml bundles it.
+// OfflineProvider compares this to the copy already in OPFS to decide whether
+// an app update shipped fresh data: Scenario B checks a MATCHING sha does NOT
+// trigger a re-install (instant relaunch), Scenario C checks a CHANGED sha DOES
+// (so offline users actually get corpus updates — Anuragi 2026-07-08).
+const shaPath = path.join(corpusDir, 'osho.db.zst.sha256');
+writeFileSync(shaPath, 'sha-generation-A\n');
 
 const profile = mkdtempSync(path.join(tmpdir(), 'osho-offline-'));
 
@@ -150,8 +157,23 @@ try {
   }
   console.log('Scenario B OK — relaunch is instant: same origin, corpus not re-fetched.');
 
-  console.log('\nPASS: install works, relaunch persists.');
+  // Scenario C — an app update ships a DIFFERENT corpus (its bundled checksum
+  // changes). The app MUST notice and re-install; otherwise offline users are
+  // stuck on stale data forever (Anuragi 2026-07-08: offline Hindi stayed
+  // pre-Unicode because nothing refreshed the OPFS corpus after an update).
+  writeFileSync(shaPath, 'sha-generation-B\n');
+  const third = await launch('THIRD launch (corpus updated)');
+  if (!third.corpusFetched) {
+    fail('THIRD launch did NOT re-fetch after the bundled checksum changed — the '
+      + 'offline app would keep serving the OLD corpus after an update. '
+      + 'OfflineProvider must re-install when the bundled sha differs from the '
+      + 'installed one.');
+  }
+  console.log('Scenario C OK — a changed corpus checksum triggers a re-install.');
+
+  console.log('\nPASS: install works, relaunch persists, corpus updates refresh.');
 } finally {
   try { rmSync(path.join(corpusDir, 'osho.db.zst')); } catch { /* ignore */ }
+  try { rmSync(shaPath); } catch { /* ignore */ }
   try { rmSync(profile, { recursive: true, force: true }); } catch { /* ignore */ }
 }

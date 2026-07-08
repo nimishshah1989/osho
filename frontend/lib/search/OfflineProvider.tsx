@@ -60,6 +60,26 @@ export type OfflineRuntimeState =
 
 const OPFS_FILENAME = 'osho.db';
 
+// localStorage marker: the checksum of the corpus currently installed in OPFS.
+// The desktop app bundles the matching `osho.db.zst.sha256`; when an app update
+// ships a newer corpus the checksum differs, so we re-install instead of
+// keeping the stale copy forever (Anuragi 2026-07-08: offline Hindi stayed
+// pre-Unicode because nothing ever refreshed the OPFS corpus).
+const CORPUS_SHA_KEY = 'osho-corpus-sha';
+
+// Fetch the bundled corpus checksum (desktop only — served by the app's local
+// server next to the corpus). Best-effort: any failure returns null and we just
+// keep whatever corpus is already installed.
+async function fetchCorpusSha(corpusUrl: string): Promise<string | null> {
+  try {
+    const r = await fetch(`${corpusUrl}.sha256`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    return (await r.text()).trim();
+  } catch {
+    return null;
+  }
+}
+
 // The Electron desktop app's preload script sets `window.oshoDesktop`
 // with the local URL of the corpus bundled inside the installer. On the
 // plain website this is undefined.
@@ -108,13 +128,19 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   // (the compressed `.zst` or an already-extracted `.db`), or the
   // bundled corpus the desktop app fetches from its local server. The
   // worker auto-detects the format.
-  const installBlob = useCallback(async (file: Blob) => {
+  const installBlob = useCallback(async (file: Blob, sha?: string | null) => {
     if (downloadingRef.current) return;
     downloadingRef.current = true;
     setState({ kind: 'downloading' });
     setProgress(null);
     try {
       await installCorpusFromFile(file, OPFS_FILENAME, (p) => setProgress(p));
+      // Record which corpus is now in OPFS so a future app update shipping a
+      // different corpus is detected and refreshed. `sha` is undefined for a
+      // user-picked web file (no auto-refresh there), which is fine.
+      if (sha) {
+        try { localStorage.setItem(CORPUS_SHA_KEY, sha); } catch { /* private mode */ }
+      }
       await tryOpen();
     } catch (e) {
       setState({ kind: 'failed', reason: e instanceof Error ? e.message : String(e) });
@@ -127,9 +153,9 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
   // (served by the app's local HTTP server) and install it.
   const installFromUrl = useCallback(async (url: string) => {
     try {
-      const resp = await fetch(url);
+      const [resp, sha] = await Promise.all([fetch(url), fetchCorpusSha(url)]);
       if (!resp.ok) throw new Error(`Bundled corpus unavailable (HTTP ${resp.status}).`);
-      await installBlob(await resp.blob());
+      await installBlob(await resp.blob(), sha);
     } catch (e) {
       setState({ kind: 'failed', reason: e instanceof Error ? e.message : String(e) });
     }
@@ -142,6 +168,22 @@ export function OfflineProvider({ children }: { children: React.ReactNode }) {
       const result = await openOfflineEngine(OPFS_FILENAME);
       if (cancelled) return;
       if (result.kind === 'ready') {
+        // Desktop only: if the bundled corpus differs from the one already in
+        // OPFS (an app update shipped fresh data), re-install it — otherwise the
+        // stale corpus lingers forever and corpus updates never reach offline
+        // users (Anuragi 2026-07-08: offline Hindi stayed pre-Unicode). On the
+        // web `corpusUrl` is undefined, so this is skipped.
+        const corpusUrl = (window as DesktopWindow).oshoDesktop?.corpusUrl;
+        if (corpusUrl) {
+          const bundledSha = await fetchCorpusSha(corpusUrl);
+          if (cancelled) return;
+          let installedSha: string | null = null;
+          try { installedSha = localStorage.getItem(CORPUS_SHA_KEY); } catch { /* ignore */ }
+          if (bundledSha && bundledSha !== installedSha) {
+            void installFromUrl(corpusUrl);
+            return;
+          }
+        }
         setEngine(result.engine);
         setState({ kind: 'ready' });
       } else if (result.kind === 'needs-download') {

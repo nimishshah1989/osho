@@ -270,6 +270,19 @@ section with them. **What's removed vs. what's retained:**
   manual) rebuilds the compressed `.zst` corpus on the VPS and replaces the
   `corpus-latest` release asset, keeping the desktop/offline copy in sync with the
   live DB. See `docs/OFFLINE_APP.md` for the full runbook.
+- **Corpus refresh in the installed app** — the offline app stores the corpus in
+  OPFS **keyed only by existence**, so before 2026-07-08 an updated installer
+  kept serving whatever corpus was already in storage *forever* — a user could
+  update the app and still see the old data (Anuragi: offline Hindi stayed
+  pre-Unicode/distorted). Fixed by shipping the corpus checksum
+  (`osho.db.zst.sha256`) inside the installer (`build-desktop.yml` bundles it;
+  the local server exposes it at `/corpus/osho.db.zst.sha256`) and having
+  `OfflineProvider` compare it to a `localStorage` marker of the installed
+  corpus: **on mismatch it re-installs the fresh corpus.** The `verify-offline`
+  gate now covers it — Scenario B: a *matching* checksum must NOT re-install
+  (instant relaunch preserved); Scenario C: a *changed* checksum MUST re-install.
+  Web is unaffected (no `oshoDesktop.corpusUrl` → the check is skipped; the user
+  supplies the corpus manually).
 
 The TS engine in `frontend/lib/search/` must stay behaviour-compatible with
 `scripts/cloud_api.py` — tokenizer, Devanagari normalisation, BM25 ranking, NEAR
