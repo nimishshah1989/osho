@@ -326,7 +326,19 @@ async function streamIntoOpfs(
   // Move the existing corpus aside (if any), then put the new one in
   // place, then delete the backup on success. On any failure restore
   // the backup.
-  const hadExisting = await corpusExists(filename);
+  //
+  // Only a PLAIN OPFS file can be moved aside for rollback. Once the app has
+  // OPENED the corpus it lives in the SAHPool with NO plain file, so check the
+  // plain file specifically here — `corpusExists` also returns true for a
+  // pooled corpus, which made a re-install-after-open try to move a
+  // non-existent plain file and crash with "a requested file could not be
+  // found" (Anuragi 2026-07-08 corpus auto-refresh). The stale pooled copy is
+  // dropped after the swap instead (see below).
+  let hadExisting = false;
+  try {
+    await root.getFileHandle(filename, { create: false });
+    hadExisting = true;
+  } catch { /* no plain file — corpus is pooled or absent */ }
   if (hadExisting) {
     if (moveSupported) {
       const existing = await root.getFileHandle(filename);
@@ -361,6 +373,18 @@ async function streamIntoOpfs(
   if (hadExisting) {
     try { await root.removeEntry(backupName); } catch { /* harmless */ }
   }
+
+  // A prior open imported the OLD corpus into the SAHPool and dropped its plain
+  // file; the swap above just wrote the NEW corpus as a fresh plain file.
+  // Release the open DB and drop the stale pooled copy so the NEXT open
+  // re-imports the new plain file instead of re-opening the old pooled corpus
+  // (Anuragi 2026-07-08 auto-refresh: re-install while a corpus was already
+  // open). Harmless on a first install — nothing is open or pooled yet.
+  closeDb();
+  try {
+    const p = await ensurePool();
+    if (p.getFileNames().includes(poolName(filename))) p.unlink(poolName(filename));
+  } catch { /* pool not initialised / nothing pooled — nothing to drop */ }
 
   emit({ phase: 'done', bytesReceived, bytesTotal, bytesWritten });
 }
