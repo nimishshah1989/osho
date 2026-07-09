@@ -132,7 +132,10 @@ It SSHes into EC2, runs `scripts/publish_corpus.sh`, which:
    throughout).
 2. Runs `VACUUM` + `INSERT INTO paragraphs_fts(paragraphs_fts) VALUES('optimize')`
    to shrink the copy.
-3. Compresses with `zstd -19 --long --T0`.
+3. Compresses with `zstd -19 -T0` — **NO `--long`**. The client
+   decompresses in-browser with fzstd (pure-JS), which corrupts a large
+   ("long") zstd window; `build_corpus_artifact.sh` asserts the window
+   stays ≤ 8 MiB. (Anuragi 2026-07-09: `--long` → SQLITE_CORRUPT offline.)
 4. Uploads `osho.db.zst` + a SHA-256 sidecar to the
    `corpus-latest` release, replacing the previous asset under the
    same name.

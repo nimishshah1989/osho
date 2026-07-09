@@ -46,7 +46,15 @@ const { startServer } = require('../server.js');
 const { chromium } = require('playwright');
 
 const OUT = path.join(HERE, '..', '..', 'frontend', 'out');
-const FIXTURE = path.join(HERE, 'fixtures', 'tiny-corpus.db');
+// A REAL zstd archive (compressed `zstd -19`, exactly as the production corpus
+// is built), NOT a raw .db renamed to .zst. This is deliberate: the worker
+// auto-detects the format from the magic bytes, so a raw .db would take the
+// verbatim-copy path and NEVER exercise fzstd decompression — the exact code
+// that silently corrupted the real corpus when it was compressed with --long
+// (a 128 MiB window fzstd can't decode; Anuragi 2026-07-09). Staging a real
+// .zst makes every scenario below run the decompress→import→open→query
+// pipeline end-to-end, and the "Test Talk" assertion fails if fzstd mangles it.
+const FIXTURE = path.join(HERE, 'fixtures', 'tiny-corpus.db.zst');
 
 const fail = (msg) => { console.error('\nFAIL: ' + msg); process.exit(1); };
 
