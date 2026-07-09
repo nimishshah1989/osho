@@ -10,8 +10,10 @@
 #      block the API process serving live traffic).
 #   2. VACUUM + FTS optimize on the copy to shrink the file before
 #      compression.
-#   3. zstd -19 -T0 — long mode + every core. Best speed/ratio trade
-#      for a one-shot nightly build.
+#   3. zstd -19 -T0 — NO --long. The offline/desktop app decompresses
+#      this file in-browser with fzstd (a pure-JS decoder), which cannot
+#      correctly decode a large ("long") zstd window and silently corrupts
+#      the DB on the client. See the window guard below.
 #   4. Move the artifact into place atomically so any in-flight web
 #      readers see either the old file or the new one, never a partial.
 #
@@ -82,9 +84,29 @@ PY
 raw_size=$(stat -c %s "$tmp_db")
 printf "==> Raw DB:        %'d bytes (%.1f MiB)\n" "$raw_size" "$(echo "$raw_size / 1048576" | bc -l)"
 
-echo "==> zstd -19 -T0 (long mode)"
-zstd -19 -T0 --long --quiet --force -o "$tmp_zst" "$tmp_db"
+# IMPORTANT: NO --long. The offline PWA / desktop app decompresses this
+# archive in the browser with fzstd (pure-JS). fzstd cannot correctly decode
+# a large zstd *window* (--long defaults to a 128 MiB window); it returns the
+# right number of bytes but with corrupted regions, producing a malformed
+# SQLite DB on the client (SQLITE_CORRUPT + garbled Hindi — Anuragi 2026-07-09,
+# verified byte-for-byte: fzstd on a --long frame ≠ the source DB; on a plain
+# -19 frame it matches exactly). Plain -19 keeps an 8 MiB window fzstd handles.
+echo "==> zstd -19 -T0 (no --long — fzstd-safe window)"
+zstd -19 -T0 --quiet --force -o "$tmp_zst" "$tmp_db"
 zst_size=$(stat -c %s "$tmp_zst")
+
+# Guard against a silent regression: if anyone re-adds --long/--ultra (or a
+# level whose window exceeds fzstd's safe range) the client would corrupt the
+# corpus again with no error. Assert the frame window stayed within 8 MiB and
+# fail the build loudly otherwise, so a bad corpus never reaches offline users.
+win_bytes=$(zstd -lv "$tmp_zst" 2>&1 | sed -n 's/.*Window Size:[^(]*(\([0-9]\+\) B).*/\1/p')
+if [ -z "$win_bytes" ] || [ "$win_bytes" -gt 8388608 ]; then
+  echo "ERROR: corpus zstd window is ${win_bytes:-unknown} B (> 8 MiB / 8388608)." >&2
+  echo "       The offline app's fzstd decoder will CORRUPT this archive." >&2
+  echo "       Do NOT use --long/--ultra when compressing the offline corpus." >&2
+  exit 4
+fi
+printf "==> zstd window: %'d B (fzstd-safe, <= 8 MiB)\n" "$win_bytes"
 printf "==> Compressed:    %'d bytes (%.1f MiB, %.1f%% of raw)\n" \
   "$zst_size" \
   "$(echo "$zst_size / 1048576" | bc -l)" \

@@ -594,6 +594,37 @@ gitignored — moved between machines by rsync, never committed.
    whole-archive sweep for these is a `ROW_NUMBER() … PARTITION BY event_id`
    query comparing `events.title` to `paragraphs` seq-0 (base titles).
 
+10. **Offline corpus must be compressed WITHOUT `zstd --long`** (Anuragi,
+    2026-07-09). The offline/desktop app decompresses the corpus **in the
+    browser** with `fzstd` (`frontend/lib/search/worker/dbWorker.ts`), a tiny
+    pure-JS zstd decoder. fzstd **cannot correctly decode a large zstd window**:
+    `build_corpus_artifact.sh` used `zstd -19 --long`, and `--long` defaults to a
+    **128 MiB window**. fzstd returned the right *number* of decompressed bytes
+    but with **corrupted regions** → a **malformed SQLite DB on the client**
+    (`SQLITE_CORRUPT: database disk image is malformed`, plus `�`/stray-byte
+    garbling of otherwise-correct Hindi). Crucially the **live API and the source
+    `.zst` are perfectly fine** — the `zstd` CLI decodes the 128 MiB window
+    correctly; only the in-browser fzstd path corrupts it, so this looked like a
+    data problem but was purely a **client decompression** problem. Verified
+    byte-for-byte: fzstd on the `--long` frame ≠ the source DB (`3903a745…` vs
+    `639c6cfd…`); on a plain `-19` (8 MiB window) frame it matches exactly.
+    **The fix** (PR — 2026-07-09): drop `--long` from
+    `scripts/build_corpus_artifact.sh` (keeps an 8 MiB window fzstd handles), add
+    a **post-compression window guard** there that fails the build if the frame
+    window exceeds 8 MiB (so re-adding `--long`/`--ultra` can never silently ship
+    a corrupt corpus again), and — the gap that let this through —
+    `desktop/test/verify-offline.mjs` was staging a **raw `.db` renamed to
+    `.zst`**, so the worker took the verbatim-copy branch and **never exercised
+    fzstd at all**; it now stages a **real `zstd -19` archive**
+    (`tiny-corpus.db.zst`) so every scenario runs the true
+    decompress→import→open→query pipeline. **Delivery is a chain**: the fix only
+    reaches offline users after `publish-corpus.yml` re-runs (recompresses
+    `corpus-latest` without `--long`) **and then** `build-desktop.yml` re-runs
+    (bundles the fixed corpus into a new installer). A merge alone changes
+    nothing users see. Lesson: anything the **client** must decode (not just the
+    server) has to be validated against the **client's actual decoder** — a
+    CLI-level "the file is fine" is not sufficient.
+
 ---
 
 ## Code conventions
