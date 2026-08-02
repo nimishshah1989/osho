@@ -50,6 +50,33 @@ function apiForm(path: string, key: string, formData: FormData) {
   });
 }
 
+/**
+ * Read a response body as JSON. nginx and Cloudflare answer with an HTML
+ * error page (413, 502, 504, 524 …) that never reaches our API, so a bare
+ * `res.json()` throws a SyntaxError and every caller's catch reported it as
+ * "Network error — could not reach the server." That sent Anuragi hunting a
+ * connectivity problem when the server had in fact answered, clearly, that
+ * the upload was too big (2026-08-02). Translate the status instead.
+ */
+async function readJson(res: Response) {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(errorForStatus(res.status));
+  }
+}
+
+function errorForStatus(status: number): string {
+  if (status === 413)
+    return 'Upload too large — the server rejected it before processing. The limit is 100 MB per zip; split the batch into smaller zips and run them one after another.';
+  if (status === 504 || status === 524)
+    return 'The server took too long to process this batch and the connection timed out (the limit is ~100 seconds). Split the batch into smaller zips.';
+  if (status === 502)
+    return 'The archive server is not responding (502). It may be restarting — wait a minute and retry.';
+  return `The server returned an unexpected error (HTTP ${status}).`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TagPicker({
@@ -128,15 +155,15 @@ function UploadTab({ adminKey }: { adminKey: string }) {
         method: 'POST',
         body: JSON.stringify({ title, date, location, language, content, tags }),
       });
-      const data = await res.json();
+      const data = await readJson(res);
       if (res.ok) {
         setStatus({ ok: true, msg: `Ingested! ${data.paragraphs} paragraphs · auto-tags: ${data.tags.join(', ') || 'none'}` });
         setTitle(''); setDate(''); setLocation(''); setContent(''); setTags([]);
       } else {
         setStatus({ ok: false, msg: data.detail ?? 'Ingest failed.' });
       }
-    } catch {
-      setStatus({ ok: false, msg: 'Network error.' });
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Network error.' });
     }
     setLoading(false);
   };
@@ -372,6 +399,35 @@ interface UpdateResult {
   warnings?: { action: string; file: string; warning: string }[];
 }
 
+// nginx caps a single request body at 10 MB on the site vhost and Cloudflare
+// caps it at 100 MB, and neither can be raised from the deploy account. A
+// monthly batch is bigger than that, which is what made the 2026-08-01 update
+// fail. So anything past this size is sent in slices that each stay well under
+// the ceiling; the server appends them and returns an id the ingest call uses
+// in place of the file. Batches now have no practical size limit.
+const CHUNK_BYTES = 8 * 1024 * 1024;
+
+/** Upload a big zip slice by slice; resolves to the server-side upload id. */
+async function uploadInChunks(
+  file: File,
+  adminKey: string,
+  onProgress: (pct: number) => void,
+): Promise<string> {
+  let uploadId = '';
+  for (let start = 0; start < file.size; start += CHUNK_BYTES) {
+    const fd = new FormData();
+    fd.append('chunk', file.slice(start, start + CHUNK_BYTES));
+    // Empty on the first slice — that is what tells the server to mint an id.
+    if (uploadId) fd.append('upload_id', uploadId);
+    const res = await apiForm('upload-chunk', adminKey, fd);
+    const data = await readJson(res);
+    if (!res.ok) throw new Error(data.detail ?? 'The upload failed part-way through.');
+    uploadId = data.upload_id;
+    onProgress(Math.min(99, Math.round(((start + CHUNK_BYTES) / file.size) * 100)));
+  }
+  return uploadId;
+}
+
 function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
   const [mode, setMode] = useState<CorpusMode>('bulk');
   const [file, setFile] = useState<File | null>(null);
@@ -384,6 +440,8 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showFailures, setShowFailures] = useState(false);
+  // null unless a chunked upload is in flight.
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   const reset = () => {
     setBulkResult(null); setUpdateResult(null);
@@ -396,24 +454,33 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
     reset();
     setLoading(true);
     const fd = new FormData();
-    fd.append('file', file);
     fd.append('dry_run', dryRun ? 'true' : 'false');
     if (corpusVersion.trim()) fd.append('corpus_version', corpusVersion.trim());
     const endpoint = mode === 'bulk' ? 'upload-docx' : 'batch-update';
     try {
+      if (file.size > CHUNK_BYTES) {
+        setUploadPct(0);
+        fd.append('upload_id', await uploadInChunks(file, adminKey, setUploadPct));
+      } else {
+        fd.append('file', file);
+      }
+      setUploadPct(null);
       const res = await apiForm(endpoint, adminKey, fd);
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) { setError(data.detail ?? 'Request failed.'); return; }
       if (mode === 'bulk') setBulkResult(data as BulkResult);
       else setUpdateResult(data as UpdateResult);
-    } catch {
-      setError('Network error — could not reach the server.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error — could not reach the server.');
     } finally {
+      setUploadPct(null);
       setLoading(false);
     }
   };
 
-  const btnLabel = loading
+  const btnLabel = uploadPct !== null
+    ? `Uploading… ${uploadPct}%`
+    : loading
     ? 'Processing…'
     : dryRun
     ? 'Run Dry Run'
@@ -633,12 +700,12 @@ function ReindexPanel({ adminKey }: { adminKey: string }) {
     setError(null);
     try {
       const res = await api('reindex', adminKey, { method: 'POST' });
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) { setError(data.detail ?? 'Could not start the rebuild.'); return; }
       setStatus({ state: 'running', done: 0, total: 0, started_at: null, finished_at: null, message: 'Starting…' });
       setPolling(true);
-    } catch {
-      setError('Network error — could not reach the server.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error — could not reach the server.');
     }
   };
 
@@ -698,7 +765,7 @@ function RecordsCsvPanel({ adminKey }: { adminKey: string }) {
     setError(null); setCount(null); setBusy(true);
     try {
       const res = await api('records-csv', adminKey);
-      const data = await res.json();
+      const data = await readJson(res);
       if (!res.ok) { setError(data.detail ?? 'Could not generate the dump.'); return; }
 
       // Prepend a UTF-8 BOM (U+FEFF) so Excel renders the Devanagari (Hindi)
