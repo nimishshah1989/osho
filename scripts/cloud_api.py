@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import time
 import unicodedata
 import uuid
 import zipfile
@@ -2231,10 +2232,141 @@ def admin_records_csv(request: Request):
             "corpus_version": corpus_version, "csv": buf.getvalue()}
 
 
+# ─── Chunked upload staging ──────────────────────────────────────────────────
+#
+# nginx caps a request body at 10 MB on the site vhost and Cloudflare's plan
+# caps it at 100 MB, and neither can be raised from the deploy account (no
+# passwordless root). That 10 MB ceiling is what silently killed Anuragi's
+# 2026-08-01 corpus update. So the admin UI slices a big zip client-side and
+# posts it a piece at a time to /admin/upload-chunk; the pieces are appended to
+# one staging file here, and the ingest endpoints then take an `upload_id`
+# instead of a `file`. Each individual request stays far below every proxy cap,
+# so the archive can take a zip of any size without touching nginx.
+#
+# The staging file is also what the ingest reads from — the zip is never held
+# in memory, which matters now that uploads are no longer capped at 10 MB.
+
+_UPLOAD_DIR = os.path.join(tempfile.gettempdir(), "osho-admin-uploads")
+_UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_UPLOAD_MAX_BYTES = 2 * 1024 * 1024 * 1024
+_UPLOAD_TTL_SECONDS = 6 * 60 * 60
+
+
+def _upload_path(upload_id: str) -> str:
+    """Map an upload id to its staging file.
+
+    Ids are minted server-side, but they come back from the client on every
+    later chunk, so re-validate the shape here — this string is about to become
+    a filesystem path and must never be able to escape the staging directory.
+    """
+    if not _UPLOAD_ID_RE.match(upload_id):
+        raise HTTPException(status_code=400, detail="Invalid upload id.")
+    return os.path.join(_UPLOAD_DIR, upload_id)
+
+
+def _sweep_stale_uploads() -> None:
+    """Delete staging files left by uploads that were never finished (the
+    archivist closed the tab, lost the connection, …). Without this the box
+    slowly fills with abandoned multi-hundred-MB zips."""
+    cutoff = time.time() - _UPLOAD_TTL_SECONDS
+    # Housekeeping must never take an upload down with it: a file vanishing
+    # mid-sweep (concurrent upload finishing) is expected, not an error.
+    with contextlib.suppress(FileNotFoundError):
+        for name in os.listdir(_UPLOAD_DIR):
+            path = os.path.join(_UPLOAD_DIR, name)
+            with contextlib.suppress(OSError):
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.unlink(path)
+
+
+def _discard_staged(path: str) -> None:
+    """Best-effort delete — already gone is the desired state either way."""
+    with contextlib.suppress(OSError):
+        os.unlink(path)
+
+
+async def _stage_zip(file: Optional[UploadFile], upload_id: str) -> str:
+    """Resolve this request's zip to a path on disk, accepting either a direct
+    multipart `file` (small batches, unchanged behaviour) or the `upload_id` of
+    a completed chunked upload. The caller must _discard_staged() the result.
+    """
+    if upload_id:
+        path = _upload_path(upload_id)
+        if not os.path.exists(path):
+            raise HTTPException(
+                status_code=409,
+                detail="That upload is no longer on the server (it expired, or the "
+                       "server restarted). Please select the file and try again.",
+            )
+    elif file is not None:
+        os.makedirs(_UPLOAD_DIR, exist_ok=True)
+        path = os.path.join(_UPLOAD_DIR, uuid.uuid4().hex)
+        with open(path, "wb") as fh:
+            while True:
+                block = await file.read(4 * 1024 * 1024)
+                if not block:
+                    break
+                if fh.tell() + len(block) > _UPLOAD_MAX_BYTES:
+                    fh.close()
+                    _discard_staged(path)
+                    raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
+                fh.write(block)
+    else:
+        raise HTTPException(status_code=400, detail="No file uploaded.")
+
+    with open(path, "rb") as fh:
+        magic = fh.read(4)
+    if magic != b"PK\x03\x04":
+        _discard_staged(path)
+        raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+    return path
+
+
+@app.post("/admin/upload-chunk")
+async def admin_upload_chunk(
+    request: Request,
+    chunk: UploadFile = File(...),
+    upload_id: str = Form(""),
+):
+    """Append one slice of a zip to its staging file; return the id to reuse.
+
+    Send the first slice with an empty `upload_id` to start an upload, then
+    echo back the returned id on every following slice. Deliberately does NOT
+    take the admin write lock — an upload can run for minutes and holds no
+    database resources; the lock is taken by the ingest call that follows.
+    """
+    _check_admin(request)
+    os.makedirs(_UPLOAD_DIR, exist_ok=True)
+
+    if upload_id:
+        path = _upload_path(upload_id)
+        if not os.path.exists(path):
+            raise HTTPException(
+                status_code=409,
+                detail="That upload is no longer on the server (it expired, or the "
+                       "server restarted). Please select the file and try again.",
+            )
+    else:
+        _sweep_stale_uploads()
+        upload_id = uuid.uuid4().hex
+        path = _upload_path(upload_id)
+        open(path, "wb").close()
+
+    data = await chunk.read()
+    if os.path.getsize(path) + len(data) > _UPLOAD_MAX_BYTES:
+        _discard_staged(path)
+        raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
+    with open(path, "ab") as fh:
+        fh.write(data)
+
+    return {"ok": True, "upload_id": upload_id, "received": os.path.getsize(path)}
+
+
 @app.post("/admin/upload-docx")
 async def admin_upload_docx(
     request: Request,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    upload_id: str = Form(""),
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
     skip_dirs: str = Form("Texts by Others"),
@@ -2250,15 +2382,12 @@ async def admin_upload_docx(
     is_dry_run = dry_run.lower() == "true"
     skip_set = {d.strip().lower() for d in skip_dirs.split(",") if d.strip()}
 
-    raw = await file.read()
-    if len(raw) > 2 * 1024 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
-    if raw[:4] != b"PK\x03\x04":
-        raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+    zip_path = await _stage_zip(file, upload_id.strip())
 
     try:
         import ingest_docx as _ingest
     except ImportError as exc:
+        _discard_staged(zip_path)
         raise HTTPException(status_code=500, detail=f"ingest_docx module unavailable: {exc}")
 
     processed = 0
@@ -2268,10 +2397,14 @@ async def admin_upload_docx(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            with zipfile.ZipFile(zip_path) as zf:
                 zf.extractall(tmpdir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+        finally:
+            # Everything below reads the extracted tree, so the archive itself
+            # is dead weight from here on — and it can be hundreds of MB.
+            _discard_staged(zip_path)
 
         docx_paths = []
         for dirpath, dirnames, filenames in os.walk(tmpdir):
@@ -2348,7 +2481,8 @@ async def admin_upload_docx(
 @app.post("/admin/batch-update")
 async def admin_batch_update(
     request: Request,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    upload_id: str = Form(""),
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
     _slot: None = Depends(_require_admin_write_slot),
@@ -2362,23 +2496,24 @@ async def admin_batch_update(
     _check_admin(request)
     is_dry_run = dry_run.lower() == "true"
 
-    raw = await file.read()
-    if len(raw) > 2 * 1024 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Zip too large (max 2 GB)")
-    if raw[:4] != b"PK\x03\x04":
-        raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+    zip_path = await _stage_zip(file, upload_id.strip())
 
     try:
         from word_update import run_update, Action as UpdateAction
     except ImportError as exc:
+        _discard_staged(zip_path)
         raise HTTPException(status_code=500, detail=f"word_update module unavailable: {exc}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         try:
-            with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            with zipfile.ZipFile(zip_path) as zf:
                 zf.extractall(tmpdir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="File is not a valid zip archive")
+        finally:
+            # Everything below reads the extracted tree, so the archive itself
+            # is dead weight from here on — and it can be hundreds of MB.
+            _discard_staged(zip_path)
 
         update_root = _find_update_root(tmpdir)
         if not update_root:

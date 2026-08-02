@@ -4,6 +4,7 @@
     POST /admin/batch-update
 """
 import io
+import os
 import time
 import zipfile
 
@@ -505,3 +506,139 @@ def test_batch_update_empty_folders_rejected(app_client):
     )
     assert r.status_code == 400
     assert "no .docx" in r.json()["detail"].lower()
+
+
+# ── Chunked upload ───────────────────────────────────────────────────────────
+#
+# nginx caps a request body at 10 MB and Cloudflare at 100 MB, neither raisable
+# from the deploy account — that ceiling is what silently failed the 2026-08-01
+# corpus update. Big zips are therefore sliced client-side and reassembled here.
+
+
+def _upload_in_chunks(client, payload: bytes, chunk_size: int, headers=ADMIN_HEADERS):
+    """Mirror the browser's slice loop; return the final upload id."""
+    upload_id = ""
+    for start in range(0, len(payload), chunk_size):
+        data = {"upload_id": upload_id} if upload_id else {}
+        r = client.post(
+            "/admin/upload-chunk", headers=headers,
+            files={"chunk": ("slice", payload[start:start + chunk_size],
+                             "application/octet-stream")},
+            data=data,
+        )
+        assert r.status_code == 200, r.text
+        upload_id = r.json()["upload_id"]
+    return upload_id
+
+
+def test_chunked_upload_matches_a_direct_upload(app_client, tmp_path):
+    """The whole point: a zip delivered in slices must ingest exactly as if it
+    had been posted in one request."""
+    docx = tmp_path / "talk.docx"
+    make_docx(docx, title="Chunked Talk ~ 01", body=["first line", "second line"])
+    z = _make_zip({"English/talk.docx": docx})
+
+    # Slice small enough that this zip genuinely spans several requests.
+    upload_id = _upload_in_chunks(app_client, z, chunk_size=64)
+
+    r = app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS,
+        data={"upload_id": upload_id, "dry_run": "false"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["processed"] == 1
+    assert r.json()["failed"] == 0
+
+    # And the record really landed.
+    rows = app_client.get("/admin/events?q=Chunked Talk", headers=ADMIN_HEADERS)
+    assert any(e["title"] == "Chunked Talk ~ 01" for e in rows.json()["events"])
+
+
+def test_chunked_batch_update_applies(app_client, tmp_path):
+    """The structured Add/Modify/Delete path accepts a chunked upload too."""
+    docx = tmp_path / "add.docx"
+    make_docx(docx, title="Chunked Added ~ 01", body=["body"])
+    z = _make_zip({"Add/add.docx": docx})
+
+    upload_id = _upload_in_chunks(app_client, z, chunk_size=100)
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        data={"upload_id": upload_id, "dry_run": "false"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["added"] == 1
+    assert r.json()["failed"] == 0
+
+
+def test_chunked_upload_reassembles_bytes_exactly(app_client):
+    """A corrupt reassembly would show up as a bad zip, not a wrong result —
+    assert the boundary case where the payload doesn't divide evenly."""
+    z = _make_zip({f"Add/f{i}.docx": b"x" * 500 for i in range(20)})
+    assert len(z) % 333 != 0, "pick a chunk size that leaves a partial tail"
+    upload_id = _upload_in_chunks(app_client, z, chunk_size=333)
+
+    # Not valid .docx content, so the batch is rejected for that reason —
+    # proving the zip itself was reassembled and opened correctly.
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        data={"upload_id": upload_id, "dry_run": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["failed"] == 20
+
+
+def test_upload_chunk_requires_admin(app_client):
+    r = app_client.post(
+        "/admin/upload-chunk", headers=BAD_ADMIN_HEADERS,
+        files={"chunk": ("slice", b"data", "application/octet-stream")},
+    )
+    assert r.status_code == 401
+
+
+def test_upload_chunk_rejects_forged_upload_id(app_client):
+    """The id becomes a filesystem path, so a traversal attempt must be
+    refused rather than appended to some file outside the staging dir."""
+    for forged in ("../../../../tmp/pwned", "not-hex", "a" * 31, ""):
+        r = app_client.post(
+            "/admin/upload-chunk", headers=ADMIN_HEADERS,
+            files={"chunk": ("slice", b"data", "application/octet-stream")},
+            data={"upload_id": forged},
+        )
+        # "" means "start a new upload" and is legitimately accepted.
+        expected = 200 if forged == "" else 400
+        assert r.status_code == expected, f"{forged!r} → {r.status_code}"
+
+
+def test_ingest_with_unknown_upload_id_is_rejected(app_client):
+    """An expired/swept upload must fail loudly, never ingest nothing and
+    report success (the 2026-07-02 silent-no-op lesson)."""
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        data={"upload_id": "0" * 32, "dry_run": "true"},
+    )
+    assert r.status_code == 409
+    assert "try again" in r.json()["detail"].lower()
+
+
+def test_ingest_without_file_or_upload_id_is_rejected(app_client):
+    r = app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS, data={"dry_run": "true"},
+    )
+    assert r.status_code == 400
+    assert "no file" in r.json()["detail"].lower()
+
+
+def test_staged_upload_is_deleted_after_ingest(app_client, tmp_path):
+    """Staging files are hundreds of MB; leaving them behind fills the box."""
+    from scripts.cloud_api import _upload_path
+
+    docx = tmp_path / "talk.docx"
+    make_docx(docx, title="Cleanup Talk ~ 01", body=["body"])
+    upload_id = _upload_in_chunks(app_client, _make_zip({"t.docx": docx}), chunk_size=128)
+    assert os.path.exists(_upload_path(upload_id))
+
+    app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS,
+        data={"upload_id": upload_id, "dry_run": "true"},
+    )
+    assert not os.path.exists(_upload_path(upload_id))

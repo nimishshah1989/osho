@@ -66,6 +66,7 @@ E2E VPS 164.52.223.241  (Ubuntu 24.04)
         ├── /api/catalog, /api/tags, /api/clusters, …
         └── /admin/*         — ingest, edit, tag, delete (x-admin-key required)
               ├── /admin/ingest          — paste a single talk (JSON)
+              ├── /admin/upload-chunk    — one slice of a big zip (multipart)
               ├── /admin/upload-docx     — bulk zip of .docx files (multipart)
               └── /admin/batch-update    — Add/Modify/Delete zip batch (multipart)
 
@@ -258,11 +259,24 @@ section with them. **What's removed vs. what's retained:**
   (`frontend/.env.production` → stable `corpus-latest` GitHub Release asset) is
   still set, but **no live frontend component reads it anymore** — it now feeds
   only the corpus-publish tooling and the desktop bundle.
-- **Retained** — the PWA shell still installs (`public/manifest.webmanifest`,
-  `public/sw.js`, `components/PwaRegistrar.tsx`, `components/DesktopGate.tsx`),
-  and the full TypeScript search engine (`frontend/lib/search/`: sqlite-wasm +
-  OPFS web worker, `OfflineProvider`, `engine.ts`, …) stays because **the desktop
-  build depends on it.** Do not delete `lib/search/` thinking it's dead PWA code.
+- **The website is no longer installable at all** (2026-08-02). The remaining
+  "download the offline app" affordance was the PWA install offer, and it is
+  gone: `components/InstallPrompt.tsx` (the "Install app" button in the nav),
+  `components/PwaRegistrar.tsx` and `public/manifest.webmanifest` are deleted,
+  and the `manifest` + `appleWebApp` metadata is off `app/layout.tsx`, so
+  browsers no longer advertise an install action either.
+  **`public/sw.js` is deliberately NOT deleted** — it is now a *kill switch*
+  that unregisters itself and drops its caches. Every browser that visited
+  while the PWA shipped still has the old cache-first worker installed, and a
+  worker only ever updates by re-fetching its own script URL; deleting the file
+  would leave those users pinned to a frozen copy of the site with no way to
+  reach them. Leave the stub in place.
+- **Retained** — `components/DesktopGate.tsx` and the full TypeScript search
+  engine (`frontend/lib/search/`: sqlite-wasm + OPFS web worker,
+  `OfflineProvider`, `engine.ts`, …) stay because **the desktop build depends on
+  them.** Do not delete `lib/search/` thinking it's dead PWA code. Nothing in
+  `desktop/` ever referenced the manifest, the registrar or the service worker
+  (verified before removal), so the Electron app is unaffected.
 - **Desktop app** — `desktop/` is an Electron shell that bundles the built
   frontend and the corpus, offline from first launch. Installers are built in CI
   by `.github/workflows/build-desktop.yml`.
@@ -493,6 +507,18 @@ dry-run.
 > failure the report + admin UI say **"Aborted — no records were changed"** and
 > the counts are labelled *attempted* (Issue 6).
 
+> **Upload size is unlimited, via chunking — don't "simplify" it away.**
+> nginx caps a request body at 10 MB on the site vhost and Cloudflare caps it at
+> 100 MB, and neither can be changed from the deploy account (no passwordless
+> root). So a zip over 8 MB is sliced in the browser and posted a piece at a time
+> to `POST /admin/upload-chunk`, which appends to one staging file under
+> `$TMPDIR/osho-admin-uploads/` and returns an `upload_id`; both ingest endpoints
+> take that id in place of `file`. Ids are server-minted hex and re-validated
+> against `_UPLOAD_ID_RE` on every chunk, because the id becomes a filesystem
+> path. Abandoned uploads are swept after 6 h, and the staging file is deleted
+> as soon as the zip is extracted. Small zips still post directly, unchanged.
+> This is what makes the monthly batch work at all — see Recurring bugs #11.
+
 Both modes accept an optional **corpus version date** (e.g. `"2026-05-24"`)
 that is saved to `corpus_meta` on a successful non-dry-run and shown on the
 Help page as "Data version YYYY-MM-DD" via `CorpusVersionBadge`.
@@ -624,6 +650,41 @@ gitignored — moved between machines by rsync, never committed.
     nothing users see. Lesson: anything the **client** must decode (not just the
     server) has to be validated against the **client's actual decoder** — a
     CLI-level "the file is fine" is not sufficient.
+
+11. **A proxy 413/504 surfaced as "Network error — could not reach the server"**
+    (Anuragi, 2026-08-02). The first monthly corpus update failed on every
+    attempt, in two browsers, with that message — which reads as "the site is
+    down" and sent the archivist looking at his connection. The server had in
+    fact answered, immediately and correctly: **nginx `client_max_body_size` is
+    `10M`** on the `oshoarchives.com` vhost, so the batch zip was rejected with
+    a **413 before it ever reached the app**. Two separate faults:
+    - **The cap.** Verified against production: an 11 MB POST → `413` from
+      `nginx/1.24.0`; a 9 MB POST → clean JSON from FastAPI. Cloudflare imposes
+      a second, *harder* ceiling — a 110 MB POST is rejected by Cloudflare
+      itself (`server: cloudflare`) in under a second, and on this plan that
+      100 MB limit cannot be raised.
+    - **The masking.** The admin UI did `await res.json()` inside a `try`, and
+      nginx/Cloudflare answer with an **HTML** error page. `res.json()` threw a
+      SyntaxError, which the `catch` reported as a network failure — so a
+      precise, actionable server answer was rendered as a generic connectivity
+      error. `readJson()` in `app/admin/page.tsx` now translates the status
+      (413/502/504/524) instead, and every admin caller routes through it.
+      **Lesson: any `catch` around `res.json()` is an error-message liability —
+      the proxies in front of this app do not speak JSON.**
+
+    **The fix, given no root.** The `osho` deploy account is a full sudoer but
+    every command needs a password we don't hold (only
+    `systemctl restart osho-backend.service` is NOPASSWD), so the one-line nginx
+    change was unavailable. Instead the admin UI **slices any zip over 8 MB and
+    posts it a piece at a time** to `POST /admin/upload-chunk`; the server
+    appends the slices to one staging file and `/admin/upload-docx` +
+    `/admin/batch-update` accept an `upload_id` in place of `file`. Every
+    individual request stays far under both ceilings, so **batch size is now
+    unbounded and nginx never has to change**. The staged zip is also what the
+    ingest reads from, so a large upload is no longer held in memory twice.
+    `deploy/nginx-osho.conf` tracks the config (previously it existed *only* on
+    the box) with the `/api/admin/` 100 MB block, should anyone with root ever
+    want to raise the direct-upload path too — but nothing depends on it.
 
 ---
 
