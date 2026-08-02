@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { Library, Search, Sparkles, Sun, Moon, HelpCircle } from 'lucide-react';
 import { useLocale } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
-import { InstallPrompt } from './InstallPrompt';
 
 export default function Nav() {
   const pathname = usePathname();
@@ -90,11 +89,6 @@ export default function Nav() {
           <HelpCircle size={14} />
           <span className="hidden sm:inline">{t('nav.help')}</span>
         </Link>
-        {/* Install button appears only when the browser offers a
-            prompt (most desktop + Android Chrome). iOS users see a
-            short "Share → Add to Home Screen" hint instead. Hides
-            entirely once the user has installed. */}
-        <InstallPrompt />
       </div>
     </nav>
   );
