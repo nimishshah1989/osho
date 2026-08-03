@@ -686,6 +686,43 @@ gitignored — moved between machines by rsync, never committed.
     the box) with the `/api/admin/` 100 MB block, should anyone with root ever
     want to raise the direct-upload path too — but nothing depends on it.
 
+12. **Add-batches timed out where Modify-batches sailed through** (Anuragi,
+    2026-08-02, second failure — after the chunked upload fixed the 413). His
+    295-file `Add/` batch died with a raw browser network error while a
+    290-file `Modify/` batch of the same size processed instantly. Root cause:
+    `_find_existing_event_id` (ingest_docx) falls to a slow path when the exact
+    title match misses — and an **Add never matches** (the record shouldn't
+    exist yet), so every Add re-scanned and re-canonicalised **all ~6,600
+    same-language titles, twice per file** (once in `_process_add`, once in
+    `upsert`). Benchmarked at 14.6 s per 295 Adds on a fast laptop — minutes on
+    the VPS — while the ingest ran *inside the HTTP request*, whose lifetime is
+    bounded by **nginx `proxy_read_timeout 30s`** (site vhost) and Cloudflare's
+    ~100 s. The connection was severed mid-work: Firefox showed
+    "NetworkError when attempting to fetch resource", Brave "Failed to fetch".
+    Two fixes (PR #132):
+    - **Canonical-title index** — a per-connection `TEMP TABLE` of
+      `(canonical_title, language) → id`, built once (~50 ms) and probed per
+      file; maintained by `upsert`/`delete_record` so intra-batch collisions
+      are still caught, and transactional so a dry-run rollback discards it.
+      295 Adds: 14.59 s → 0.03 s. (A Python-side cache keyed on the connection
+      was not possible: `sqlite3.Connection` refuses weakrefs.)
+    - **Background ingest** — `upload-docx`/`batch-update` with
+      `background=true` (the admin UI always sends it) stage + validate
+      synchronously (bad zips still 400 immediately), then run the work in a
+      thread exactly like the reindex button; the UI polls
+      `GET /admin/ingest-status` (2 s) and shows live "Processing… N/M files"
+      progress. **No proxy timeout can ever cut off an ingest again,
+      regardless of batch size.** Sync mode (no flag) is unchanged for
+      tests/curl.
+    Lessons: (a) when one operation type fails and its sibling succeeds at the
+    same payload size, diff their code paths before blaming infrastructure;
+    (b) an E2E harness must run at **production data scale** — the first E2E
+    used a near-empty events table, so the O(n)-per-file scan cost was
+    invisible and the harness passed while production failed; it now seeds
+    ~6,600 events and asserts the ingest POST answers in ~1 s; (c) never do
+    unbounded work inside an HTTP request when a proxy you don't control
+    bounds request lifetime — stage, return, poll.
+
 ---
 
 ## Code conventions

@@ -642,3 +642,99 @@ def test_staged_upload_is_deleted_after_ingest(app_client, tmp_path):
         data={"upload_id": upload_id, "dry_run": "true"},
     )
     assert not os.path.exists(_upload_path(upload_id))
+
+
+# ── Background ingest ────────────────────────────────────────────────────────
+#
+# The admin UI runs every ingest with background=true: the POST returns
+# immediately and the result arrives via GET /admin/ingest-status. This is
+# what makes the flow immune to the proxies' request timeouts (nginx 30 s,
+# Cloudflare ~100 s) that killed Anuragi's 295-file Add batch on 2026-08-02.
+
+
+def _poll_ingest_done(client, timeout_s: float = 30.0) -> dict:
+    """Poll /admin/ingest-status until it leaves 'running'; return the status."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        s = client.get("/admin/ingest-status", headers=ADMIN_HEADERS).json()
+        if s["state"] in ("done", "error"):
+            return s
+        time.sleep(0.05)
+    raise AssertionError("background ingest did not finish in time")
+
+
+def test_background_bulk_ingest_returns_immediately_then_completes(app_client, tmp_path):
+    docx = tmp_path / "bg.docx"
+    make_docx(docx, title="Background Talk ~ 01", body=["body text"])
+    z = _make_zip({"English/bg.docx": docx})
+
+    r = app_client.post(
+        "/admin/upload-docx", headers=ADMIN_HEADERS,
+        files={"file": ("corpus.zip", z, "application/zip")},
+        data={"dry_run": "false", "background": "true"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "state": "running"}
+
+    s = _poll_ingest_done(app_client)
+    assert s["state"] == "done", s
+    assert s["kind"] == "bulk"
+    assert s["result"]["processed"] == 1
+    assert s["result"]["failed"] == 0
+
+    rows = app_client.get("/admin/events?q=Background Talk", headers=ADMIN_HEADERS)
+    assert any(e["title"] == "Background Talk ~ 01" for e in rows.json()["events"])
+
+
+def test_background_batch_update_completes_with_result(app_client, tmp_path):
+    docx = tmp_path / "add.docx"
+    make_docx(docx, title="Background Added ~ 01", body=["body"])
+    z = _make_zip({"Add/add.docx": docx})
+
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        files={"file": ("update.zip", z, "application/zip")},
+        data={"dry_run": "false", "background": "true"},
+    )
+    assert r.status_code == 200, r.text
+    s = _poll_ingest_done(app_client)
+    assert s["state"] == "done", s
+    assert s["result"]["added"] == 1
+    assert s["result"]["failed"] == 0
+
+
+def test_background_failure_surfaces_via_status_not_a_hang(app_client):
+    """A bad zip in background mode must land in state=error with the same
+    actionable message the sync path would have 400'd with."""
+    inner = _make_zip({"Add/talk.docx": b"fake"})
+    outer = _make_zip({"batch/inner.zip": inner})  # double-zipped
+    r = app_client.post(
+        "/admin/batch-update", headers=ADMIN_HEADERS,
+        files={"file": ("update.zip", outer, "application/zip")},
+        data={"dry_run": "true", "background": "true"},
+    )
+    assert r.status_code == 200, r.text
+    s = _poll_ingest_done(app_client)
+    assert s["state"] == "error"
+    assert "double-zip" in s["message"].lower()
+
+
+def test_background_run_releases_the_write_lock(app_client, tmp_path):
+    """After a background run finishes — success OR failure — the next update
+    must be accepted, not 409'd by a leaked lock."""
+    docx = tmp_path / "t.docx"
+    make_docx(docx, title="Lock Release Talk ~ 01", body=["body"])
+    for dry in ("true", "false"):
+        z = _make_zip({"English/t.docx": docx})
+        r = app_client.post(
+            "/admin/upload-docx", headers=ADMIN_HEADERS,
+            files={"file": ("corpus.zip", z, "application/zip")},
+            data={"dry_run": dry, "background": "true"},
+        )
+        assert r.status_code == 200, r.text
+        assert _poll_ingest_done(app_client)["state"] == "done"
+
+
+def test_ingest_status_requires_admin(app_client):
+    r = app_client.get("/admin/ingest-status", headers=BAD_ADMIN_HEADERS)
+    assert r.status_code == 401
