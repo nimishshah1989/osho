@@ -224,7 +224,8 @@ def _list_docx(folder: Path) -> list[Path]:
     )
 
 
-def run_update(root: Path, db_path: Path, dry_run: bool = False) -> RunReport:
+def run_update(root: Path, db_path: Path, dry_run: bool = False,
+               progress=None) -> RunReport:
     """Process root/Add, root/Modify, root/Delete in that order.
 
     Everything happens inside a single transaction. If --dry-run is set,
@@ -233,20 +234,28 @@ def run_update(root: Path, db_path: Path, dry_run: bool = False) -> RunReport:
 
     Any failed file (parse error, missing-when-required, exists-when-not)
     aborts the whole run — the transaction is rolled back so the DB is
-    never left in a partial state."""
+    never left in a partial state.
+
+    `progress`, if given, is called as progress(done, total) after each file
+    so a long batch can report liveness (the admin UI polls it)."""
     report = RunReport()
     conn = sqlite3.connect(db_path)
     try:
         _ensure_translated_from_column(conn)
         _ensure_source_short_column(conn)
         _ensure_role_column(conn)
+        work = [
+            (_process_add, p) for p in _list_docx(root / "Add")
+        ] + [
+            (_process_modify, p) for p in _list_docx(root / "Modify")
+        ] + [
+            (_process_delete, p) for p in _list_docx(root / "Delete")
+        ]
         # Implicit transaction — sqlite3 begins one on the first write.
-        for path in _list_docx(root / "Add"):
-            report.add(_process_add(conn, path))
-        for path in _list_docx(root / "Modify"):
-            report.add(_process_modify(conn, path))
-        for path in _list_docx(root / "Delete"):
-            report.add(_process_delete(conn, path))
+        for n, (fn, path) in enumerate(work, start=1):
+            report.add(fn(conn, path))
+            if progress is not None:
+                progress(n, len(work))
 
         if dry_run or report.failed:
             conn.rollback()

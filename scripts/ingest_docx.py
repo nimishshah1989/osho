@@ -378,6 +378,63 @@ def _title_content_warning(talk: "TalkRecord") -> str | None:
     return None
 
 
+# Per-connection index for the canonical-title lookup. A TEMP table (scoped
+# and lifetime-managed by SQLite itself) rather than a Python-side cache:
+# sqlite3.Connection can't be weak-referenced, and a temp table participates
+# in the batch's transaction, so a dry-run rollback discards it too.
+#
+# Why it exists: an Add NEVER matches the fast path (the record shouldn't
+# exist yet), so before this index every Add fell through to re-scanning and
+# re-canonicalising every same-language title — twice (once in _process_add,
+# once in upsert). At the production corpus (~6,600 English events) that made
+# a 295-file Add batch take minutes while the equivalent Modify batch was
+# instant, and the ingest request died on the proxy's timeout (Anuragi,
+# 2026-08-02). Now the titles are canonicalised once per connection and every
+# lookup after that is an indexed probe.
+_CANON_TABLE = "_canon_title_index"
+
+
+def _canon_table_exists(conn: sqlite3.Connection) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM sqlite_temp_master WHERE type = 'table' AND name = ?",
+        (_CANON_TABLE,),
+    ).fetchone() is not None
+
+
+def _canon_index_lookup(conn: sqlite3.Connection, want: str, language: str) -> str | None:
+    if not _canon_table_exists(conn):
+        conn.create_function("osho_canon_title", 1, _canonical_title, deterministic=True)
+        conn.execute(
+            f"CREATE TEMP TABLE {_CANON_TABLE} AS "
+            "SELECT osho_canon_title(title) AS ck, COALESCE(language, '') AS lang, id "
+            "FROM events"
+        )
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS temp.{_CANON_TABLE}_ix "
+            f"ON {_CANON_TABLE}(ck, lang)"
+        )
+    row = conn.execute(
+        f"SELECT id FROM {_CANON_TABLE} WHERE ck = ? AND lang = ?",
+        (want, language),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _canon_index_note_insert(conn: sqlite3.Connection, title: str, language: str, event_id: str) -> None:
+    """Keep the index true after upsert creates a new event, so a later file
+    in the same batch that collides with it is still detected."""
+    if _canon_table_exists(conn):
+        conn.execute(
+            f"INSERT INTO {_CANON_TABLE} (ck, lang, id) VALUES (?, ?, ?)",
+            (_canonical_title(title), language or "", event_id),
+        )
+
+
+def _canon_index_note_delete(conn: sqlite3.Connection, event_id: str) -> None:
+    if _canon_table_exists(conn):
+        conn.execute(f"DELETE FROM {_CANON_TABLE} WHERE id = ?", (event_id,))
+
+
 def _find_existing_event_id(conn: sqlite3.Connection, title: str, language: str) -> str | None:
     # Fast path: a byte-exact match hits the events(title) lookup and covers
     # the overwhelmingly common case (re-ingesting the same files unchanged).
@@ -389,18 +446,9 @@ def _find_existing_event_id(conn: sqlite3.Connection, title: str, language: str)
         return row[0]
     # Slow path, only when the exact match misses: tolerate invisible title
     # differences (Unicode form, whitespace, dash/tilde glyph) that would
-    # otherwise make the upsert create a duplicate event. Scoped to the same
-    # language and compared on the canonical key. This is an admin-only path
-    # (ingest / batch-update), so the per-call candidate scan is acceptable;
-    # the fast path keeps a clean bulk re-ingest off it entirely.
-    want = _canonical_title(title)
-    for rid, cand in conn.execute(
-        "SELECT id, title FROM events WHERE COALESCE(language, '') = ?",
-        (language,),
-    ):
-        if _canonical_title(cand or "") == want:
-            return rid
-    return None
+    # otherwise make the upsert create a duplicate event. Served by the
+    # per-connection canonical index above.
+    return _canon_index_lookup(conn, _canonical_title(title), language)
 
 
 def _delete_event_rows(conn: sqlite3.Connection, event_id: str) -> None:
@@ -437,6 +485,7 @@ def delete_record(
     ).fetchone():
         conn.execute("DELETE FROM event_tags WHERE event_id = ?", (event_id,))
     conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    _canon_index_note_delete(conn, event_id)
     return event_id, para_count
 
 
@@ -468,6 +517,7 @@ def upsert(conn: sqlite3.Connection, talk: TalkRecord) -> tuple[str, bool]:
                 talk.translated_from, talk.source_short,
             ),
         )
+        _canon_index_note_insert(conn, talk.title, talk.language, event_id)
         created_new = True
 
     conn.executemany(

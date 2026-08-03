@@ -1,4 +1,4 @@
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import contextlib
 import csv
@@ -2129,24 +2129,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _require_admin_write_slot(request: Request):
-    """FastAPI dependency for the ingest / batch-update endpoints: check admin
-    auth, then refuse (409) if a reindex or another write holds the lock, and
-    release it after the request. Stops a rebuild's atomic table-swap from
-    racing a write to the same FTS tables."""
-    _check_admin(request)
-    if not _ADMIN_WRITE_LOCK.acquire(blocking=False):
-        raise HTTPException(
-            status_code=409,
-            detail="A search-index rebuild (or another update) is in progress. "
-                   "Please retry once it finishes.",
-        )
-    try:
-        yield
-    finally:
-        _ADMIN_WRITE_LOCK.release()
-
-
 def _run_reindex_bg():
     """Background worker: rebuild the FTS index with no downtime, updating
     `_reindex_status` as it goes, and release the admin-write lock when done."""
@@ -2362,6 +2344,98 @@ async def admin_upload_chunk(
     return {"ok": True, "upload_id": upload_id, "received": os.path.getsize(path)}
 
 
+# ─── Background ingest ───────────────────────────────────────────────────────
+#
+# The ingest endpoints used to do all their processing inside the HTTP request.
+# Every proxy in front of this app bounds how long a request may take — nginx
+# proxy_read_timeout is 30 s on the site vhost, Cloudflare cuts at ~100 s — and
+# a large Add batch legitimately needs longer, so the connection was severed
+# mid-work and the browser showed a raw network error (Anuragi, 2026-08-02,
+# second failure). Same cure as the FTS rebuild: run the work in a background
+# thread and let the UI poll. The POST validates + stages synchronously (bad
+# zips still fail fast with a 400), then returns immediately; the result the
+# sync path would have returned is stored in _ingest_status for the poller.
+
+_ingest_status_lock = threading.Lock()
+_ingest_status: dict = {
+    "state": "idle",       # idle | running | done | error
+    "kind": None,          # bulk | update
+    "started_at": None,
+    "finished_at": None,
+    "message": "",
+    "result": None,        # on done: the exact payload the sync path returns
+}
+
+
+def _set_ingest_message(msg: str) -> None:
+    with _ingest_status_lock:
+        _ingest_status["message"] = msg
+
+
+def _run_ingest_bg(fn) -> None:
+    """Run one staged ingest to completion, publish the outcome, release the
+    admin write lock (acquired by _start_background_ingest)."""
+    try:
+        result = fn()
+        with _ingest_status_lock:
+            _ingest_status.update(state="done", finished_at=_now_iso(),
+                                  message="", result=result)
+    except HTTPException as ex:
+        with _ingest_status_lock:
+            _ingest_status.update(state="error", finished_at=_now_iso(),
+                                  message=str(ex.detail), result=None)
+    except Exception as ex:  # noqa: BLE001 — surface any failure to the UI
+        with _ingest_status_lock:
+            _ingest_status.update(state="error", finished_at=_now_iso(),
+                                  message=f"Update failed: {ex}", result=None)
+    finally:
+        _ADMIN_WRITE_LOCK.release()
+
+
+def _start_background_ingest(kind: str, fn, zip_path: str) -> dict:
+    if not _ADMIN_WRITE_LOCK.acquire(blocking=False):
+        _discard_staged(zip_path)
+        raise HTTPException(
+            status_code=409,
+            detail="A search-index rebuild (or another update) is in progress. "
+                   "Please retry once it finishes.",
+        )
+    try:
+        with _ingest_status_lock:
+            _ingest_status.update(state="running", kind=kind,
+                                  started_at=_now_iso(), finished_at=None,
+                                  message="Processing…", result=None)
+        threading.Thread(target=_run_ingest_bg, args=(fn,),
+                         name=f"ingest-{kind}", daemon=True).start()
+    except BaseException:
+        # Never leak the lock if we failed to hand it to the worker thread.
+        _ADMIN_WRITE_LOCK.release()
+        raise
+    return {"ok": True, "state": "running"}
+
+
+@app.get("/admin/ingest-status")
+def admin_ingest_status(request: Request):
+    """Current state of the background ingest (admin-gated, safe to poll)."""
+    _check_admin(request)
+    with _ingest_status_lock:
+        return dict(_ingest_status)
+
+
+def _run_locked_sync(fn):
+    """Direct-callers path (tests, curl): same work, inside the request."""
+    if not _ADMIN_WRITE_LOCK.acquire(blocking=False):
+        raise HTTPException(
+            status_code=409,
+            detail="A search-index rebuild (or another update) is in progress. "
+                   "Please retry once it finishes.",
+        )
+    try:
+        return fn()
+    finally:
+        _ADMIN_WRITE_LOCK.release()
+
+
 @app.post("/admin/upload-docx")
 async def admin_upload_docx(
     request: Request,
@@ -2370,20 +2444,29 @@ async def admin_upload_docx(
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
     skip_dirs: str = Form("Texts by Others"),
-    _slot: None = Depends(_require_admin_write_slot),
+    background: str = Form("false"),
 ):
     """Bulk-ingest a zip of .docx files (best-effort: failed files are skipped
     and reported; successful ones are committed unless dry_run=true).
 
     Used for the initial full corpus load or a complete re-sync. Mirrors
-    ingest_docx.py's upsert-on-(title, language) semantics.
+    ingest_docx.py's upsert-on-(title, language) semantics. With
+    background=true the work runs in a thread (poll /admin/ingest-status);
+    the admin UI always uses that mode so no proxy timeout can cut it off.
     """
     _check_admin(request)
     is_dry_run = dry_run.lower() == "true"
     skip_set = {d.strip().lower() for d in skip_dirs.split(",") if d.strip()}
 
     zip_path = await _stage_zip(file, upload_id.strip())
+    run = lambda: _execute_upload_docx(zip_path, is_dry_run, skip_set, corpus_version)  # noqa: E731
+    if background.lower() == "true":
+        return _start_background_ingest("bulk", run, zip_path)
+    return _run_locked_sync(run)
 
+
+def _execute_upload_docx(zip_path: str, is_dry_run: bool, skip_set: set,
+                         corpus_version: str) -> dict:
     try:
         import ingest_docx as _ingest
     except ImportError as exc:
@@ -2436,7 +2519,7 @@ async def admin_upload_docx(
             _ingest._ensure_source_short_column(conn)
             _ingest._ensure_role_column(conn)
 
-            for path in docx_paths:
+            for n, path in enumerate(docx_paths, start=1):
                 rel_path = os.path.relpath(path, tmpdir)
                 try:
                     conn.execute("SAVEPOINT sp_file")
@@ -2453,6 +2536,8 @@ async def admin_upload_docx(
                     failed += 1
                     if len(failures) < 50:
                         failures.append({"file": rel_path, "error": str(ex)})
+                if n % 10 == 0 or n == len(docx_paths):
+                    _set_ingest_message(f"Processing… {n:,}/{len(docx_paths):,} files")
 
             if is_dry_run:
                 conn.rollback()
@@ -2485,19 +2570,27 @@ async def admin_batch_update(
     upload_id: str = Form(""),
     dry_run: str = Form("false"),
     corpus_version: str = Form(""),
-    _slot: None = Depends(_require_admin_write_slot),
+    background: str = Form("false"),
 ):
     """Apply a structured Add/Modify/Delete update batch (all-or-nothing).
 
     The zip must contain Add/, Modify/, Delete/ subfolders — either at the
     top level or one level deep inside a dated folder like
     WordDB 2027-01-01/. Mirrors word_update.py's run_update() semantics.
+    With background=true the work runs in a thread (poll
+    /admin/ingest-status); the admin UI always uses that mode.
     """
     _check_admin(request)
     is_dry_run = dry_run.lower() == "true"
 
     zip_path = await _stage_zip(file, upload_id.strip())
+    run = lambda: _execute_batch_update(zip_path, is_dry_run, corpus_version)  # noqa: E731
+    if background.lower() == "true":
+        return _start_background_ingest("update", run, zip_path)
+    return _run_locked_sync(run)
 
+
+def _execute_batch_update(zip_path: str, is_dry_run: bool, corpus_version: str) -> dict:
     try:
         from word_update import run_update, Action as UpdateAction
     except ImportError as exc:
@@ -2530,6 +2623,8 @@ async def admin_batch_update(
             pathlib.Path(update_root),
             pathlib.Path(DB_PATH),
             dry_run=is_dry_run,
+            progress=lambda done, total: _set_ingest_message(
+                f"Processing… {done:,}/{total:,} files"),
         )
 
     # Never accept a no-op batch silently: folders present but no .docx inside.

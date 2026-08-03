@@ -442,6 +442,8 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
   const [showFailures, setShowFailures] = useState(false);
   // null unless a chunked upload is in flight.
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  // Live server-side progress ("Processing… 120/295 files") while polling.
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
 
   const reset = () => {
     setBulkResult(null); setUpdateResult(null);
@@ -456,6 +458,12 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
     const fd = new FormData();
     fd.append('dry_run', dryRun ? 'true' : 'false');
     if (corpusVersion.trim()) fd.append('corpus_version', corpusVersion.trim());
+    // The processing runs in a background thread on the server and we poll for
+    // the result. Doing the work inside the POST looked simpler but cannot
+    // work: nginx cuts a request at 30 s and Cloudflare at ~100 s, and a large
+    // Add batch legitimately needs longer — the connection died mid-work and
+    // surfaced as a raw browser network error (Anuragi, 2026-08-02).
+    fd.append('background', 'true');
     const endpoint = mode === 'bulk' ? 'upload-docx' : 'batch-update';
     try {
       if (file.size > CHUNK_BYTES) {
@@ -468,12 +476,35 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
       const res = await apiForm(endpoint, adminKey, fd);
       const data = await readJson(res);
       if (!res.ok) { setError(data.detail ?? 'Request failed.'); return; }
-      if (mode === 'bulk') setBulkResult(data as BulkResult);
-      else setUpdateResult(data as UpdateResult);
+
+      // Poll until the background run finishes. Transient poll failures are
+      // tolerated (same approach as the reindex panel) — the server bounds
+      // the work, so only a definitive state ends the loop.
+      let misses = 0;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 2000));
+        let status;
+        try {
+          status = await readJson(await api('ingest-status', adminKey));
+          misses = 0;
+        } catch {
+          if (++misses >= 5) throw new Error('Lost contact with the server while it was processing. The update may still be running — reload this page in a minute and check the archive before retrying.');
+          continue;
+        }
+        if (status.state === 'done') {
+          if (mode === 'bulk') setBulkResult(status.result as BulkResult);
+          else setUpdateResult(status.result as UpdateResult);
+          break;
+        }
+        if (status.state === 'error') { setError(status.message || 'The update failed.'); break; }
+        if (status.state === 'idle') { setError('The server restarted while processing. Check the archive, then retry.'); break; }
+        setProgressMsg(status.message || 'Processing…');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error — could not reach the server.');
     } finally {
       setUploadPct(null);
+      setProgressMsg(null);
       setLoading(false);
     }
   };
@@ -481,7 +512,7 @@ function CorpusUpdateTab({ adminKey }: { adminKey: string }) {
   const btnLabel = uploadPct !== null
     ? `Uploading… ${uploadPct}%`
     : loading
-    ? 'Processing…'
+    ? (progressMsg ?? 'Processing…')
     : dryRun
     ? 'Run Dry Run'
     : mode === 'bulk'
