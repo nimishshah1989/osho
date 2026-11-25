@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useOfflineEngine } from '../../lib/search/OfflineProvider';
 import { catalogApi } from '../../lib/search/searchApi';
+import LanguageTag from '../LanguageTag';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -501,13 +502,17 @@ function SeriesCard({
           style={{ backgroundColor: s.theme.bg }}
         >
           {s.talks.map((ev) => (
-            <div key={ev.id} className="flex items-center justify-between gap-2 group">
+            // Full title wraps (no truncate) and each row carries its language,
+            // so the EN and HI copies of a talk are distinguishable
+            // (Sugit 2026-11-19, item 1).
+            <div key={ev.id} className="flex items-start justify-between gap-2 group">
               <Link
                 href={`/read?event_id=${encodeURIComponent(ev.id)}`}
-                className="text-[13px] text-stone-700 dark:text-ivory/80 hover:text-gold truncate flex-1"
+                className="text-[13px] leading-snug text-stone-700 dark:text-ivory/80 hover:text-gold break-words min-w-0 flex-1"
               >
                 {ev.title ?? 'Untitled'}
               </Link>
+              <LanguageTag language={ev.language} />
               <span className="text-[11px] text-stone-400 dark:text-ivory/40 flex-shrink-0 tabular-nums">
                 {(ev.date ?? '').slice(0, 4)}
               </span>

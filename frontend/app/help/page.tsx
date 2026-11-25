@@ -49,7 +49,7 @@ export default function HelpPage() {
           </p>
 
           {/* ── Search modes ── */}
-          <Section title="Search Modes">
+          <Section title="Search Modes (Match)">
             <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
               Choose the mode using the <span className="text-[rgb(var(--fg))]">Match</span> filter
               below the search bar.
@@ -66,10 +66,29 @@ export default function HelpPage() {
             <Table rows={[
               ['love meditation',    'Both words must appear (anywhere in the discourse)'],
               ['"love is god"',      'Exact phrase — words in this exact order'],
+              ['"your name" Arjuna', 'The exact phrase in quotes and the word Arjuna must both appear, in the same paragraph'],
               ['meditat*',           'Prefix / wildcard — matches meditation, meditating, meditativeness …'],
               ['title:vigyan',       'Search only in discourse titles'],
               ['love OR compassion', 'Either word (at least one must appear)'],
             ]} />
+          </Section>
+
+          {/* ── Proximity / Near ── */}
+          <Section title="Proximity Search (“Within N words”)">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
+              Choose <span className="text-[rgb(var(--fg))]">Within N words</span> in the
+              Match filter to find records where two or more words appear close together —
+              within the same sentence, paragraph, or a few paragraphs depending on the
+              distance (N) you set. Very common words like “the” or “your” are ignored.
+            </p>
+            <Table rows={[
+              ['Distance 10',  'Words within ~10 tokens (a short phrase or sentence)'],
+              ['Distance 30',  'Words within ~30 tokens (a sentence or two) — default'],
+              ['Distance 100', 'Words within a passage (several sentences or paragraphs)'],
+            ]} />
+            <p className="text-[12px] text-stone-400 dark:text-ivory/40 mt-4">
+              Words can appear in the same paragraph or in immediately adjacent paragraphs.
+            </p>
           </Section>
 
           {/* ── Spelling (stemming) ── */}
@@ -84,6 +103,43 @@ export default function HelpPage() {
             <Table rows={[
               ['Stemmed', 'Default. Matches word families — “teach” finds teacher, teaching, teaches; अनन्त matches अनंत.'],
               ['Exact',   'Matches the literal word only, like OCTP and the CD-ROM — “teach” matches only “teach”.'],
+            ]} />
+          </Section>
+
+          {/* ── Language filter ── */}
+          <Section title="Language Filter">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
+              Use the <span className="text-[rgb(var(--fg))]">Language</span> filter below the search
+              bar to restrict results.
+            </p>
+            <Table rows={[
+              ['All',      'Search both English and Hindi records (default)'],
+              ['Original', 'Original, non-translated discourses only'],
+              ['English',  'English-language records only'],
+              ['Hindi',    'Hindi-language records only'],
+            ]} />
+          </Section>
+
+          {/* ── Date filter ── */}
+          <Section title="Date / Period Filter">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
+              Enter a year range in the <span className="text-[rgb(var(--fg))]">Period</span> fields
+              (e.g. <span className="font-mono text-gold">1974</span> –{' '}
+              <span className="font-mono text-gold">1981</span>) to limit results to discourses
+              given during that period. Discourses span 1962 – 1990. Leave blank to search all years.
+            </p>
+          </Section>
+
+          {/* ── Sort ── */}
+          <Section title="Sort Order">
+            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
+              Use the <span className="text-[rgb(var(--fg))]">Sort</span> control (last in the
+              filter row) to order the results.
+            </p>
+            <Table rows={[
+              ['Rank',  'Most relevant first — best keyword match, weighted by how often the words appear (default).'],
+              ['Time',  'Chronological — earliest discourses first.'],
+              ['Title', 'Alphabetical by discourse title.'],
             ]} />
           </Section>
 
@@ -123,76 +179,6 @@ export default function HelpPage() {
               Keyboard and Gboard. No special notation required: just type phonetically.
             </p>
 
-            <h3 className="text-[10px] tracking-[0.25em] uppercase text-stone-400 dark:text-ivory/40 mb-3">
-              Common examples
-            </h3>
-            <Table rows={[
-              ['prem',      'प्रेम',    'love'],
-              ['dhyan',     'ध्यान',    'meditation'],
-              ['nahin',     'नहीं',     'no / not'],
-              ['thik',      'ठीक',      'correct / okay'],
-              ['sannyas',   'सन्न्यास', 'renunciation'],
-              ['anand',     'आनंद',     'bliss'],
-              ['satya',     'सत्य',     'truth'],
-              ['shanti',    'शांति',    'peace'],
-              ['mukti',     'मुक्ति',   'liberation'],
-              ['prabhu',    'प्रभु',    'God / Lord'],
-            ]} />
-          </Section>
-
-          {/* ── Proximity / Near ── */}
-          <Section title="Proximity Search (“Within N words”)">
-            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Choose <span className="text-[rgb(var(--fg))]">Within N words</span> in the
-              Match filter to find records where two or more words appear close together —
-              within the same sentence, paragraph, or a few paragraphs depending on the
-              distance (N) you set.
-            </p>
-            <Table rows={[
-              ['Distance 10',  'Words within ~10 tokens (a short phrase or sentence)'],
-              ['Distance 30',  'Words within ~30 tokens (a sentence or two) — default'],
-              ['Distance 100', 'Words within a passage (several sentences or paragraphs)'],
-            ]} />
-            <p className="text-[12px] text-stone-400 dark:text-ivory/40 mt-4">
-              Words can appear in the same paragraph or in immediately adjacent paragraphs.
-            </p>
-          </Section>
-
-          {/* ── Language filter ── */}
-          <Section title="Language Filter">
-            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Use the <span className="text-[rgb(var(--fg))]">Language</span> filter below the search
-              bar to restrict results.
-            </p>
-            <Table rows={[
-              ['All',      'Search both English and Hindi records (default)'],
-              ['Original', 'Original, non-translated discourses only'],
-              ['English',  'English-language records only'],
-              ['Hindi',    'Hindi-language records only'],
-            ]} />
-          </Section>
-
-          {/* ── Sort ── */}
-          <Section title="Sort Order">
-            <p className="text-[14px] text-stone-500 dark:text-ivory/60 mb-4 leading-relaxed">
-              Use the <span className="text-[rgb(var(--fg))]">Sort</span> control (last in the
-              filter row) to order the results.
-            </p>
-            <Table rows={[
-              ['Rank',  'Most relevant first — best keyword match, weighted by how often the words appear (default).'],
-              ['Time',  'Chronological — earliest discourses first.'],
-              ['Title', 'Alphabetical by discourse title.'],
-            ]} />
-          </Section>
-
-          {/* ── Date filter ── */}
-          <Section title="Date / Period Filter">
-            <p className="text-[14px] text-stone-500 dark:text-ivory/60 leading-relaxed">
-              Enter a year range in the <span className="text-[rgb(var(--fg))]">Period</span> fields
-              (e.g. <span className="font-mono text-gold">1974</span> –{' '}
-              <span className="font-mono text-gold">1981</span>) to limit results to discourses
-              given during that period. Discourses span 1962 – 1990. Leave blank to search all years.
-            </p>
           </Section>
 
           {/* ── sannyas.wiki ── */}
