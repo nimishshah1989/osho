@@ -769,28 +769,21 @@ def test_date_range_endpoint_includes_second_year_of_slash_date(app_client):
     assert data["min_year"] == "1971"
 
 
-# ── Shailendra text stripping ────────────────────────────
+# ── Paragraph whitespace trim (kept when Shailendra stripping was removed) ──
 
-def test_shailendra_text_stripped_from_search_results(app_client):
-    """'source: Shailendra's Hindi collection' should be stripped from content."""
-    r = app_client.get("/api/search?q=प्रवचन महत्वपूर्ण")
-    data = r.json()
-    for ev in data["events"]:
-        for hit in ev["hits"]:
-            assert "Shailendra" not in hit["content"], (
-                f"Shailendra text not stripped: {hit['content'][:100]}"
-            )
+def test_search_hit_content_is_trimmed(app_client):
+    data = app_client.get("/api/search?q=प्रवचन महत्वपूर्ण").json()
+    # Hits ship `hl` instead of `content` when markers are present (#105).
+    contents = [h.get("content") or h.get("hl") or "" for ev in data["events"] for h in ev["hits"]]
+    contents = [c for c in contents if c]
+    assert contents
+    assert all(c == c.strip() for c in contents)
 
 
-def test_shailendra_text_stripped_from_discourse(app_client):
-    """Full discourse should also have Shailendra text stripped."""
-    r = app_client.get("/api/discourse?event_id=h3")
-    assert r.status_code == 200
-    data = r.json()
-    for p in data["paragraphs"]:
-        assert "Shailendra" not in p["content"], (
-            f"Shailendra text not stripped in discourse: {p['content'][:100]}"
-        )
+def test_discourse_paragraphs_are_trimmed(app_client):
+    data = app_client.get("/api/discourse?event_id=h3").json()
+    p = [p for p in data["paragraphs"] if "प्रवचन" in p["content"]][0]
+    assert p["content"] == "यह प्रवचन बहुत महत्वपूर्ण है।"
 
 
 # ── Metadata paragraph filtering ─────────────────────────

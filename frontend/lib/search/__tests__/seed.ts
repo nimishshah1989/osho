@@ -86,7 +86,7 @@ export function seedDatabase(): { db: BetterSqlite3.Database; engine: Database }
     [10, 'h2', 3, 'धन धर्म और विश्वास — ये तीनों साथ चलते हैं।'],
     [11, 'h2', 8, 'ध्यान में बैठो और मौन हो जाओ।'],
     [12, 'h3', 2, 'धन का मूल्य धर्म से है और विश्वास से जीवन चलता है।'],
-    [13, 'h3', 5, "source: Shailendra's Hindi collection\nयह प्रवचन बहुत महत्वपूर्ण है।"],
+    [13, 'h3', 5, "\nयह प्रवचन बहुत महत्वपूर्ण है।\n"],
     [14, 't1', 1, 'The path of meditation is the path of silence and awareness.'],
     [15, 'p1', 1, 'Nietzsche was a great philosopher. Nietzsche understood the superman.'],
     [16, 'p1', 3, 'Nietzsche proclaimed God is dead. This was Nietzsche\'s greatest insight.'],

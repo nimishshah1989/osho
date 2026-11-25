@@ -8,7 +8,7 @@ Includes both English and Hindi seed data to cover:
 - Hindi/Devanagari search
 - Language filtering
 - Date range filtering
-- Shailendra text stripping
+- Paragraph whitespace trimming
 - Duplicate detection
 """
 
@@ -134,7 +134,7 @@ def _seed_db(path: str) -> None:
         (11, "h2", 8, "ध्यान में बैठो और मौन हो जाओ।"),
         (12, "h3", 2, "धन का मूल्य धर्म से है और विश्वास से जीवन चलता है।"),
         (13, "h3", 5,
-         "source: Shailendra's Hindi collection\nयह प्रवचन बहुत महत्वपूर्ण है।"),
+         "\nयह प्रवचन बहुत महत्वपूर्ण है।\n"),
         # Translation paragraph
         (14, "t1", 1, "The path of meditation is the path of silence and awareness."),
         # Proximity search: many Nietzsche mentions in Light on the Path

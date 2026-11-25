@@ -187,14 +187,13 @@ LENS_PALETTE = {
     "Unknown":       "#94a3b8",
 }
 
-_SHAILENDRA_RE = re.compile(
-    r'\s*source\s*:\s*Shailendra.s\s+Hindi\s+collection\s*',
-    re.IGNORECASE,
-)
-
-
-def _strip_shailendra(text: str) -> str:
-    return _SHAILENDRA_RE.sub('', text).strip()
+def _trim_text(text: str) -> str:
+    # Formerly _strip_shailendra, which also removed the "source: Shailendra's
+    # Hindi collection" attribution on the fly. The source documents no longer
+    # carry it (Sugit 2026-11-19, item 4; live corpus has 0 matches), so only
+    # the whitespace trim it always applied is kept — output is otherwise
+    # byte-identical.
+    return text.strip()
 
 
 def _palette(name: str) -> str:
@@ -602,7 +601,7 @@ def _is_meta_paragraph(seq: int, content: str) -> bool:
     them in the totals while hiding them from the snippets)."""
     return (
         seq == 0
-        or _strip_shailendra(content or '').lower().startswith("event page in sannyas")
+        or _trim_text(content or '').lower().startswith("event page in sannyas")
     )
 
 
@@ -1091,9 +1090,9 @@ def _record_level_search(
             # the maps as-is so these hits fall back to empty content.
             continue
         for r in hrows:
-            content_map[r['paragraph_id']] = _strip_shailendra(r['content'] or '')
+            content_map[r['paragraph_id']] = _trim_text(r['content'] or '')
             hl_map[r['paragraph_id']] = (
-                _strip_shailendra(r['hl'] or '')
+                _trim_text(r['hl'] or '')
                 .replace('\x02', '«')
                 .replace('\x03', '»')
             )
@@ -1548,14 +1547,14 @@ def search(
                 }
             ev = events[ev_id]
             ev["hit_count"] += 1
-            content = _strip_shailendra(r["content"])
+            content = _trim_text(r["content"])
             is_meta = (
                 r["sequence_number"] == 0
                 or content.lower().startswith("event page in sannyas")
             )
             if len(ev["hits"]) < 3 and not is_meta:
                 raw_hl = r["hl"] or r["content"]
-                hl = _strip_shailendra(raw_hl).replace('\x02', '«').replace('\x03', '»')
+                hl = _trim_text(raw_hl).replace('\x02', '«').replace('\x03', '»')
                 # When hl carries «» markers it is the same preview text as
                 # content; the frontend renders from hl, so drop content to
                 # avoid doubling the payload (mirrors the record-level path).
@@ -1922,7 +1921,7 @@ def discourse(
                     if '\x02' not in raw_hl:
                         continue
                     hl_map[row["paragraph_id"]] = (
-                        _strip_shailendra(raw_hl)
+                        _trim_text(raw_hl)
                         .replace('\x02', '«')
                         .replace('\x03', '»')
                     )
@@ -1943,7 +1942,7 @@ def discourse(
         paragraphs = [
             {
                 "sequence_number": r["sequence_number"],
-                "content": _strip_shailendra(r["content"]),
+                "content": _trim_text(r["content"]),
                 **({"role": r["role"]} if r["role"] else {}),
                 **({"hl": hl_map[r["id"]]} if r["id"] in hl_map else {}),
             }

@@ -405,11 +405,10 @@ describe('discourse()', () => {
     expect(() => discourse(freshEngine(), { eventId: 'nonexistent' })).toThrow(SearchError);
   });
 
-  it('strips Shailendra source line from content', () => {
+  it('trims paragraph whitespace (mirrors _trim_text)', () => {
     const r = discourse(freshEngine(), { eventId: 'h3' });
-    for (const p of r.paragraphs) {
-      expect(p.content).not.toContain('Shailendra');
-    }
+    const p = r.paragraphs.find((x) => x.content.includes('प्रवचन'));
+    expect(p?.content).toBe('यह प्रवचन बहुत महत्वपूर्ण है।');
   });
 
   it('attaches hl markers when q= is provided', () => {
@@ -420,16 +419,15 @@ describe('discourse()', () => {
 });
 
 
-// ─── Shailendra stripping in search hits ─────────────────────────────────
+// ─── Search hit content is whitespace-trimmed ─────────────────────────────
 
-describe('Shailendra stripping in search hits', () => {
-  it('removes the source line from displayed hits', () => {
+describe('search hit trimming', () => {
+  it('returns trimmed hit content', () => {
     const r = search(freshEngine(), { q: 'प्रवचन महत्वपूर्ण' });
-    for (const ev of r.events) {
-      for (const hit of ev.hits) {
-        expect(hit.content).not.toContain('Shailendra');
-      }
-    }
+    // Hits ship `hl` instead of `content` when markers are present (#105).
+    const contents = r.events.flatMap((ev) => ev.hits.map((h) => h.content || h.hl || '')).filter(Boolean);
+    expect(contents.length).toBeGreaterThan(0);
+    for (const c of contents) expect(c).toBe(c.trim());
   });
 });
 
