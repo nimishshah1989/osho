@@ -116,6 +116,8 @@ const EN: Dict = {
   'read.error': 'Discourse unavailable',
   'read.empty': 'This discourse has no paragraphs indexed yet.',
   'read.searchInstead': 'Search for this instead',
+  'read.copyLink': 'Copy link',
+  'read.linkCopied': 'Link copied',
 
   'nav.help': 'Help',
 
@@ -243,6 +245,8 @@ const HI: Dict = {
   'read.error': 'प्रवचन उपलब्ध नहीं',
   'read.empty': 'इस प्रवचन के अंश अभी तैयार नहीं हैं।',
   'read.searchInstead': 'इसके बदले खोज में देखो',
+  'read.copyLink': 'लिंक कॉपी करें',
+  'read.linkCopied': 'लिंक कॉपी हुआ',
 
   'nav.help': 'मदद',
 

@@ -897,3 +897,85 @@ def test_discourse_near_single_paragraph_highlights_correct(app_client):
     assert hl_seqs == [20], (
         f"Expected only seq 20 highlighted, got {hl_seqs}"
     )
+
+
+# ── Readable deep-link refs (Sugit 2026-11-19, item 3) ───
+
+def _add_bilingual_pair():
+    """A talk in both languages under one title — the case a ref must
+    disambiguate by its _LEN / _LHI suffix."""
+    import sqlite3
+    from scripts import cloud_api
+    c = sqlite3.connect(cloud_api.DB_PATH)
+    c.executemany(
+        "INSERT INTO events (id,title,date,location,language) VALUES (?,?,?,?,?)",
+        [("zm_en", "The Zen Manifesto ~ 11", "1989-04-10-pm-19:00", "Pune", "English"),
+         ("zm_hi", "The Zen Manifesto ~ 11", "1989-04-10-pm-19:00", "Pune", "Hindi")],
+    )
+    c.executemany(
+        "INSERT INTO paragraphs (event_id,sequence_number,content) VALUES (?,?,?)",
+        [("zm_en", 1, "english body"), ("zm_hi", 1, "हिंदी पाठ")],
+    )
+    c.commit()
+    c.close()
+
+
+def test_ref_resolves_by_language_suffix(app_client):
+    _add_bilingual_pair()
+    en = app_client.get("/api/discourse", params={"ref": "The_Zen_Manifesto_~_11_LEN"})
+    hi = app_client.get("/api/discourse", params={"ref": "The_Zen_Manifesto_~_11_LHI"})
+    assert en.status_code == 200 and en.json()["event"]["id"] == "zm_en"
+    assert hi.status_code == 200 and hi.json()["event"]["id"] == "zm_hi"
+
+
+def test_ref_accepted_in_event_id_param(app_client):
+    """Sugit's proposed link shape: /read?event_id=The_Zen_Manifesto_~_11_LEN."""
+    _add_bilingual_pair()
+    r = app_client.get("/api/discourse", params={"event_id": "The_Zen_Manifesto_~_11_LHI"})
+    assert r.status_code == 200 and r.json()["event"]["id"] == "zm_hi"
+
+
+def test_ref_is_normalisation_tolerant(app_client):
+    _add_bilingual_pair()
+    for ref in ("the_zen_manifesto_~_11_LEN", "The_Zen_Manifesto_-_11_LEN",
+                "The Zen Manifesto ~ 11_LEN", "The_Zen__Manifesto_~_11_len"):
+        r = app_client.get("/api/discourse", params={"ref": ref})
+        assert r.status_code == 200, ref
+        assert r.json()["event"]["id"] == "zm_en", ref
+
+
+def test_discourse_returns_round_tripping_ref(app_client):
+    _add_bilingual_pair()
+    ev = app_client.get("/api/discourse", params={"event_id": "zm_hi"}).json()["event"]
+    assert ev["ref"] == "The_Zen_Manifesto_~_11_LHI"
+    back = app_client.get("/api/discourse", params={"ref": ev["ref"]}).json()["event"]
+    assert back["id"] == "zm_hi"
+
+
+def test_unknown_or_wrong_language_ref_is_404(app_client):
+    _add_bilingual_pair()
+    assert app_client.get("/api/discourse", params={"ref": "No_Such_Talk_~_01_LEN"}).status_code == 404
+    assert app_client.get("/api/discourse", params={"ref": "The_Zen_Manifesto_~_11_LXX"}).status_code == 404
+    assert app_client.get("/api/discourse", params={"ref": "The_Zen_Manifesto_~_11"}).status_code == 404
+
+
+def test_ref_omitted_when_ambiguous(app_client):
+    """A legacy duplicate (same title + language twice) must not get a ref:
+    a shared link could otherwise open the other copy."""
+    import sqlite3
+    from scripts import cloud_api
+    _add_bilingual_pair()
+    c = sqlite3.connect(cloud_api.DB_PATH)
+    c.execute("INSERT INTO events (id,title,date,location,language) VALUES "
+              "('zm_en2','The Zen Manifesto ~ 11','1989-04-11','Pune','English')")
+    c.commit(); c.close()
+    ev = app_client.get("/api/discourse", params={"event_id": "zm_en"}).json()["event"]
+    assert "ref" not in ev
+
+
+def test_existing_event_id_and_title_lookups_unchanged(app_client):
+    _add_bilingual_pair()
+    assert app_client.get("/api/discourse", params={"event_id": "zm_en"}).json()["event"]["id"] == "zm_en"
+    assert app_client.get("/api/discourse", params={"event_id": "does-not-exist"}).status_code == 404
+    assert app_client.get("/api/discourse", params={"title": "The Zen Manifesto ~ 11"}).status_code == 200
+    assert app_client.get("/api/discourse").status_code == 400

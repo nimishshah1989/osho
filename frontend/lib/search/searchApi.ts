@@ -127,6 +127,7 @@ export async function discourseApi(
   const params = new URLSearchParams();
   if (opts.title)   params.set('title',   opts.title);
   if (opts.eventId) params.set('event_id', opts.eventId);
+  if (opts.ref)     params.set('ref',     opts.ref);
   if (opts.q)       params.set('q', opts.q);
   if (opts.exact)   params.set('exact',   'true');
   const r = await fetchWithRetry(`/api/discourse?${params.toString()}`);

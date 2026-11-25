@@ -1767,15 +1767,91 @@ def clusters(lens: str = "themes", limit: int = 20):
     return {"lens": lens, "clusters": clusters_out}
 
 
+# ─── Readable deep-link refs (Sugit 2026-11-19, item 3) ──────────────────────
+#
+# A record is addressable by a human-readable ref built from its identity,
+# (title, language):  "The Zen Manifesto ~ 11" + English -> "The_Zen_Manifesto_~_11_LEN"
+# (spaces -> "_", then "_L" + a 2-letter language code — the same _LEN / _LHI
+# suffix convention the archivists' .docx filenames use). External sites
+# (sannyas.wiki, …) can link /read?ref=… without knowing the opaque event id.
+#
+# Resolution is normalisation-tolerant via ingest_docx._canonical_title (NFC,
+# whitespace, dash/tilde family, case), the same rule that defines record
+# identity on ingest, so a link survives cosmetic title differences. A ref
+# names a (title, language) pair, so it keeps working across a delete +
+# re-add of the record (which mints a new id) — but not across a title
+# rename. The numeric/uuid event_id links keep working unchanged.
+_REF_RE = re.compile(r"^(?P<title>.+?)_L(?P<code>[A-Z]{2})$", re.IGNORECASE)
+
+
+def _lang_code(language: str | None) -> str:
+    lang = (language or "").strip()
+    return lang[:2].upper() if lang else ""
+
+
+def _event_ref(title: str | None, language: str | None) -> str | None:
+    code = _lang_code(language)
+    t = (title or "").strip()
+    if not t or not code:
+        return None
+    return "_".join(t.split()) + "_L" + code
+
+
+def _ref_canon(title: str) -> str:
+    try:
+        from ingest_docx import _canonical_title
+    except Exception:  # pragma: no cover — ingest module always ships alongside
+        def _canonical_title(t: str) -> str:
+            return " ".join(unicodedata.normalize("NFC", t).split()).casefold()
+    # "_" and " " are interchangeable in a ref; compare with both as spaces.
+    return _canonical_title(title.replace("_", " "))
+
+
+def _resolve_ref_ids(conn: sqlite3.Connection, ref: str) -> list[str]:
+    """Every event id the ref names, earliest date first. Normally exactly one
+    (record identity is (title, language)); more only for a legacy duplicate."""
+    m = _REF_RE.match(unicodedata.normalize("NFC", (ref or "").strip()))
+    if not m:
+        return []
+    code = m.group("code").upper()
+    want = _ref_canon(m.group("title"))
+    # Language codes map to whatever spelling(s) the DB uses ("English"/"en").
+    langs = [
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT language FROM events WHERE language IS NOT NULL"
+        ).fetchall()
+        if _lang_code(r[0]) == code
+    ]
+    if not langs:
+        return []
+    ph = ",".join("?" * len(langs))
+    # Fast path: verbatim title (the ref with "_" -> " ").
+    exact = conn.execute(
+        f"SELECT id FROM events WHERE title = ? AND language IN ({ph})"
+        " ORDER BY COALESCE(date, ''), id",
+        [m.group("title").replace("_", " "), *langs],
+    ).fetchall()
+    if exact:
+        return [r[0] for r in exact]
+    # Slow path: canonical compare over that language's titles (~ms).
+    rows = conn.execute(
+        f"SELECT id, title FROM events WHERE language IN ({ph})"
+        " ORDER BY COALESCE(date, ''), id",
+        langs,
+    ).fetchall()
+    return [r[0] for r in rows if r[1] and _ref_canon(r[1]) == want]
+
+
 @app.get("/api/discourse")
 def discourse(
     title: str | None = None,
     event_id: str | None = None,
     q: str | None = None,
     exact: bool = False,
+    ref: str | None = None,
 ):
-    if not title and not event_id:
-        raise HTTPException(status_code=400, detail="Provide title or event_id")
+    if not title and not event_id and not ref:
+        raise HTTPException(status_code=400, detail="Provide title, event_id or ref")
     if not os.path.exists(DB_PATH):
         raise HTTPException(status_code=404, detail="Discourse store unavailable")
 
@@ -1786,22 +1862,35 @@ def discourse(
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
+        _EV_COLS = ("SELECT id, title, date, location, language, "
+                    "translated_from, source_short FROM events")
+        ev = None
         if event_id:
+            cur.execute(_EV_COLS + " WHERE id = ?", (event_id,))
+            ev = cur.fetchone()
+            # Also accept a readable ref in event_id, so the exact link shape
+            # Sugit proposed (/read?event_id=The_Zen_Manifesto_~_11_LEN) works.
+            if not ev and not ref and _REF_RE.match(event_id):
+                ref = event_id
+        if not ev and ref:
+            ids = _resolve_ref_ids(conn, ref)
+            if ids:
+                cur.execute(_EV_COLS + " WHERE id = ?", (ids[0],))
+                ev = cur.fetchone()
+        elif not ev and title and not event_id:
             cur.execute(
-                "SELECT id, title, date, location, language, "
-                "translated_from, source_short FROM events WHERE id = ?",
-                (event_id,),
-            )
-        else:
-            cur.execute(
-                "SELECT id, title, date, location, language, "
-                "translated_from, source_short FROM events"
-                " WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
+                _EV_COLS + " WHERE title = ? ORDER BY COALESCE(date, '') LIMIT 1",
                 (title,),
             )
-        ev = cur.fetchone()
+            ev = cur.fetchone()
         if not ev:
             raise HTTPException(status_code=404, detail="Discourse not found")
+
+        # Readable permalink for this record — only when it resolves back to
+        # exactly this record, so a shared link can never land elsewhere.
+        ev_ref = _event_ref(ev["title"], ev["language"])
+        if ev_ref and _resolve_ref_ids(conn, ev_ref) != [ev["id"]]:
+            ev_ref = None
 
         cur.execute(
             "SELECT id, sequence_number, content, role FROM paragraphs"
@@ -1870,6 +1959,7 @@ def discourse(
             "language": ev["language"],
             "translated_from": ev["translated_from"],
             "source_short": ev["source_short"],
+            **({"ref": ev_ref} if ev_ref else {}),
         },
         "paragraphs": paragraphs,
     }
