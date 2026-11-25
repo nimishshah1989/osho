@@ -7,6 +7,7 @@ import { BookOpen, ChevronRight, ChevronDown } from 'lucide-react';
 import { useLocale } from '../../lib/i18n';
 import { useOfflineEngine } from '../../lib/search/OfflineProvider';
 import { catalogApi } from '../../lib/search/searchApi';
+import LanguageTag from '../LanguageTag';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,7 +207,7 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
               className="w-full text-left px-4 py-2.5 flex items-center justify-between gap-3 hover:bg-gold/5 transition-colors"
             >
               <div className="flex-1 min-w-0">
-                <span className="text-[13px] font-medium text-[rgb(var(--fg))] truncate block">{name}</span>
+                <span className="text-[13px] font-medium text-[rgb(var(--fg))] break-words block">{name}</span>
                 <span className="text-[11px] text-stone-400 dark:text-ivory/40">
                   {talks.length} {talks.length === 1 ? t('archive.talkOne') : t('archive.talkMany')}
                   {talks[0]._city !== 'Unknown' && ` · ${talks[0]._city}`}
@@ -223,13 +224,18 @@ function SeriesList({ events }: { events: EnrichedEvent[] }) {
               <div className="border-t border-gold/10 px-4 py-2 space-y-1 max-h-60 overflow-y-auto"
                 style={{ backgroundColor: color + '08' }}>
                 {talks.map((ev) => (
-                  <div key={ev.id} className="flex items-center justify-between gap-3">
+                  // items-start + break-words: the full title wraps instead of
+                  // being cut off on phones, and the language tag tells apart
+                  // the two otherwise-identical rows of a bilingual talk
+                  // (Sugit 2026-11-19, item 1).
+                  <div key={ev.id} className="flex items-start justify-between gap-3">
                     <Link
                       href={`/read?event_id=${encodeURIComponent(ev.id)}`}
-                      className="text-[12px] text-stone-600 dark:text-ivory/75 hover:text-gold truncate flex-1"
+                      className="text-[12px] leading-snug text-stone-600 dark:text-ivory/75 hover:text-gold break-words min-w-0 flex-1"
                     >
                       {ev.title ?? 'Untitled'}
                     </Link>
+                    <LanguageTag language={ev.language} />
                     <span className="text-[11px] text-stone-400 dark:text-ivory/35 flex-shrink-0 tabular-nums">
                       {displayDate(ev.date)}
                     </span>

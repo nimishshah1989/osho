@@ -31,6 +31,11 @@ import { paragraphRoleClass, paragraphGapClass, isMetadataRole, cx } from '../..
 import { useOfflineEngine } from '../../lib/search/OfflineProvider';
 import { discourseApi } from '../../lib/search/searchApi';
 
+// Same marker/link as the search view (app/page.tsx) so the event-info line
+// "Event page in sannyas.wiki: <title>" is linkified identically here.
+const WIKI_MARKER_RE = /^(event page in sannyas\.wiki:)\s*(.+?)\.?\s*$/i;
+const SANNYAS_WIKI_BASE = 'https://www.sannyas.wiki/index.php?title=';
+
 interface Paragraph {
   sequence_number: number;
   content: string;
@@ -207,23 +212,42 @@ function ReaderInner() {
               questions/poems/comments keep a clear gap. */}
           {data && !loading && data.paragraphs.length > 0 && (
             <article className="prose-osho">
-              {data.paragraphs
-                // Title + event_info are already shown in the page header;
-                // hiding them here avoids duplication when reading a record
-                // ingested from a styled .docx.
-                .filter((p) => !isMetadataRole(p.role))
-                .map((p, idx) => {
+              {(() => {
+                // Only the `title` paragraph is hidden (it duplicates the h1).
+                // The `event_info` block — date and place, sannyas.wiki event
+                // page, source — is shown exactly as in the search view's
+                // "Show entire record" (Sugit 2026-11-19, item 2).
+                const paras = data.paragraphs.filter((p) => p.role !== 'title');
+                const firstBodyIdx = paras.findIndex((p) => !isMetadataRole(p.role));
+                return paras.map((p, idx) => {
                   const cls = cx(
                     'whitespace-pre-wrap leading-loose',
                     idx > 0 ? paragraphGapClass(p.role) : null,
+                    idx === firstBodyIdx && firstBodyIdx > 0 ? 'mt-7' : null,
                     paragraphRoleClass(p.role),
                   );
+                  const wiki = p.content.match(WIKI_MARKER_RE);
                   return (
                     <p key={p.sequence_number} className={cls}>
-                      {p.content}
+                      {wiki ? (
+                        <>
+                          {wiki[1]}{' '}
+                          <a
+                            href={`${SANNYAS_WIKI_BASE}${encodeURIComponent(wiki[2].replace(/ /g, '_'))}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-gold hover:underline"
+                          >
+                            {wiki[2]}
+                          </a>
+                        </>
+                      ) : (
+                        p.content
+                      )}
                     </p>
                   );
-                })}
+                });
+              })()}
             </article>
           )}
         </div>
