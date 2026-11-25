@@ -910,6 +910,10 @@ interface MutableEvent {
 export interface DiscourseOptions {
   title?: string;
   eventId?: string;
+  /** Readable deep-link ref: title with spaces as "_" + "_L" + 2-letter
+   *  language code, e.g. "The_Zen_Manifesto_~_11_LEN". The server resolves it
+   *  normalisation-tolerantly; offline we match the verbatim title only. */
+  ref?: string;
   /** If provided, include FTS5 highlight markers on matching paragraphs. */
   q?: string;
   /** When true, highlight against the un-stemmed exact index (mirrors search exact mode). */
@@ -927,10 +931,20 @@ interface DiscourseEventRow {
 }
 
 export function discourse(db: Database, opts: DiscourseOptions): DiscourseResponse {
-  const { title, eventId, q, exact } = opts;
-  if (!title && !eventId) throw new SearchError('Provide title or event_id', 400);
+  const { title, eventId, q, exact, ref } = opts;
+  if (!title && !eventId && !ref) throw new SearchError('Provide title, event_id or ref', 400);
 
-  const evRow = eventId
+  const refMatch = !eventId && !title && ref ? /^(.+?)_L([A-Za-z]{2})$/.exec(ref.trim()) : null;
+  if (ref && !eventId && !title && !refMatch) throw new SearchError('Discourse not found', 404);
+
+  const evRow = refMatch
+    ? db.get<DiscourseEventRow>(
+        'SELECT id, title, date, location, language, translated_from, source_short'
+        + " FROM events WHERE title = ? AND UPPER(SUBSTR(language, 1, 2)) = ?"
+        + " ORDER BY COALESCE(date, '') LIMIT 1",
+        [refMatch[1].replace(/_/g, ' '), refMatch[2].toUpperCase()],
+      )
+    : eventId
     ? db.get<DiscourseEventRow>(
         'SELECT id, title, date, location, language, translated_from, source_short'
         + ' FROM events WHERE id = ?',

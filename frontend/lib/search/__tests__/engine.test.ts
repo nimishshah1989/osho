@@ -389,6 +389,13 @@ describe('discourse()', () => {
     expect(seqs).toEqual(sorted);
   });
 
+  it('looks up by readable ref (offline deep link)', () => {
+    const r = discourse(freshEngine(), { ref: 'The_Book_of_Secrets_~_01_LEN' });
+    expect(r.event.id).toBe('e1');
+    expect(() => discourse(freshEngine(), { ref: 'The_Book_of_Secrets_~_01_LHI' })).toThrow();
+    expect(() => discourse(freshEngine(), { ref: 'no-language-suffix' })).toThrow();
+  });
+
   it('looks up by title', () => {
     const r = discourse(freshEngine(), { title: 'Zen: The Quantum Leap ~ 02' });
     expect(r.event.title).toBe('Zen: The Quantum Leap ~ 02');

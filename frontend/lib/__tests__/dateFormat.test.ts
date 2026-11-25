@@ -18,6 +18,12 @@ describe('formatReadableDate (EN)', () => {
     expect(formatReadableDate('1987-03-08-xm')).toBe('8 March 1987');
   });
 
+  it('drops slot + clock time (the common production shape)', () => {
+    expect(formatReadableDate('1989-04-10-pm-19:00')).toBe('10 April 1989');
+    expect(formatReadableDate('1971-06-19-PM-20:30')).toBe('19 June 1971');
+    expect(formatReadableDate('1974-01-02-am-8:00')).toBe('2 January 1974');
+  });
+
   it("passes archivist notes through unchanged ('1971/1972 ?')", () => {
     expect(formatReadableDate('1971/1972 ?')).toBe('1971/1972 ?');
   });

@@ -3,7 +3,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, Search, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Search, ExternalLink, Link2, Check } from 'lucide-react';
 import Nav from '../../components/Nav';
 import { useLocale } from '../../lib/i18n';
 import { formatReadableDate } from '../../lib/dateFormat';
@@ -35,6 +35,7 @@ import { discourseApi } from '../../lib/search/searchApi';
 // "Event page in sannyas.wiki: <title>" is linkified identically here.
 const WIKI_MARKER_RE = /^(event page in sannyas\.wiki:)\s*(.+?)\.?\s*$/i;
 const SANNYAS_WIKI_BASE = 'https://www.sannyas.wiki/index.php?title=';
+const PUBLIC_ORIGIN = 'https://oshoarchives.com';
 
 interface Paragraph {
   sequence_number: number;
@@ -51,6 +52,7 @@ interface DiscourseResponse {
     language: string | null;
     translated_from?: string | null;
     source_short?: string | null;
+    ref?: string | null;
   };
   paragraphs: Paragraph[];
 }
@@ -60,6 +62,8 @@ function ReaderInner() {
   const searchParams = useSearchParams();
   const title = searchParams?.get('title') ?? '';
   const eventId = searchParams?.get('event_id') ?? '';
+  // Readable deep link: /read?ref=The_Zen_Manifesto_~_11_LEN (Sugit item 3).
+  const ref = searchParams?.get('ref') ?? '';
   const offlineEngine = useOfflineEngine();
 
   const [data, setData] = useState<DiscourseResponse | null>(null);
@@ -72,7 +76,7 @@ function ReaderInner() {
   // DB once it's ready). Analytics tracking lives in a separate
   // effect below so we don't double-fire it across engine swaps.
   useEffect(() => {
-    if (!title && !eventId) {
+    if (!title && !eventId && !ref) {
       setError('No discourse selected.');
       setLoading(false);
       return;
@@ -80,7 +84,10 @@ function ReaderInner() {
 
     let cancelled = false;
     // Local engine when offline corpus is ready, /api/discourse otherwise.
-    discourseApi({ eventId: eventId || undefined, title: eventId ? undefined : title }, offlineEngine)
+    discourseApi(
+      eventId ? { eventId } : ref ? { ref } : { title },
+      offlineEngine,
+    )
       .then((body) => body as DiscourseResponse)
       .then((body) => {
         if (!cancelled) setData(body);
@@ -95,7 +102,7 @@ function ReaderInner() {
     return () => {
       cancelled = true;
     };
-  }, [title, eventId, offlineEngine]);
+  }, [title, eventId, ref, offlineEngine]);
 
   // Analytics — fire exactly once per discourse load, not on engine
   // swap. Keyed by event.id (or title fallback) so re-fetching the
@@ -112,6 +119,22 @@ function ReaderInner() {
   }, [data]);
 
   const headerTitle = data?.event.title ?? title ?? t('read.discourse');
+
+  // Public permalink, always on the live site (the desktop app serves from a
+  // local origin, which is useless to share).
+  const permalink = data?.event.ref
+    ? `${PUBLIC_ORIGIN}/read?ref=${encodeURIComponent(data.event.ref)}`
+    : null;
+  const [copied, setCopied] = useState(false);
+  const copyPermalink = () => {
+    if (!permalink) return;
+    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 2000); };
+    try {
+      navigator.clipboard.writeText(permalink).then(done, () => window.prompt('', permalink));
+    } catch {
+      window.prompt('', permalink);
+    }
+  };
 
   const sannyasWikiUrl = headerTitle
     ? `https://www.sannyas.wiki/index.php?title=${encodeURIComponent(headerTitle.replace(/ /g, '_'))}`
@@ -177,6 +200,17 @@ function ReaderInner() {
                 <ExternalLink size={12} />
                 sannyas.wiki →
               </a>
+            )}
+            {permalink && (
+              <button
+                type="button"
+                onClick={copyPermalink}
+                title={permalink}
+                className="inline-flex items-center gap-1.5 mt-3 ml-6 text-[10px] tracking-[0.25em] uppercase text-gold/70 hover:text-gold transition-colors font-medium"
+              >
+                {copied ? <Check size={12} /> : <Link2 size={12} />}
+                {copied ? t('read.linkCopied') : t('read.copyLink')}
+              </button>
             )}
           </header>
 

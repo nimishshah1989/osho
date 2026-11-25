@@ -7,6 +7,7 @@
  *      "1986-04-19-am"   morning
  *      "1976-06-28-pm"   evening
  *      "1970-08-17"      no slot suffix
+ *      "1989-04-10-pm-19:00"  slot + clock time (most production records)
  *      "1971/1972 ?"     archivist note — non-ISO, passed through verbatim
  *
  *  Output: "DD MonthName YYYY". The slot suffix is intentionally NOT
@@ -28,7 +29,11 @@ const MONTHS_HI = [
   'जुलाई', 'अगस्त', 'सितंबर', 'अक्टूबर', 'नवंबर', 'दिसंबर',
 ];
 
-const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:-[a-z]{2,3})?$/i;
+// Optional slot (`-pm`) and optional clock time (`-19:00`). The time suffix is
+// what most production records carry; without it here the reader header and
+// search subtitles fell back to printing the raw "1989-04-10-pm-19:00".
+// The time itself is not rendered — the event_info line already shows it.
+const ISO_RE = /^(\d{4})-(\d{2})-(\d{2})(?:-[a-z]{2,3})?(?:-\d{1,2}:\d{2})?$/i;
 
 export function formatReadableDate(raw: string | null | undefined, locale: Locale = 'en'): string {
   if (!raw) return '';

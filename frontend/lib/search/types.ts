@@ -72,6 +72,9 @@ export interface DiscourseEventMeta {
   language: string | null;
   translated_from?: string | null;
   source_short?: string | null;
+  /** Readable permalink ref (server only, and only when it resolves uniquely
+   *  back to this record), e.g. "The_Zen_Manifesto_~_11_LEN". */
+  ref?: string | null;
 }
 
 export interface DiscourseResponse {

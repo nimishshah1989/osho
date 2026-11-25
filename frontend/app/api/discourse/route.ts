@@ -13,9 +13,11 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const title = searchParams.get('title');
   const eventId = searchParams.get('event_id');
+  // Readable deep-link ref, e.g. The_Zen_Manifesto_~_11_LEN (Sugit item 3).
+  const ref = searchParams.get('ref');
 
-  if (!title && !eventId) {
-    return NextResponse.json({ error: 'Provide title or event_id' }, { status: 400 });
+  if (!title && !eventId && !ref) {
+    return NextResponse.json({ error: 'Provide title, event_id or ref' }, { status: 400 });
   }
 
   const q = searchParams.get('q');
@@ -24,6 +26,7 @@ export async function GET(req: Request) {
   const upstream = new URL(`${API_BASE}/api/discourse`);
   if (title) upstream.searchParams.set('title', title);
   if (eventId) upstream.searchParams.set('event_id', eventId);
+  if (ref) upstream.searchParams.set('ref', ref);
   if (q) upstream.searchParams.set('q', q);
   if (exact === 'true') upstream.searchParams.set('exact', 'true');
 
