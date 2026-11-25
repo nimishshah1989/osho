@@ -30,11 +30,14 @@ import type {
 
 // ─── Constants ───────────────────────────────────────────────────────────
 
-const SHAILENDRA_RE = /\s*source\s*:\s*Shailendra.s\s+Hindi\s+collection\s*/i;
 const META_PARA_PREFIX = 'event page in sannyas';
 
-function stripShailendra(text: string): string {
-  return text.replace(SHAILENDRA_RE, '').trim();
+// Formerly stripShailendra (removed the "source: Shailendra's Hindi
+// collection" attribution); the source documents no longer carry it (Sugit
+// 2026-11-19, item 4). Only the whitespace trim is kept — mirrors
+// _trim_text in scripts/cloud_api.py.
+function trimText(text: string): string {
+  return text.trim();
 }
 
 function isMetaParagraph(sequenceNumber: number, content: string): boolean {
@@ -250,10 +253,10 @@ export function search(db: Database, opts: SearchOptions): SearchResponse {
       events.set(r.event_id, ev);
     }
     ev.hit_count += 1;
-    let content = stripShailendra(r.content);
+    let content = trimText(r.content);
     if (ev.hits.length < 3 && !isMetaParagraph(r.sequence_number, content)) {
       const rawHl = r.hl || r.content;
-      const hl = markersToGuillemets(stripShailendra(rawHl));
+      const hl = markersToGuillemets(trimText(rawHl));
       // hl with «» markers duplicates content; frontend renders the preview from hl, so drop content to avoid shipping the same text twice (mirrors recordLevelSearch).
       if (hl.includes('«')) content = '';
       const hit: SearchHit = {
@@ -858,8 +861,8 @@ function recordLevelSearch(
         [HL_OPEN, HL_CLOSE, gatherFts, ...chunk],
       );
       for (const r of hrows) {
-        contentMap.set(r.paragraph_id, stripShailendra(r.content || ''));
-        hlMap.set(r.paragraph_id, markersToGuillemets(stripShailendra(r.hl || '')));
+        contentMap.set(r.paragraph_id, trimText(r.content || ''));
+        hlMap.set(r.paragraph_id, markersToGuillemets(trimText(r.hl || '')));
       }
     } catch {
       // Defensive: mirror the gather's catch. On failure leave the maps
@@ -975,7 +978,7 @@ export function discourse(db: Database, opts: DiscourseOptions): DiscourseRespon
         [HL_OPEN, HL_CLOSE, ftsQuery, evRow.id],
       );
       for (const row of hlRows) {
-        hlMap.set(row.paragraph_id, markersToGuillemets(stripShailendra(row.hl || '')));
+        hlMap.set(row.paragraph_id, markersToGuillemets(trimText(row.hl || '')));
       }
     } catch {
       // FTS unavailable / invalid query — silently skip highlighting.
@@ -985,7 +988,7 @@ export function discourse(db: Database, opts: DiscourseOptions): DiscourseRespon
   const paragraphs: DiscourseParagraph[] = paraRows.map((r) => {
     const out: DiscourseParagraph = {
       sequence_number: r.sequence_number,
-      content: stripShailendra(r.content),
+      content: trimText(r.content),
     };
     if (r.role) out.role = r.role;
     if (hlMap.has(r.id)) out.hl = hlMap.get(r.id);
