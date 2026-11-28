@@ -1114,7 +1114,7 @@ function SearchPageInner() {
                                 <span className="ml-1 text-[10px] tracking-[0.15em] uppercase text-gold/50">[{ev.language}]</span>
                               )}
                               {ev.hit_count > 0 && (
-                                <> · <strong className="text-gold">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
+                                <> · <strong className="text-[rgb(var(--fg))]">{ev.hit_count}</strong> {locale === 'hi' ? 'अंश' : ev.hit_count === 1 ? 'hit' : 'hits'}</>
                               )}
                               {(() => {
                                 const tline = translationLine(ev.translated_from, ev.source_short, locale);
@@ -1155,7 +1155,7 @@ function SearchPageInner() {
                 <article className="p-6 md:p-8">
                   <div className="flex items-start justify-between gap-4 mb-6 pb-4 border-b border-gold/20">
                     <div>
-                      <h2 className="text-lg md:text-xl text-gold leading-snug font-medium">
+                      <h2 className="text-lg md:text-xl text-[rgb(var(--fg))] leading-snug font-medium">
                         {selectedEvent.title ?? 'Untitled'}
                       </h2>
                       <div className="text-[13px] tracking-[0.15em] uppercase text-stone-500 dark:text-ivory/55 mt-1.5">
@@ -1169,7 +1169,7 @@ function SearchPageInner() {
                           .filter(Boolean)
                           .join(' · ')}
                         {selectedEvent.hit_count > 0 && (
-                          <> · <strong className="text-gold">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
+                          <> · <strong className="text-[rgb(var(--fg))]">{selectedEvent.hit_count} {locale === 'hi' ? 'अंश' : 'hits'}</strong></>
                         )}
                       </div>
                       {(() => {
