@@ -12,6 +12,9 @@ module.exports = {
         // CSS-variable-driven: dark mode uses warm gold, light mode uses darker amber
         // so opacity modifiers (text-gold/60 etc.) still work correctly
         gold: 'rgb(var(--gold) / <alpha-value>)',
+        // Hyperlinks only (Sugit 2026-11-28): red in light mode, gold in dark.
+        // Colour alone says "link"; a hover underline confirms it.
+        link: 'rgb(var(--link) / <alpha-value>)',
         ivory: '#faf9f6',
       },
       fontFamily: {
