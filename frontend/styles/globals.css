@@ -14,6 +14,11 @@
 
   /* Dark amber for high contrast on light bg — WCAG AA+ (≈7:1) */
   --gold: 100, 75, 0;
+
+  /* Hyperlink colour. Space-separated on purpose: Tailwind emits
+     rgb(var(--link) / <alpha>), and the comma form is invalid CSS there.
+     Deep red ≈ 7:1 on --bg (WCAG AAA). */
+  --link: 165 29 29;
 }
 
 .dark {
@@ -22,6 +27,7 @@
 
   /* Warm gold on dark backgrounds */
   --gold: 212 175 55;
+  --link: 212 175 55;
 }
 
 /* ── Base ─────────────────────────────────────────────────── */

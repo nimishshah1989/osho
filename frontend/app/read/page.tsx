@@ -75,7 +75,13 @@ function ReaderInner() {
   // currently-open discourse transparently re-fetches from the local
   // DB once it's ready). Analytics tracking lives in a separate
   // effect below so we don't double-fire it across engine swaps.
+  // Set when we rewrite the address bar to the canonical ?ref= form (below).
+  // Next 14 syncs history.replaceState into useSearchParams, so without this
+  // guard the rewrite would re-fetch the record we already have on screen.
+  const canonicalRefRef = React.useRef<string | null>(null);
+
   useEffect(() => {
+    if (ref && !eventId && !title && canonicalRefRef.current === ref) return;
     if (!title && !eventId && !ref) {
       setError('No discourse selected.');
       setLoading(false);
@@ -125,6 +131,22 @@ function ReaderInner() {
   const permalink = data?.event.ref
     ? `${PUBLIC_ORIGIN}/read?ref=${encodeURIComponent(data.event.ref)}`
     : null;
+  // One public link shape (Sugit 2026-11-28): whatever opened the reader —
+  // ?event_id= (internal links from search/archive/constellation), ?title=,
+  // or an old shared link — the address bar ends up as ?ref=, so anything a
+  // user copies from it is the readable form. The other params stay accepted
+  // so no existing link breaks.
+  useEffect(() => {
+    const canon = data?.event.ref;
+    if (!canon || (ref === canon && !eventId && !title)) return;
+    canonicalRefRef.current = canon;
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${window.location.pathname}?ref=${encodeURIComponent(canon)}${window.location.hash}`,
+    );
+  }, [data, ref, eventId, title]);
+
   const [copied, setCopied] = useState(false);
   const copyPermalink = () => {
     if (!permalink) return;
@@ -165,7 +187,7 @@ function ReaderInner() {
                     below — Issue 9 (Sugit 2026-06-27): it used to also sit here,
                     doubling the book name. */}
                 {data.event.date && (
-                  <span className="text-gold font-medium">
+                  <span className="text-[rgb(var(--fg))] font-medium">
                     {formatReadableDate(data.event.date, locale)}
                   </span>
                 )}
@@ -195,7 +217,7 @@ function ReaderInner() {
                 href={sannyasWikiUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 mt-3 text-[10px] tracking-[0.25em] uppercase text-gold/70 hover:text-gold transition-colors font-medium"
+                className="inline-flex items-center gap-1.5 mt-3 text-[10px] tracking-[0.25em] uppercase text-link hover:underline underline-offset-4 font-medium"
               >
                 <ExternalLink size={12} />
                 sannyas.wiki →
@@ -206,7 +228,7 @@ function ReaderInner() {
                 type="button"
                 onClick={copyPermalink}
                 title={permalink}
-                className="inline-flex items-center gap-1.5 mt-3 ml-6 text-[10px] tracking-[0.25em] uppercase text-gold/70 hover:text-gold transition-colors font-medium"
+                className="inline-flex items-center gap-1.5 mt-3 ml-6 text-[10px] tracking-[0.25em] uppercase text-link hover:underline underline-offset-4 font-medium"
               >
                 {copied ? <Check size={12} /> : <Link2 size={12} />}
                 {copied ? t('read.linkCopied') : t('read.copyLink')}
@@ -270,7 +292,7 @@ function ReaderInner() {
                             href={`${SANNYAS_WIKI_BASE}${encodeURIComponent(wiki[2].replace(/ /g, '_'))}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-gold hover:underline"
+                            className="text-link hover:underline underline-offset-4"
                           >
                             {wiki[2]}
                           </a>

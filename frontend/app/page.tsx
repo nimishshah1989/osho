@@ -1185,7 +1185,7 @@ function SearchPageInner() {
                           href={`https://www.sannyas.wiki/index.php?title=${encodeURIComponent(selectedEvent.title.replace(/ /g, '_'))}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="inline-block mt-2 text-[11px] tracking-[0.15em] uppercase text-gold/60 hover:text-gold transition-colors"
+                          className="inline-block mt-2 text-[11px] tracking-[0.15em] uppercase text-link hover:underline underline-offset-4"
                         >
                           sannyas.wiki ↗
                         </a>
@@ -1220,7 +1220,7 @@ function SearchPageInner() {
                       )}
                       <Link
                         href={`/read?event_id=${encodeURIComponent(selectedEvent.event_id)}`}
-                        className="text-[13px] tracking-[0.15em] uppercase text-gold/80 hover:text-gold inline-flex items-center gap-1 font-medium"
+                        className="text-[13px] tracking-[0.15em] uppercase text-link hover:underline underline-offset-4 inline-flex items-center gap-1 font-medium"
                         onClick={() => trackDiscourseOpen(selectedEvent.event_id, selectedEvent.title ?? selectedEvent.event_id, 'search')}
                       >
                         <BookOpen size={14} /> {t('search.detail.full')}
@@ -1349,7 +1349,7 @@ function SearchPageInner() {
                                       href={`${SANNYAS_WIKI_BASE}${encodeURIComponent(wiki[2].replace(/ /g, '_'))}`}
                                       target="_blank"
                                       rel="noopener noreferrer"
-                                      className="text-gold hover:underline"
+                                      className="text-link hover:underline underline-offset-4"
                                     >
                                       <Highlighted
                                         text={wiki[2]}
